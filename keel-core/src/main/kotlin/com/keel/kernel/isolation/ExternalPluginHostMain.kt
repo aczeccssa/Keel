@@ -167,10 +167,11 @@ object ExternalPluginHostMain {
                     val adminJob = scope.launch {
                         while (isActive && running.get()) {
                             try {
-                                adminServer.accept().use { channel ->
-                                    launch(adminDispatcher) {
+                                val channel = adminServer.accept()
+                                launch(adminDispatcher) {
+                                    channel.use {
                                         safeHandleAdminConnection(
-                                            channel = channel,
+                                            channel = it,
                                             plugin = plugin,
                                             config = config,
                                             authToken = hostArgs.authToken,
@@ -194,10 +195,11 @@ object ExternalPluginHostMain {
                     val invokeJob = scope.launch {
                         while (isActive && running.get()) {
                             try {
-                                invokeServer.accept().use { channel ->
-                                    launch(invokeDispatcher) {
+                                val channel = invokeServer.accept()
+                                launch(invokeDispatcher) {
+                                    channel.use {
                                         safeHandleInvokeConnection(
-                                            channel = channel,
+                                            channel = it,
                                             plugin = plugin,
                                             config = config,
                                             authToken = hostArgs.authToken,
