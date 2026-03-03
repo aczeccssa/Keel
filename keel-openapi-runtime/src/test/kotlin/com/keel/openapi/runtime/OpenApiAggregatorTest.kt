@@ -1,0 +1,128 @@
+package com.keel.openapi.runtime
+
+import io.ktor.http.HttpMethod
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlin.test.AfterTest
+import kotlin.test.BeforeTest
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertTrue
+import kotlin.reflect.typeOf
+
+class OpenApiAggregatorTest {
+    private val json = Json { ignoreUnknownKeys = true }
+
+    @BeforeTest
+    fun setUp() {
+        OpenApiRegistry.clear()
+    }
+
+    @AfterTest
+    fun tearDown() {
+        OpenApiRegistry.clear()
+    }
+
+    @Test
+    fun `buildSpec includes registered paths schemas and path parameters`() {
+        OpenApiRegistry.register(
+            OpenApiOperation(
+                method = HttpMethod.Get,
+                path = "/api/_system/plugins/{pluginId}",
+                responseBodyType = typeOf<TestPayload>(),
+                typeBound = true,
+                responseEnvelope = true,
+                errorStatuses = setOf(404)
+            )
+        )
+
+        val spec = json.parseToJsonElement(OpenApiAggregator.buildSpec()).jsonObject
+
+        assertTrue(spec["paths"]?.jsonObject?.containsKey("/api/_system/plugins/{pluginId}") == true)
+        val getOperation = spec["paths"]!!.jsonObject["/api/_system/plugins/{pluginId}"]!!.jsonObject["get"]!!.jsonObject
+        val parameters = getOperation["parameters"]!!.jsonArray
+        assertEquals("pluginId", parameters.first().jsonObject["name"]?.jsonPrimitive?.content)
+
+        val tags = spec["tags"]!!.jsonArray.map { it.jsonObject["name"]!!.jsonPrimitive.content }.toSet()
+        assertTrue("system" in tags)
+        assertTrue("plugins" in tags)
+
+        val schemas = spec["components"]!!.jsonObject["schemas"]!!.jsonObject
+        assertTrue("TestPayload" in schemas)
+        assertTrue("KeelResponse_TestPayload" in schemas)
+    }
+
+    @Test
+    fun `buildSpec includes declared operations when registry is empty`() {
+        val spec = json.parseToJsonElement(OpenApiAggregator.buildSpec()).jsonObject
+        val paths = spec["paths"]?.jsonObject
+        assertTrue(paths != null && paths.isNotEmpty())
+        assertTrue("/api/plugins/helloworld" in paths)
+        assertTrue("/api/_system/plugins" in paths)
+    }
+
+    @Test
+    fun `service loader discovers generated sample fragments`() {
+        val pluginIds = OpenApiAggregator.discoverFragments().map { it.pluginId }.toSet()
+        assertTrue("helloworld" in pluginIds)
+        assertTrue("dbdemo" in pluginIds)
+    }
+
+    @Test
+    fun `annotation metadata merges with typed route schema metadata`() {
+        OpenApiRegistry.register(
+            OpenApiOperation(
+                method = HttpMethod.Get,
+                path = "/api/plugins/helloworld",
+                responseBodyType = typeOf<TestPayload>(),
+                typeBound = true
+            )
+        )
+
+        val spec = json.parseToJsonElement(OpenApiAggregator.buildSpec()).jsonObject
+        val getOperation = spec["paths"]!!
+            .jsonObject["/api/plugins/helloworld"]!!
+            .jsonObject["get"]!!
+            .jsonObject
+
+        assertEquals("Hello World greeting", getOperation["summary"]?.jsonPrimitive?.content)
+        assertEquals(listOf("helloworld"), getOperation["tags"]?.jsonArray?.map { it.jsonPrimitive.content })
+
+        val schemas = spec["components"]!!.jsonObject["schemas"]!!.jsonObject
+        assertTrue("TestPayload" in schemas)
+    }
+
+    @Test
+    fun `annotation metadata controls success status and envelope`() {
+        val declared = OpenApiAggregator.discoverDeclaredOperations()
+            .first { it.path == "/api/_system/plugins" && it.method == HttpMethod.Get }
+
+        assertEquals(200, declared.successStatus)
+        assertTrue(declared.responseEnvelope)
+    }
+
+    @Test
+    fun `typed only route uses default doc metadata`() {
+        OpenApiRegistry.register(
+            OpenApiOperation(
+                method = HttpMethod.Get,
+                path = "/typed-only",
+                responseBodyType = typeOf<TestPayload>(),
+                typeBound = true
+            )
+        )
+
+        val spec = json.parseToJsonElement(OpenApiAggregator.buildSpec()).jsonObject
+        val operation = spec["paths"]!!.jsonObject["/typed-only"]!!.jsonObject["get"]!!.jsonObject
+        assertEquals("", operation["summary"]?.jsonPrimitive?.content)
+        val schemas = spec["components"]!!.jsonObject["schemas"]!!.jsonObject
+        assertTrue("TestPayload" in schemas)
+    }
+}
+
+@kotlinx.serialization.Serializable
+private data class TestPayload(
+    val value: String
+)

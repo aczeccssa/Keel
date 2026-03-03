@@ -1,0 +1,1490 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Keel - Control Panel</title>
+    <style>
+        /* --- Theme Variables --- */
+        :root {
+            --bg-body: #f8fafc;
+            --bg-surface: #ffffff;
+            --bg-input: #f8fafc;
+            --border: #e2e8f0;
+            --border-hover: #cbd5e1;
+            --text-main: #0f172a;
+            --text-muted: #64748b;
+            --accent: #2563eb;
+            --accent-hover: #1d4ed8;
+
+            /* Semantic Colors */
+            --success-bg: #dcfce7;
+            --success-text: #166534;
+            --success-pure: #10b981;
+            --danger-bg: #fee2e2;
+            --danger-text: #991b1b;
+            --danger-pure: #ef4444;
+            --warn-bg: #fef3c7;
+            --warn-text: #92400e;
+            --warn-pure: #f59e0b;
+            --info-bg: #dbeafe;
+            --info-text: #1e40af;
+            --info-pure: #3b82f6;
+            --neutral-bg: #f1f5f9;
+            --neutral-text: #475569;
+
+            /* Buttons */
+            --btn-sec-bg: #f1f5f9;
+            --btn-sec-text: #334155;
+            --btn-sec-hover: #e2e8f0;
+        }
+
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --bg-body: #0f172a;
+                --bg-surface: #1e293b;
+                --bg-input: #0f172a;
+                --border: #334155;
+                --border-hover: #475569;
+                --text-main: #f8fafc;
+                --text-muted: #94a3b8;
+                --accent: #38bdf8;
+                --accent-hover: #0ea5e9;
+
+                /* Semantic Colors */
+                --success-bg: #064e3b;
+                --success-text: #34d399;
+                --success-pure: #22c55e;
+                --danger-bg: #7f1d1d;
+                --danger-text: #fca5a5;
+                --danger-pure: #ef4444;
+                --warn-bg: #78350f;
+                --warn-text: #fcd34d;
+                --warn-pure: #f59e0b;
+                --info-bg: #1e3a8a;
+                --info-text: #93c5fd;
+                --info-pure: #38bdf8;
+                --neutral-bg: #334155;
+                --neutral-text: #cbd5e1;
+
+                /* Buttons */
+                --btn-sec-bg: #334155;
+                --btn-sec-text: #f8fafc;
+                --btn-sec-hover: #475569;
+            }
+        }
+
+        /* --- Global Reset & Base --- */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: var(--bg-body);
+            color: var(--text-main);
+            min-height: 100vh;
+            line-height: 1.5;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        /* --- Layout & Header --- */
+        .header {
+            background: var(--bg-surface);
+            border-bottom: 1px solid var(--border);
+            padding: 16px 32px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .header h1 {
+            font-size: 20px;
+            font-weight: 700;
+            letter-spacing: -0.02em;
+        }
+
+        .header h1 span {
+            color: var(--accent);
+        }
+
+        .status-dot {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            margin-right: 8px;
+        }
+
+        .status-dot.ok {
+            background: var(--success-pure);
+            box-shadow: 0 0 8px var(--success-pure);
+        }
+
+        .status-dot.err {
+            background: var(--danger-pure);
+            box-shadow: 0 0 8px var(--danger-pure);
+        }
+
+        .health-info {
+            font-size: 13px;
+            color: var(--text-muted);
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            font-weight: 500;
+        }
+
+        /* --- Tabs --- */
+        .tab-nav {
+            background: var(--bg-surface);
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            padding: 0 32px;
+            gap: 8px;
+        }
+
+        .tab-btn {
+            padding: 14px 16px;
+            font-size: 14px;
+            font-weight: 500;
+            color: var(--text-muted);
+            background: none;
+            border: none;
+            border-bottom: 2px solid transparent;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            margin-bottom: -1px;
+        }
+
+        .tab-btn:hover {
+            color: var(--text-main);
+        }
+
+        .tab-btn.active {
+            color: var(--accent);
+            border-bottom-color: var(--accent);
+        }
+
+        .tab-content {
+            display: none;
+            animation: fadeIn 0.3s ease;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(4px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 32px;
+        }
+
+        .section {
+            margin-bottom: 40px;
+        }
+
+        .section h2 {
+            font-size: 14px;
+            font-weight: 600;
+            margin-bottom: 16px;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        /* --- Tables --- */
+        table {
+            width: 100%;
+            border-collapse: separate;
+            border-spacing: 0;
+            background: var(--bg-surface);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            overflow: hidden;
+        }
+
+        th {
+            text-align: left;
+            padding: 12px 20px;
+            background: var(--bg-body);
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-muted);
+            border-bottom: 1px solid var(--border);
+            font-weight: 600;
+        }
+
+        td {
+            padding: 16px 20px;
+            border-bottom: 1px solid var(--border);
+            font-size: 14px;
+            vertical-align: middle;
+        }
+
+        tr:last-child td {
+            border-bottom: none;
+        }
+
+        /* --- Badges --- */
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            padding: 4px 10px;
+            border-radius: 6px;
+            font-size: 12px;
+            font-weight: 600;
+            letter-spacing: 0.02em;
+        }
+
+        .badge.enabled {
+            background: var(--success-bg);
+            color: var(--success-text);
+        }
+
+        .badge.disabled {
+            background: var(--danger-bg);
+            color: var(--danger-text);
+        }
+
+        .badge.installed {
+            background: var(--info-bg);
+            color: var(--info-text);
+        }
+
+        .badge.other {
+            background: var(--neutral-bg);
+            color: var(--neutral-text);
+        }
+
+        .badge.dynamic {
+            background: var(--neutral-bg);
+            color: var(--neutral-text);
+            font-size: 11px;
+            margin-left: 8px;
+        }
+
+        /* --- Buttons --- */
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 8px 16px;
+            border: none;
+            border-radius: 6px;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .btn:hover {
+            filter: brightness(1.1);
+            transform: translateY(-1px);
+        }
+
+        .btn:active {
+            transform: translateY(0);
+        }
+
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .btn-enable {
+            background: var(--success-pure);
+            color: #fff;
+        }
+
+        .btn-disable {
+            background: var(--danger-pure);
+            color: #fff;
+        }
+
+        .btn-send {
+            background: var(--accent);
+            color: #fff;
+        }
+
+        .btn-secondary {
+            background: var(--btn-sec-bg);
+            color: var(--btn-sec-text);
+        }
+
+        .btn-warn {
+            background: var(--warn-pure);
+            color: #fff;
+        }
+
+        .btn-sm {
+            padding: 6px 12px;
+            font-size: 12px;
+        }
+
+        /* --- Forms & Inputs --- */
+        input, select, textarea {
+            padding: 10px 14px;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            background: var(--bg-input);
+            color: var(--text-main);
+            font-size: 14px;
+            font-family: inherit;
+            transition: all 0.2s;
+        }
+
+        input:focus, select:focus, textarea:focus {
+            outline: none;
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+        }
+
+        /* --- API Tester --- */
+        .test-area {
+            background: var(--bg-surface);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 24px;
+        }
+
+        .test-row {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 16px;
+        }
+
+        .test-row input {
+            flex: 1;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        }
+
+        .response-box {
+            background: var(--bg-input);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 16px;
+            min-height: 120px;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+            font-size: 13px;
+            white-space: pre-wrap;
+            word-break: break-all;
+            color: var(--text-main);
+        }
+
+        .response-box .status-line {
+            margin-bottom: 12px;
+            font-weight: 600;
+            padding-bottom: 8px;
+            border-bottom: 1px dashed var(--border);
+        }
+
+        .response-box .status-line.s2xx {
+            color: var(--success-pure);
+        }
+
+        .response-box .status-line.s4xx {
+            color: var(--warn-pure);
+        }
+
+        .response-box .status-line.s5xx {
+            color: var(--danger-pure);
+        }
+
+        .actions {
+            display: flex;
+            gap: 8px;
+        }
+
+        /* --- Log Stream --- */
+        .log-stream-container {
+            background: var(--bg-surface);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            overflow: hidden;
+        }
+
+        .log-toolbar {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px 20px;
+            background: var(--bg-surface);
+            border-bottom: 1px solid var(--border);
+            flex-wrap: wrap;
+        }
+
+        .log-toolbar label {
+            font-size: 13px;
+            color: var(--text-muted);
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            cursor: pointer;
+        }
+
+        .sse-status {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 13px;
+            margin-left: auto;
+            color: var(--text-muted);
+            font-weight: 500;
+        }
+
+        .log-stream {
+            background: var(--bg-input);
+            padding: 16px 20px;
+            max-height: 500px;
+            overflow-y: auto;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+            font-size: 13px;
+            line-height: 1.6;
+        }
+
+        .log-line {
+            white-space: pre-wrap;
+            word-break: break-all;
+            margin-bottom: 4px;
+            padding-bottom: 4px;
+            border-bottom: 1px solid var(--border);
+            border-bottom-style: dashed;
+        }
+
+        .log-line:last-child {
+            border-bottom: none;
+            margin-bottom: 0;
+            padding-bottom: 0;
+        }
+
+        .log-line.DEBUG {
+            color: var(--text-muted);
+        }
+
+        .log-line.INFO {
+            color: var(--info-pure);
+        }
+
+        .log-line.WARN {
+            color: var(--warn-pure);
+        }
+
+        .log-line.ERROR {
+            color: var(--danger-pure);
+            font-weight: 500;
+        }
+
+        /* --- Stats Cards --- */
+        .stats-row, .db-stats-row {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+
+        .stat-card, .db-stat-card {
+            background: var(--bg-surface);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 24px;
+            text-align: center;
+            transition: transform 0.2s;
+        }
+
+        .stat-card:hover, .db-stat-card:hover {
+            transform: translateY(-2px);
+        }
+
+        .stat-card .stat-value, .db-stat-card .stat-value {
+            font-size: 32px;
+            font-weight: 700;
+            line-height: 1;
+        }
+
+        .stat-card .stat-label, .db-stat-card .stat-label {
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            margin-top: 8px;
+            letter-spacing: 0.05em;
+        }
+
+        .stat-card.debug .stat-value {
+            color: var(--text-muted);
+        }
+
+        .stat-card.info .stat-value {
+            color: var(--info-pure);
+        }
+
+        .stat-card.warn .stat-value {
+            color: var(--warn-pure);
+        }
+
+        .stat-card.error .stat-value {
+            color: var(--danger-pure);
+        }
+
+        .db-stat-card .stat-value {
+            color: var(--accent);
+        }
+
+        .db-stat-card.pinned .stat-value {
+            color: var(--warn-pure);
+        }
+
+        .db-stat-card.deleted .stat-value {
+            color: var(--danger-pure);
+        }
+
+        .db-stat-card.total .stat-value {
+            color: var(--info-pure);
+        }
+
+        /* --- Level Control --- */
+        .level-control {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 24px;
+            flex-wrap: wrap;
+            background: var(--bg-surface);
+            padding: 16px;
+            border-radius: 8px;
+            border: 1px solid var(--border);
+        }
+
+        .level-btn {
+            padding: 8px 16px;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            background: var(--bg-input);
+            color: var(--text-main);
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .level-btn:hover {
+            border-color: var(--accent);
+        }
+
+        .level-btn.active {
+            background: var(--accent);
+            color: #fff;
+            border-color: var(--accent);
+        }
+
+        /* --- Forms & Notes --- */
+        .db-meta {
+            font-size: 13px;
+            color: var(--text-muted);
+            margin-bottom: 20px;
+            background: var(--bg-surface);
+            padding: 12px 16px;
+            border-radius: 6px;
+            border: 1px solid var(--border);
+            display: inline-block;
+        }
+
+        .db-meta span {
+            margin-right: 24px;
+        }
+
+        .db-meta strong {
+            color: var(--text-main);
+            font-weight: 600;
+        }
+
+        .form-group {
+            margin-bottom: 16px;
+        }
+
+        .form-group label {
+            display: block;
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text-muted);
+            margin-bottom: 6px;
+            text-transform: uppercase;
+            letter-spacing: 0.02em;
+        }
+
+        .form-group textarea {
+            min-height: 100px;
+            resize: vertical;
+        }
+
+        .form-inline {
+            display: flex;
+            gap: 16px;
+            align-items: flex-end;
+        }
+
+        .form-inline .form-group {
+            flex: 1;
+            margin-bottom: 0;
+        }
+
+        .create-form {
+            background: var(--bg-surface);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 24px;
+            margin-bottom: 24px;
+        }
+
+        .note-card {
+            background: var(--bg-surface);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 12px;
+            border-left: 4px solid var(--accent);
+            transition: all 0.2s;
+        }
+
+        .note-card:hover {
+            border-color: var(--border-hover);
+        }
+
+        .note-card.pinned {
+            border-left-color: var(--warn-pure);
+        }
+
+        .note-card.soft-deleted {
+            opacity: 0.6;
+            border-left-color: var(--danger-pure);
+            background: var(--bg-input);
+        }
+
+        .note-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 12px;
+        }
+
+        .note-title {
+            font-size: 16px;
+            font-weight: 600;
+            color: var(--text-main);
+        }
+
+        .note-content {
+            font-size: 14px;
+            color: var(--text-muted);
+            margin-bottom: 16px;
+            white-space: pre-wrap;
+            line-height: 1.5;
+        }
+
+        .note-meta {
+            font-size: 12px;
+            color: var(--text-muted);
+            display: flex;
+            gap: 16px;
+            flex-wrap: wrap;
+            padding-top: 12px;
+            border-top: 1px solid var(--border);
+        }
+
+        .note-actions {
+            display: flex;
+            gap: 8px;
+        }
+
+        .pin-icon {
+            color: var(--warn-pure);
+            margin-right: 6px;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+
+<div class="header">
+    <h1><span>Keel</span> Control Panel</h1>
+    <div class="health-info">
+        <span id="health-status"><span class="status-dot"></span>Connecting...</span>
+        <span id="health-ts"></span>
+    </div>
+</div>
+
+<div class="tab-nav">
+    <button class="tab-btn active" onclick="switchTab('plugins')">Plugins</button>
+    <button class="tab-btn" onclick="switchTab('logs')">Logs</button>
+    <button class="tab-btn" onclick="switchTab('database')">Database</button>
+    <button class="tab-btn" onclick="switchTab('tester')">API Tester</button>
+</div>
+
+<div class="container">
+
+    <div id="tab-plugins" class="tab-content active">
+        <div class="section">
+            <h2>Plugins Overview</h2>
+            <table>
+                <thead>
+                <tr>
+                    <th>Plugin ID</th>
+                    <th>Version</th>
+                    <th>Type</th>
+                    <th>State</th>
+                    <th>Actions</th>
+                </tr>
+                </thead>
+                <tbody id="plugin-table-body">
+                <tr>
+                    <td colspan="5" style="text-align:center;color:var(--text-muted);">Loading...</td>
+                </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <div id="tab-logs" class="tab-content">
+
+        <div class="section">
+            <h2>Real-time Stream</h2>
+            <div class="log-stream-container">
+                <div class="log-toolbar">
+                    <button class="btn btn-sm btn-secondary" id="btn-pause" onclick="togglePause()">Pause</button>
+                    <label><input type="checkbox" id="chk-autoscroll" checked> Auto-scroll</label>
+                    <label style="margin-left: 12px;">Filter:
+                        <select id="log-filter" onchange="applyFilter()" style="padding: 4px 8px; margin-left: 6px;">
+                            <option value="ALL">ALL</option>
+                            <option value="DEBUG">DEBUG</option>
+                            <option value="INFO">INFO</option>
+                            <option value="WARN">WARN</option>
+                            <option value="ERROR">ERROR</option>
+                        </select>
+                    </label>
+                    <div class="sse-status">
+                        <span class="status-dot" id="sse-dot"></span>
+                        <span id="sse-label">Disconnected</span>
+                    </div>
+                </div>
+                <div class="log-stream" id="log-stream"></div>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>Event Diagnostics</h2>
+            <div class="stats-row">
+                <div class="stat-card debug">
+                    <div class="stat-value" id="stat-debug">0</div>
+                    <div class="stat-label">Debug</div>
+                </div>
+                <div class="stat-card info">
+                    <div class="stat-value" id="stat-info">0</div>
+                    <div class="stat-label">Info</div>
+                </div>
+                <div class="stat-card warn">
+                    <div class="stat-value" id="stat-warn">0</div>
+                    <div class="stat-label">Warn</div>
+                </div>
+                <div class="stat-card error">
+                    <div class="stat-value" id="stat-error">0</div>
+                    <div class="stat-label">Error</div>
+                </div>
+            </div>
+
+            <div class="level-control">
+                <span style="font-size:13px; font-weight: 600; color:var(--text-muted); margin-right:8px; text-transform: uppercase;">Active Log Level:</span>
+                <button class="level-btn" onclick="setLogLevel('DEBUG')">DEBUG</button>
+                <button class="level-btn" onclick="setLogLevel('INFO')">INFO</button>
+                <button class="level-btn" onclick="setLogLevel('WARN')">WARN</button>
+                <button class="level-btn" onclick="setLogLevel('ERROR')">ERROR</button>
+                <div style="margin-left:auto; display: flex; gap: 8px;">
+                    <button class="btn btn-sm btn-warn" onclick="clearLogs()">Clear Buffer</button>
+                    <button class="btn btn-sm btn-secondary" onclick="refreshLogs()">Refresh</button>
+                </div>
+            </div>
+
+            <div class="source-table">
+                <h2>Events By Source</h2>
+                <table>
+                    <thead>
+                    <tr>
+                        <th>Source Identifier</th>
+                        <th>Hit Count</th>
+                        <th>Last Recorded Level</th>
+                    </tr>
+                    </thead>
+                    <tbody id="source-table-body">
+                    <tr>
+                        <td colspan="3" style="text-align:center;color:var(--text-muted);">No data accumulated</td>
+                    </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>Export</h2>
+            <div style="display: flex; gap: 12px;">
+                <button class="btn btn-send" onclick="downloadJSON()">Download JSON Payload</button>
+                <button class="btn btn-secondary" onclick="downloadText()">Download Raw Text</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="tab-tester" class="tab-content">
+        <div class="section">
+            <h2>Endpoint Playground</h2>
+            <div class="test-area">
+                <div class="test-row">
+                    <select id="req-method" style="width: 100px;">
+                        <option value="GET">GET</option>
+                        <option value="POST">POST</option>
+                        <option value="PUT">PUT</option>
+                        <option value="DELETE">DELETE</option>
+                    </select>
+                    <input type="text" id="req-url" value="/api/plugins/helloworld"
+                           placeholder="/api/plugins/helloworld">
+                    <button class="btn btn-send" onclick="sendRequest()">Execute</button>
+                </div>
+                <div class="response-box" id="response-box">Response payload will appear here...</div>
+            </div>
+        </div>
+    </div>
+
+    <div id="tab-database" class="tab-content">
+
+        <div class="section">
+            <h2>Storage Diagnostics</h2>
+            <div class="db-meta">
+                <span>Target Table: <strong id="db-table-name">-</strong></span>
+                <span>Driver Engine: <strong id="db-engine">-</strong></span>
+            </div>
+            <div class="db-stats-row">
+                <div class="db-stat-card">
+                    <div class="stat-value" id="db-active">0</div>
+                    <div class="stat-label">Active Records</div>
+                </div>
+                <div class="db-stat-card pinned">
+                    <div class="stat-value" id="db-pinned">0</div>
+                    <div class="stat-label">Pinned</div>
+                </div>
+                <div class="db-stat-card deleted">
+                    <div class="stat-value" id="db-deleted">0</div>
+                    <div class="stat-label">Soft-Deleted</div>
+                </div>
+                <div class="db-stat-card total">
+                    <div class="stat-value" id="db-total">0</div>
+                    <div class="stat-label">Total Volume</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>Record Entry</h2>
+            <div class="create-form">
+                <div class="form-inline" style="margin-bottom:16px;">
+                    <div class="form-group"><label>Title Key</label><input type="text" id="note-title"
+                                                                           placeholder="Enter note title..."></div>
+                    <div class="form-group" style="max-width:200px;"><label>Author ID</label><input type="text"
+                                                                                                    id="note-author"
+                                                                                                    placeholder="anonymous"
+                                                                                                    value="anonymous">
+                    </div>
+                    <div class="form-group" style="max-width:120px;"><label>Priority Pin</label>
+                        <select id="note-pinned" style="width:100%;">
+                            <option value="false">Standard</option>
+                            <option value="true">Pinned</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-group"><label>Payload Content</label><textarea id="note-content"
+                                                                                placeholder="Enter comprehensive note details..."></textarea>
+                </div>
+                <button class="btn btn-send" onclick="createNote()">Commit Record</button>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>Repository Data</h2>
+            <div style="margin-bottom:16px;display:flex;gap:12px;">
+                <button class="btn btn-sm btn-secondary" onclick="fetchNotes(false)" id="btn-show-active">Active Only
+                </button>
+                <button class="btn btn-sm btn-secondary" onclick="fetchNotes(true)" id="btn-show-all"
+                        style="opacity: 0.5;">Show All Including Deleted
+                </button>
+                <button class="btn btn-sm btn-secondary" onclick="fetchDbStats()" style="margin-left:auto;">Refresh
+                    Statistics
+                </button>
+            </div>
+            <div id="notes-list">
+                <div style="text-align:center;color:var(--text-muted);padding:32px; border: 1px dashed var(--border); border-radius: 8px;">
+                    Fetching repository records...
+                </div>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>Architecture & Framework Components</h2>
+            <table>
+                <thead>
+                <tr>
+                    <th>Component Feature</th>
+                    <th>Implementation Class</th>
+                    <th>Technical Description</th>
+                </tr>
+                </thead>
+                <tbody>
+                <tr>
+                    <td>Plugin Isolation</td>
+                    <td><code>PluginTable(pluginId, name)</code></td>
+                    <td>Auto-prefixes table name with pluginId for strict schema isolation. Physical mapping: <code>dbdemo_notes</code>
+                    </td>
+                </tr>
+                <tr>
+                    <td>Audit Trailing</td>
+                    <td><code>AuditPluginTable</code></td>
+                    <td>Composites TimestampTable + SoftDeletableTable with structured createdBy/updatedBy fields.</td>
+                </tr>
+                <tr>
+                    <td>Temporal Management</td>
+                    <td><code>TimestampTable</code></td>
+                    <td>Automated <code>created_at</code> and <code>updated_at</code> synchronization via <code>kotlinx.datetime.Instant</code>.
+                    </td>
+                </tr>
+                <tr>
+                    <td>Soft Delete Paradigm</td>
+                    <td><code>SoftDeletableTable</code></td>
+                    <td>Enforces logical deletion via nullable <code>deleted_at</code> column; active operational
+                        records retain <code>null</code>.
+                    </td>
+                </tr>
+                <tr>
+                    <td>CRUD Abstraction</td>
+                    <td><code>CrudRepository&lt;ID, E&gt;</code></td>
+                    <td>Standardized interface for findById, findAll, save, deleteById, existsById, and count
+                        operations.
+                    </td>
+                </tr>
+                <tr>
+                    <td>Transaction Context</td>
+                    <td><code>BaseRepository&lt;T&gt;</code></td>
+                    <td>Lifecycle wrappers: <code>transaction{}</code>, <code>transactionWithResult{}</code>,
+                        encapsulating robust <code>logError()</code> handling.
+                    </td>
+                </tr>
+                <tr>
+                    <td>Connection Pooling</td>
+                    <td><code>DatabaseFactory.h2Memory()</code></td>
+                    <td>HikariCP integration + Exposed ORM layer. Agnostic support for H2, PostgreSQL, MySQL, and
+                        SQLite.
+                    </td>
+                </tr>
+                <tr>
+                    <td>Database Lifecycle</td>
+                    <td><code>KeelDatabase</code></td>
+                    <td>Manages DDL execution (create/drop) and robust asynchronous wrappers
+                        (<code>suspendTransaction</code>, <code>transactionWithRetry</code>).
+                    </td>
+                </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+</div>
+
+<script>
+    const API_BASE = '';
+    const POLL_INTERVAL = 3000;
+
+    // ─── Tab Switching ───
+    function switchTab(tab) {
+        document.querySelectorAll('.tab-btn').forEach(function (b) {
+            b.classList.remove('active');
+        });
+        document.querySelectorAll('.tab-content').forEach(function (c) {
+            c.classList.remove('active');
+        });
+        document.getElementById('tab-' + tab).classList.add('active');
+        document.querySelector('.tab-btn[onclick="switchTab(\'' + tab + '\')"]').classList.add('active');
+        if (tab === 'logs' && !sseConnected) connectSSE();
+        if (tab === 'database') {
+            fetchDbStats();
+            fetchNotes();
+        }
+    }
+
+    // ─── Helpers ───
+    function escapeHtml(str) {
+        var d = document.createElement('div');
+        d.textContent = str;
+        return d.innerHTML;
+    }
+
+    function stateBadge(state) {
+        var s = (state || '').toUpperCase();
+        if (s === 'ENABLED') return '<span class="badge enabled">Enabled</span>';
+        if (s === 'DISABLED') return '<span class="badge disabled">Disabled</span>';
+        if (s === 'INSTALLED') return '<span class="badge installed">Installed</span>';
+        return '<span class="badge other">' + escapeHtml(s) + '</span>';
+    }
+
+    function formatTime(ts) {
+        var d = new Date(ts);
+        return d.toLocaleTimeString('en-US', {hour12: false});
+    }
+
+    // ─── Plugins ───
+    async function fetchPlugins() {
+        try {
+            var resp = await fetch(API_BASE + '/api/_system/plugins');
+            var json = await resp.json();
+            if (json.code === 200 && json.data && json.data.plugins) {
+                renderPlugins(json.data.plugins);
+            }
+        } catch (e) { /* silent */
+        }
+    }
+
+    function renderPlugins(plugins) {
+        var tbody = document.getElementById('plugin-table-body');
+        if (!plugins.length) {
+            tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text-muted);">No plugins registered</td></tr>';
+            return;
+        }
+        tbody.innerHTML = plugins.map(function (p) {
+            var state = (p.state || '').toUpperCase();
+            var isEnabled = state === 'ENABLED';
+            var typeLabel = p.isDynamic ? '<span class="badge dynamic">Dynamic</span>' : 'Static';
+            return '<tr>' +
+                '<td><strong>' + escapeHtml(p.pluginId) + '</strong></td>' +
+                '<td>' + escapeHtml(p.version) + '</td>' +
+                '<td>' + typeLabel + '</td>' +
+                '<td>' + stateBadge(p.state) + '</td>' +
+                '<td class="actions">' +
+                (isEnabled
+                    ? '<button class="btn btn-disable btn-sm" onclick="togglePlugin(\'' + escapeHtml(p.pluginId) + '\', \'disable\')">Disable</button>'
+                    : '<button class="btn btn-enable btn-sm" onclick="togglePlugin(\'' + escapeHtml(p.pluginId) + '\', \'enable\')">Enable</button>') +
+                '</td>' +
+                '</tr>';
+        }).join('');
+    }
+
+    async function togglePlugin(pluginId, action) {
+        try {
+            var resp = await fetch(API_BASE + '/api/_system/plugins/' + encodeURIComponent(pluginId) + '/' + action, {method: 'POST'});
+            await resp.json();
+            await fetchPlugins();
+        } catch (e) { /* silent */
+        }
+    }
+
+    // ─── Health ───
+    async function checkHealth() {
+        var el = document.getElementById('health-status');
+        var tsEl = document.getElementById('health-ts');
+        try {
+            var resp = await fetch(API_BASE + '/api/_system/health');
+            var json = await resp.json();
+            if (json.code === 200 && json.data && json.data.status === 'ok') {
+                el.innerHTML = '<span class="status-dot ok"></span>Healthy';
+                tsEl.textContent = new Date(json.data.timestamp).toLocaleTimeString();
+            } else {
+                el.innerHTML = '<span class="status-dot err"></span>Unhealthy';
+            }
+        } catch (e) {
+            el.innerHTML = '<span class="status-dot err"></span>Disconnected';
+            tsEl.textContent = '';
+        }
+    }
+
+    // ─── API Tester ───
+    async function sendRequest() {
+        var method = document.getElementById('req-method').value;
+        var url = document.getElementById('req-url').value;
+        var box = document.getElementById('response-box');
+        box.textContent = 'Sending...';
+        try {
+            var resp = await fetch(API_BASE + url, {method: method});
+            var status = resp.status;
+            var text = await resp.text();
+            var statusClass = 's5xx';
+            if (status >= 200 && status < 300) statusClass = 's2xx';
+            else if (status >= 400 && status < 500) statusClass = 's4xx';
+            var body = text;
+            try {
+                body = JSON.stringify(JSON.parse(text), null, 2);
+            } catch (_) {
+            }
+            box.innerHTML = '<div class="status-line ' + statusClass + '">' + method + ' ' + escapeHtml(url) + ' — ' + status + '</div>' + escapeHtml(body);
+        } catch (e) {
+            box.innerHTML = '<div class="status-line s5xx">Error: ' + escapeHtml(e.message) + '</div>';
+        }
+    }
+
+    // ─── Log Stream (SSE) ───
+    var sseConnected = false;
+    var sseSource = null;
+    var paused = false;
+    var allLogEntries = [];
+    var filterLevel = 'ALL';
+
+    function connectSSE() {
+        if (sseSource) {
+            sseSource.close();
+        }
+        var dot = document.getElementById('sse-dot');
+        var label = document.getElementById('sse-label');
+        dot.className = 'status-dot';
+        label.textContent = 'Connecting...';
+
+        sseSource = new EventSource(API_BASE + '/api/_system/logs/stream');
+
+        sseSource.addEventListener('log', function (e) {
+            try {
+                var evt = JSON.parse(e.data);
+                var entryString = evt.data;
+                if (entryString) {
+                    var level = 'INFO';
+                    if (entryString.includes('[DEBUG]')) level = 'DEBUG';
+                    else if (entryString.includes('[WARN]')) level = 'WARN';
+                    else if (entryString.includes('[ERROR]')) level = 'ERROR';
+
+                    var sourceMatch = entryString.match(/\] \[(.*?)\]/);
+                    var source = sourceMatch ? sourceMatch[1] : 'Unknown';
+
+                    var entry = {
+                        raw: entryString,
+                        level: level,
+                        source: source,
+                        timestamp: Date.now()
+                    };
+                    addLogEntry(entry);
+                }
+            } catch (err) { /* ignore */
+            }
+        });
+
+        sseSource.onopen = function () {
+            sseConnected = true;
+            dot.className = 'status-dot ok';
+            label.textContent = 'Connected';
+        };
+
+        sseSource.onerror = function () {
+            sseConnected = false;
+            dot.className = 'status-dot err';
+            label.textContent = 'Disconnected';
+        };
+    }
+
+    function addLogEntry(entry) {
+        allLogEntries.push(entry);
+        if (allLogEntries.length > 2000) allLogEntries = allLogEntries.slice(-1500);
+        updateStats();
+        if (paused) return;
+        if (filterLevel !== 'ALL' && entry.level !== filterLevel) return;
+        appendLogLine(entry);
+    }
+
+    function appendLogLine(entry) {
+        var stream = document.getElementById('log-stream');
+        var line = document.createElement('div');
+        line.className = 'log-line ' + entry.level;
+
+        if (entry.raw) {
+            line.textContent = entry.raw;
+        } else {
+            var ts = formatTime(entry.timestamp);
+            line.textContent = ts + ' [' + entry.source + '] ' + entry.message;
+            if (entry.throwable) {
+                line.textContent += '\n' + entry.throwable;
+            }
+        }
+
+        stream.appendChild(line);
+        while (stream.children.length > 500) stream.removeChild(stream.firstChild);
+        if (document.getElementById('chk-autoscroll').checked) {
+            stream.scrollTop = stream.scrollHeight;
+        }
+    }
+
+    function togglePause() {
+        paused = !paused;
+        document.getElementById('btn-pause').textContent = paused ? 'Resume' : 'Pause';
+        if (!paused) rebuildStream();
+    }
+
+    function applyFilter() {
+        filterLevel = document.getElementById('log-filter').value;
+        rebuildStream();
+    }
+
+    function rebuildStream() {
+        var stream = document.getElementById('log-stream');
+        stream.innerHTML = '';
+        var filtered = filterLevel === 'ALL' ? allLogEntries : allLogEntries.filter(function (e) {
+            return e.level === filterLevel;
+        });
+        filtered.slice(-300).forEach(function (entry) {
+            appendLogLine(entry);
+        });
+    }
+
+    // ─── Log Analysis ───
+    function updateStats() {
+        var counts = {DEBUG: 0, INFO: 0, WARN: 0, ERROR: 0};
+        var sources = {};
+        allLogEntries.forEach(function (e) {
+            if (counts[e.level] !== undefined) counts[e.level]++;
+            if (!sources[e.source]) sources[e.source] = {count: 0, lastLevel: ''};
+            sources[e.source].count++;
+            sources[e.source].lastLevel = e.level;
+        });
+        document.getElementById('stat-debug').textContent = counts.DEBUG;
+        document.getElementById('stat-info').textContent = counts.INFO;
+        document.getElementById('stat-warn').textContent = counts.WARN;
+        document.getElementById('stat-error').textContent = counts.ERROR;
+
+        var tbody = document.getElementById('source-table-body');
+        var sourceKeys = Object.keys(sources).sort(function (a, b) {
+            return sources[b].count - sources[a].count;
+        });
+        if (sourceKeys.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="3" style="text-align:center;color:var(--text-muted);">No data accumulated</td></tr>';
+            return;
+        }
+        tbody.innerHTML = sourceKeys.map(function (s) {
+            return '<tr><td>' + escapeHtml(s) + '</td><td>' + sources[s].count + '</td><td>' + stateBadgeLevel(sources[s].lastLevel) + '</td></tr>';
+        }).join('');
+    }
+
+    function stateBadgeLevel(level) {
+        var cssVar = 'var(--text-muted)';
+        if (level === 'INFO') cssVar = 'var(--info-pure)';
+        if (level === 'WARN') cssVar = 'var(--warn-pure)';
+        if (level === 'ERROR') cssVar = 'var(--danger-pure)';
+        return '<span style="color:' + cssVar + ';font-weight:600;">' + escapeHtml(level) + '</span>';
+    }
+
+    async function setLogLevel(level) {
+        try {
+            await fetch(API_BASE + '/api/_system/logs/level', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({level: level})
+            });
+            fetchLevels();
+        } catch (e) { /* silent */
+        }
+    }
+
+    async function fetchLevels() {
+        try {
+            var resp = await fetch(API_BASE + '/api/_system/logs/levels');
+            var json = await resp.json();
+            if (json.code === 200 && json.data) {
+                var current = json.data.currentLevel;
+                document.querySelectorAll('.level-btn').forEach(function (b) {
+                    b.classList.toggle('active', b.textContent === current);
+                });
+            }
+        } catch (e) { /* silent */
+        }
+    }
+
+    async function clearLogs() {
+        try {
+            await fetch(API_BASE + '/api/_system/logs/clear', {method: 'POST'});
+            allLogEntries = [];
+            document.getElementById('log-stream').innerHTML = '';
+            updateStats();
+        } catch (e) { /* silent */
+        }
+    }
+
+    async function refreshLogs() {
+        try {
+            var resp = await fetch(API_BASE + '/api/_system/logs/recent?limit=1000');
+            var json = await resp.json();
+            if (json.code === 200 && json.data) {
+                allLogEntries = json.data;
+                rebuildStream();
+                updateStats();
+            }
+        } catch (e) { /* silent */
+        }
+    }
+
+    // ─── Download ───
+    function downloadJSON() {
+        window.location.href = API_BASE + '/api/_system/logs/download';
+    }
+
+    function downloadText() {
+        var text = allLogEntries.map(function (e) {
+            var ts = new Date(e.timestamp).toISOString();
+            var line = ts + ' ' + e.level + ' [' + e.source + '] ' + e.message;
+            if (e.throwable) line += '\n' + e.throwable;
+            return line;
+        }).join('\n');
+        var blob = new Blob([text], {type: 'text/plain'});
+        var a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = 'keel-logs.txt';
+        a.click();
+        URL.revokeObjectURL(a.href);
+    }
+
+    // ─── Init ───
+    fetchPlugins();
+    checkHealth();
+    fetchLevels();
+    setInterval(function () {
+        fetchPlugins();
+        checkHealth();
+    }, POLL_INTERVAL);
+
+    // ─── Database Tab ───
+    var showingAll = false;
+
+    async function fetchDbStats() {
+        try {
+            var resp = await fetch(API_BASE + '/api/plugins/dbdemo/stats');
+            var json = await resp.json();
+            if (json.code === 200 && json.data) {
+                var d = json.data;
+                document.getElementById('db-active').textContent = d.activeNotes;
+                document.getElementById('db-pinned').textContent = d.pinnedNotes;
+                document.getElementById('db-deleted').textContent = d.deletedNotes;
+                document.getElementById('db-total').textContent = d.totalNotes;
+                document.getElementById('db-table-name').textContent = d.tableName;
+                document.getElementById('db-engine').textContent = d.databaseType;
+            }
+        } catch (e) { /* silent */
+        }
+    }
+
+    async function fetchNotes(all) {
+        if (all !== undefined) showingAll = all;
+        var endpoint = showingAll ? '/api/plugins/dbdemo/notes/all' : '/api/plugins/dbdemo/notes';
+        document.getElementById('btn-show-active').style.opacity = showingAll ? '0.5' : '1';
+        document.getElementById('btn-show-all').style.opacity = showingAll ? '1' : '0.5';
+        try {
+            var resp = await fetch(API_BASE + endpoint);
+            var json = await resp.json();
+            if (json.code === 200 && json.data && json.data.notes) {
+                renderNotes(json.data.notes);
+            }
+        } catch (e) {
+            document.getElementById('notes-list').innerHTML = '<div style="text-align:center;color:var(--danger-pure);padding:24px;">Failed to load notes. Is the dbdemo plugin enabled?</div>';
+        }
+    }
+
+    function renderNotes(notes) {
+        var container = document.getElementById('notes-list');
+        if (!notes.length) {
+            container.innerHTML = '<div style="text-align:center;color:var(--text-muted);padding:32px; border: 1px dashed var(--border); border-radius: 8px;">No notes found in the repository</div>';
+            return;
+        }
+        container.innerHTML = notes.map(function (n) {
+            var isDeleted = !!n.deletedAt;
+            var cls = 'note-card';
+            if (n.pinned && !isDeleted) cls += ' pinned';
+            if (isDeleted) cls += ' soft-deleted';
+            var pin = n.pinned ? '<span class="pin-icon">&#9733;</span>' : '';
+            var actions = '';
+            if (isDeleted) {
+                actions = '<button class="btn btn-sm btn-enable" onclick="restoreNote(' + n.id + ')">Restore</button>' +
+                    '<button class="btn btn-sm btn-disable" onclick="hardDeleteNote(' + n.id + ')">Permanently Delete</button>';
+            } else {
+                actions = '<button class="btn btn-sm btn-warn" onclick="softDeleteNote(' + n.id + ')">Soft Delete</button>' +
+                    '<button class="btn btn-sm btn-disable" onclick="hardDeleteNote(' + n.id + ')">Hard Delete</button>';
+            }
+            var meta = '<span>ID: ' + n.id + '</span>';
+            if (n.createdAt) meta += '<span>Created: ' + new Date(n.createdAt).toLocaleString() + '</span>';
+            if (n.updatedAt) meta += '<span>Updated: ' + new Date(n.updatedAt).toLocaleString() + '</span>';
+            if (n.createdBy) meta += '<span>By: ' + escapeHtml(n.createdBy) + '</span>';
+            if (isDeleted) meta += '<span style="color:var(--danger-pure);">Deleted: ' + new Date(n.deletedAt).toLocaleString() + '</span>';
+
+            return '<div class="' + cls + '">' +
+                '<div class="note-header">' +
+                '<div class="note-title">' + pin + escapeHtml(n.title) + '</div>' +
+                '<div class="note-actions">' + actions + '</div>' +
+                '</div>' +
+                (n.content ? '<div class="note-content">' + escapeHtml(n.content) + '</div>' : '') +
+                '<div class="note-meta">' + meta + '</div>' +
+                '</div>';
+        }).join('');
+    }
+
+    async function createNote() {
+        var title = document.getElementById('note-title').value.trim();
+        if (!title) return;
+        var body = {
+            title: title,
+            content: document.getElementById('note-content').value,
+            author: document.getElementById('note-author').value || 'anonymous',
+            pinned: document.getElementById('note-pinned').value === 'true'
+        };
+        try {
+            await fetch(API_BASE + '/api/plugins/dbdemo/notes', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(body)
+            });
+            document.getElementById('note-title').value = '';
+            document.getElementById('note-content').value = '';
+            fetchNotes();
+            fetchDbStats();
+        } catch (e) { /* silent */
+        }
+    }
+
+    async function softDeleteNote(id) {
+        try {
+            await fetch(API_BASE + '/api/plugins/dbdemo/notes/' + id + '/delete', {method: 'POST'});
+            fetchNotes();
+            fetchDbStats();
+        } catch (e) { /* silent */
+        }
+    }
+
+    async function restoreNote(id) {
+        try {
+            await fetch(API_BASE + '/api/plugins/dbdemo/notes/' + id + '/restore', {method: 'POST'});
+            fetchNotes();
+            fetchDbStats();
+        } catch (e) { /* silent */
+        }
+    }
+
+    async function hardDeleteNote(id) {
+        if (!confirm('Permanently delete this note?')) return;
+        try {
+            await fetch(API_BASE + '/api/plugins/dbdemo/notes/' + id, {method: 'DELETE'});
+            fetchNotes();
+            fetchDbStats();
+        } catch (e) { /* silent */
+        }
+    }
+</script>
+</body>
+</html>

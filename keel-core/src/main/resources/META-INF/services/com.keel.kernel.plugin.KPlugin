@@ -1,0 +1,2 @@
+# Service Provider Interface for Keel plugins
+# Implement KPlugin interface and add your class name here for SPI discovery

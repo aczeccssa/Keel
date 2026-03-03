@@ -1,0 +1,76 @@
+[versions]
+kotlin = "2.3.0"
+ktor = "3.4.0"
+koin = "4.0.0"
+exposed = "0.61.0"
+kotlinx-datetime = "0.6.2"
+kotlinx-serialization = "1.8.0"
+kotlinx-coroutines = "1.9.0"
+dokka = "2.1.0"
+ksp = "2.3.0"
+soullogger = "v1.0.1"
+logback = "1.5.18"
+netty = "4.1.117.Final"
+micrometer = "1.14.2"
+hikari = "5.1.0"
+h2 = "2.2.224"
+inspektor = "0.10.0-alpha"
+
+[libraries]
+# Kotlin
+kotlin-stdlib = { group = "org.jetbrains.kotlin", name = "kotlin-stdlib", version.ref = "kotlin" }
+
+# Ktor
+ktor-server-core = { group = "io.ktor", name = "ktor-server-core", version.ref = "ktor" }
+ktor-server-netty = { group = "io.ktor", name = "ktor-server-netty", version.ref = "ktor" }
+ktor-server-routing = { group = "io.ktor", name = "ktor-server-routing", version.ref = "ktor" }
+ktor-server-content-negotiation = { group = "io.ktor", name = "ktor-server-content-negotiation", version.ref = "ktor" }
+ktor-serialization-kotlinx-json = { group = "io.ktor", name = "ktor-serialization-kotlinx-json", version.ref = "ktor" }
+ktor-server-cors = { group = "io.ktor", name = "ktor-server-cors", version.ref = "ktor" }
+ktor-server-call-logging = { group = "io.ktor", name = "ktor-server-call-logging", version.ref = "ktor" }
+ktor-server-partial-content = { group = "io.ktor", name = "ktor-server-partial-content", version.ref = "ktor" }
+ktor-server-default-headers = { group = "io.ktor", name = "ktor-server-default-headers", version.ref = "ktor" }
+ktor-server-conditional-headers = { group = "io.ktor", name = "ktor-server-conditional-headers", version.ref = "ktor" }
+ktor-server-websockets = { group = "io.ktor", name = "ktor-server-websockets", version.ref = "ktor" }
+ktor-server-sse = { group = "io.ktor", name = "ktor-server-sse", version.ref = "ktor" }
+
+# Koin
+koin-ktor = { group = "io.insert-koin", name = "koin-ktor", version.ref = "koin" }
+koin-core = { group = "io.insert-koin", name = "koin-core", version.ref = "koin" }
+
+# Exposed
+exposed-core = { group = "org.jetbrains.exposed", name = "exposed-core", version.ref = "exposed" }
+exposed-jdbc = { group = "org.jetbrains.exposed", name = "exposed-jdbc", version.ref = "exposed" }
+exposed-kotlin-datetime = { group = "org.jetbrains.exposed", name = "exposed-kotlin-datetime", version.ref = "exposed" }
+
+# kotlinx
+kotlinx-datetime = { group = "org.jetbrains.kotlinx", name = "kotlinx-datetime", version.ref = "kotlinx-datetime" }
+kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-serialization-json", version.ref = "kotlinx-serialization" }
+kotlinx-coroutines-core = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-core", version.ref = "kotlinx-coroutines" }
+kotlinx-coroutines-test = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-test", version.ref = "kotlinx-coroutines" }
+
+# Logging
+logback-classic = { group = "ch.qos.logback", name = "logback-classic", version.ref = "logback" }
+soul-logger-core = { module = "com.github.aczeccssa.SoulLogger:core", version.ref = "soullogger" }
+
+# Netty
+netty-all = { group = "io.netty", name = "netty-all", version.ref = "netty" }
+
+# Micrometer
+micrometer-core = { group = "io.micrometer", name = "micrometer-core", version.ref = "micrometer" }
+
+# HikariCP
+hikari-cp = { group = "com.zaxxer", name = "HikariCP", version.ref = "hikari" }
+
+# H2 Database
+h2-database = { group = "com.h2database", name = "h2", version.ref = "h2" }
+
+# KSP
+ksp-api = { group = "com.google.devtools.ksp", name = "symbol-processing-api", version.ref = "ksp" }
+
+[plugins]
+kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
+kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
+dokka = { id = "org.jetbrains.dokka", version.ref = "dokka" }
+ksp = { id = "com.google.devtools.ksp", version.ref = "ksp" }
+inspektor = { id = "io.github.smiley4.inspektor", version.ref = "inspektor" }
