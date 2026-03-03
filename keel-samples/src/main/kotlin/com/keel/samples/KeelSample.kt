@@ -11,11 +11,11 @@ import java.io.File
  * Sample Application demonstrating the Keel framework.
  *
  * This minimal example shows how to:
- * 1. Create a plugin by implementing KPlugin interface
+ * 1. Create a plugin by implementing KeelPlugin
  * 2. Register plugins with the Kernel
  * 3. Framework automatically handles:
- *    - Plugin installation (onInit, onInstall)
- *    - Plugin route mounting (onEnable)
+ *    - Plugin lifecycle (onInit, onStart, onStop, onDispose)
+ *    - Plugin route mounting
  *    - System routes at /api/_system/
  *    - Gateway interceptor for plugin status checking
  *    - Config hot-reloader in development mode

@@ -1040,9 +1040,10 @@
 
     function stateBadge(state) {
         var s = (state || '').toUpperCase();
-        if (s === 'ENABLED') return '<span class="badge enabled">Enabled</span>';
-        if (s === 'DISABLED') return '<span class="badge disabled">Disabled</span>';
-        if (s === 'INSTALLED') return '<span class="badge installed">Installed</span>';
+        if (s === 'RUNNING') return '<span class="badge enabled">Running</span>';
+        if (s === 'STOPPED') return '<span class="badge installed">Stopped</span>';
+        if (s === 'DISPOSED') return '<span class="badge disabled">Disposed</span>';
+        if (s === 'FAILED') return '<span class="badge disabled">Failed</span>';
         return '<span class="badge other">' + escapeHtml(s) + '</span>';
     }
 
@@ -1070,18 +1071,18 @@
             return;
         }
         tbody.innerHTML = plugins.map(function (p) {
-            var state = (p.state || '').toUpperCase();
-            var isEnabled = state === 'ENABLED';
+            var lifecycleState = (p.lifecycleState || '').toUpperCase();
+            var isRunning = lifecycleState === 'RUNNING';
             var typeLabel = p.isDynamic ? '<span class="badge dynamic">Dynamic</span>' : 'Static';
             return '<tr>' +
                 '<td><strong>' + escapeHtml(p.pluginId) + '</strong></td>' +
                 '<td>' + escapeHtml(p.version) + '</td>' +
                 '<td>' + typeLabel + '</td>' +
-                '<td>' + stateBadge(p.state) + '</td>' +
+                '<td>' + stateBadge(p.lifecycleState) + '</td>' +
                 '<td class="actions">' +
-                (isEnabled
-                    ? '<button class="btn btn-disable btn-sm" onclick="togglePlugin(\'' + escapeHtml(p.pluginId) + '\', \'disable\')">Disable</button>'
-                    : '<button class="btn btn-enable btn-sm" onclick="togglePlugin(\'' + escapeHtml(p.pluginId) + '\', \'enable\')">Enable</button>') +
+                (isRunning
+                    ? '<button class="btn btn-disable btn-sm" onclick="togglePlugin(\'' + escapeHtml(p.pluginId) + '\', \'stop\')">Stop</button>'
+                    : '<button class="btn btn-enable btn-sm" onclick="togglePlugin(\'' + escapeHtml(p.pluginId) + '\', \'start\')">Start</button>') +
                 '</td>' +
                 '</tr>';
         }).join('');

@@ -1,0 +1,2 @@
+# Service Provider Interface for unified Keel plugins
+# Implement KeelPlugin and add your class name here for SPI discovery

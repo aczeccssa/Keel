@@ -29,30 +29,37 @@ Once running, you can access:
 ## Creating Your Own Plugin
 
 1. Create a new module under `plugins/`
-2. Implement the `KPlugin` interface:
+2. Implement the `KeelPlugin` interface:
 
 ```kotlin
-class MyPlugin : KPlugin {
-    override val pluginId: String = "myplugin"
-    override val version: String = "1.0.0"
+class MyPlugin : KeelPlugin {
+    override val descriptor = PluginDescriptor(
+        pluginId = "myplugin",
+        version = "1.0.0",
+        displayName = "My Plugin"
+    )
 
-    override suspend fun onInit(ctx: PluginInitContext) {
+    override suspend fun onInit(context: PluginInitContext) {
         // Initialize plugin
     }
 
-    override suspend fun onInstall(scope: Scope) {
-        // Install dependencies
+    override suspend fun onStart(context: PluginRuntimeContext) {
+        // Start background work
     }
 
-    override suspend fun onEnable(routing: Routing) {
-        // Register routes at /api/plugins/myplugin/
+    override fun endpoints() = pluginEndpoints(descriptor.pluginId) {
+        get<String>("/ping") {
+            PluginResult(body = "pong")
+        }
     }
 
-    override suspend fun onDisable() {
+    override suspend fun onStop(context: PluginRuntimeContext) {
+        // Stop background work
+    }
+
+    override suspend fun onDispose(context: PluginRuntimeContext) {
         // Cleanup
     }
-
-    override fun getState(): PluginState = PluginState.ENABLED
 }
 ```
 

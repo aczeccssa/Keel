@@ -18,58 +18,74 @@ import java.util.jar.JarFile
 object OpenApiAggregator {
 
     private val json = Json { ignoreUnknownKeys = true; prettyPrint = true }
+    @Volatile
+    private var fragmentCache: List<OpenApiFragment>? = null
+    @Volatile
+    private var declaredOperationsCache: List<OpenApiDeclaredOperation>? = null
+    @Volatile
+    private var specCache: CachedSpec? = null
 
     /**
      * Discover all registered OpenApiFragment implementations via ServiceLoader.
      */
     fun discoverFragments(): List<OpenApiFragment> {
+        fragmentCache?.let { return it }
         return discoverImplementations(
             interfaceClass = OpenApiFragment::class.java,
             generatedClassNameFilter = { it.endsWith("OpenApiFragment") }
-        )
+        ).also { fragmentCache = it }
     }
 
     fun discoverDeclaredOperations(): List<OpenApiDeclaredOperation> {
+        declaredOperationsCache?.let { return it }
         return discoverImplementations(
             interfaceClass = OpenApiOperationFragment::class.java,
             generatedClassNameFilter = { it.contains(".AnnotatedOps_") }
         )
             .flatMap { it.operations() }
+            .also { declaredOperationsCache = it }
     }
 
     fun buildSpec(serverUrl: String = "http://localhost:8080"): String {
+        val topologyVersion = OpenApiRegistry.topologyVersion()
+        specCache?.takeIf { it.serverUrl == serverUrl && it.topologyVersion == topologyVersion }?.let { cached ->
+            return cached.spec
+        }
         val fragments = discoverFragments()
         val operations = mergeOperations(discoverDeclaredOperations(), OpenApiRegistry.operations())
-        if (operations.isEmpty()) {
-            return buildMinimalSpec(serverUrl)
-        }
-        val schemaGenerator = OpenApiSchemaGenerator()
-        val tags = buildTags(fragments, operations)
-        val paths = buildPaths(operations, schemaGenerator)
+        val spec = if (operations.isEmpty()) {
+            buildMinimalSpec(serverUrl)
+        } else {
+            val schemaGenerator = OpenApiSchemaGenerator()
+            val tags = buildTags(fragments, operations)
+            val paths = buildPaths(operations, schemaGenerator)
 
-        val spec = JsonObject(buildMap {
-            put("openapi", JsonPrimitive("3.1.0"))
-            put("info", JsonObject(mapOf(
-                "title" to JsonPrimitive("Keel API"),
-                "description" to JsonPrimitive("Auto-generated API documentation for the Keel modular monolith"),
-                "version" to JsonPrimitive("1.0.0")
-            )))
-            put("servers", JsonArray(listOf(
-                JsonObject(mapOf(
-                    "url" to JsonPrimitive(serverUrl),
-                    "description" to JsonPrimitive("Local development server")
-                ))
-            )))
-            put("tags", JsonArray(tags))
-            put("paths", JsonObject(paths))
-            if (schemaGenerator.components().isNotEmpty()) {
-                put("components", JsonObject(mapOf(
-                    "schemas" to JsonObject(schemaGenerator.components())
+            val specObject = JsonObject(buildMap {
+                put("openapi", JsonPrimitive("3.1.0"))
+                put("info", JsonObject(mapOf(
+                    "title" to JsonPrimitive("Keel API"),
+                    "description" to JsonPrimitive("Auto-generated API documentation for the Keel modular monolith"),
+                    "version" to JsonPrimitive("1.0.0")
                 )))
-            }
-        })
+                put("servers", JsonArray(listOf(
+                    JsonObject(mapOf(
+                        "url" to JsonPrimitive(serverUrl),
+                        "description" to JsonPrimitive("Local development server")
+                    ))
+                )))
+                put("tags", JsonArray(tags))
+                put("paths", JsonObject(paths))
+                if (schemaGenerator.components().isNotEmpty()) {
+                    put("components", JsonObject(mapOf(
+                        "schemas" to JsonObject(schemaGenerator.components())
+                    )))
+                }
+            })
 
-        return json.encodeToString(JsonElement.serializer(), spec)
+            json.encodeToString(JsonElement.serializer(), specObject)
+        }
+        specCache = CachedSpec(serverUrl = serverUrl, topologyVersion = topologyVersion, spec = spec)
+        return spec
     }
 
     /**
@@ -112,6 +128,10 @@ object OpenApiAggregator {
         })
 
         return json.encodeToString(JsonElement.serializer(), spec)
+    }
+
+    internal fun invalidateCache() {
+        specCache = null
     }
 
     private fun buildTags(
@@ -385,4 +405,10 @@ object OpenApiAggregator {
             }
             .toList()
     }
+
+    private data class CachedSpec(
+        val serverUrl: String,
+        val topologyVersion: Long,
+        val spec: String
+    )
 }

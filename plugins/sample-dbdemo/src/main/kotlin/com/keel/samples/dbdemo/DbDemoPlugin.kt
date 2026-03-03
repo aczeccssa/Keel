@@ -4,12 +4,13 @@ import com.keel.db.database.DatabaseFactory
 import com.keel.db.database.KeelDatabase
 import com.keel.kernel.api.KeelApi
 import com.keel.kernel.logging.KeelLoggerService
-import com.keel.kernel.plugin.KeelPluginV2
+import com.keel.kernel.plugin.KeelPlugin
 import com.keel.kernel.plugin.PluginApiException
 import com.keel.kernel.plugin.PluginDescriptor
-import com.keel.kernel.plugin.PluginExecutionMode
-import com.keel.kernel.plugin.PluginInitContextV2
+import com.keel.kernel.plugin.PluginInitContext
 import com.keel.kernel.plugin.PluginResult
+import com.keel.kernel.plugin.PluginRuntimeContext
+import com.keel.kernel.plugin.PluginRuntimeMode
 import com.keel.kernel.plugin.pluginEndpoints
 import com.keel.openapi.annotations.KeelApiPlugin
 
@@ -19,22 +20,22 @@ import com.keel.openapi.annotations.KeelApiPlugin
     description = "CRUD operations for notes with soft-delete support using H2 in-memory database",
     version = "1.0.0"
 )
-class DbDemoPlugin : KeelPluginV2 {
+class DbDemoPlugin : KeelPlugin {
     private val logger = KeelLoggerService.getLogger("DbDemoPlugin")
 
     override val descriptor: PluginDescriptor = PluginDescriptor(
         pluginId = "dbdemo",
         version = "1.0.0",
         displayName = "Database Demo Plugin",
-        defaultExecutionMode = PluginExecutionMode.ISOLATED_JVM
+        defaultRuntimeMode = PluginRuntimeMode.EXTERNAL_JVM
     )
 
     private lateinit var database: KeelDatabase
     private lateinit var repository: NoteRepository
     private var dbFactory: DatabaseFactory? = null
 
-    override suspend fun onInit(context: PluginInitContextV2) {
-        logger.info("Initializing dbdemo plugin in ${context.config.executionMode}")
+    override suspend fun onInit(context: PluginInitContext) {
+        logger.info("Initializing dbdemo plugin in ${context.config.runtimeMode}")
         dbFactory = DatabaseFactory.h2Memory(name = "dbdemo", poolSize = 5)
         database = dbFactory!!.init()
         database.createTables(NotesTable)
@@ -115,7 +116,7 @@ class DbDemoPlugin : KeelPluginV2 {
         }
     }
 
-    override suspend fun onStop() {
+    override suspend fun onStop(context: PluginRuntimeContext) {
         dbFactory?.close()
         logger.info("Stopped dbdemo plugin")
     }

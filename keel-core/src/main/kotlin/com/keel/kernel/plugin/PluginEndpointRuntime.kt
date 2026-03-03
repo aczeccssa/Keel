@@ -66,11 +66,24 @@ internal fun fullPluginPath(pluginId: String, endpointPath: String): String {
 
 internal suspend fun decodeRequestBody(call: ApplicationCall, requestType: KType?): Any? {
     if (requestType == null) return null
+    val body = readValidatedRequestBody(call, requestType)
+    return decodeRequestBody(body, requestType)
+}
+
+internal suspend fun readValidatedRequestBody(call: ApplicationCall, requestType: KType?): String? {
+    if (requestType == null) return null
     val body = call.receiveText()
     if (body.isBlank()) {
         throw PluginApiException(400, "Request body is required")
     }
-    return runtimeJson.decodeFromString(serializer(requestType), body)
+    return body
+}
+
+internal fun decodeRequestBody(body: String?, requestType: KType?): Any? {
+    if (requestType == null) return null
+    val validatedBody = body?.takeIf { it.isNotBlank() }
+        ?: throw PluginApiException(400, "Request body is required")
+    return runtimeJson.decodeFromString(serializer(requestType), validatedBody)
 }
 
 internal fun encodeResponseBody(body: Any?, responseType: KType): String? {

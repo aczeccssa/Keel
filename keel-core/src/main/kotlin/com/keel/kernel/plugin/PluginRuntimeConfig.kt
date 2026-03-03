@@ -2,41 +2,51 @@ package com.keel.kernel.plugin
 
 import com.keel.kernel.config.KeelConstants
 import com.keel.kernel.logging.KeelLoggerService
-import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import java.io.File
 
-@Serializable
-data class PluginRuntimeConfig(
-    val pluginId: String,
-    val enabled: Boolean = true,
-    val executionMode: PluginExecutionMode = PluginExecutionMode.IN_PROCESS,
-    val startupTimeoutMs: Long = 5000,
-    val callTimeoutMs: Long = 3000,
-    val healthCheckIntervalMs: Long = 10000
-)
-
-object PluginRuntimeConfigLoader {
-    private val logger = KeelLoggerService.getLogger("PluginRuntimeConfigLoader")
+object PluginConfigLoader {
+    private val logger = KeelLoggerService.getLogger("PluginConfigLoader")
     private val json = Json { ignoreUnknownKeys = true }
 
-    fun load(descriptor: PluginDescriptor, configRoot: String = KeelConstants.CONFIG_DIR): PluginRuntimeConfig {
-        val configFile = File(configRoot, "plugins/${descriptor.pluginId}.json")
-        if (!configFile.exists()) {
-            return PluginRuntimeConfig(
+    fun load(descriptor: PluginDescriptor, configRoot: String = KeelConstants.CONFIG_DIR): PluginConfig {
+        return load(descriptor, File(configRoot, "plugins/${descriptor.pluginId}.json"))
+    }
+
+    fun load(descriptor: PluginDescriptor, configFile: File): PluginConfig {
+        val config = if (!configFile.exists()) {
+            PluginConfig(
                 pluginId = descriptor.pluginId,
-                executionMode = descriptor.defaultExecutionMode
+                runtimeMode = descriptor.defaultRuntimeMode
             )
+        } else {
+            runCatching {
+                json.decodeFromString<PluginConfig>(configFile.readText())
+            }.getOrElse { error ->
+                logger.warn("Failed to load config for ${descriptor.pluginId}: ${error.message}")
+                throw IllegalArgumentException("Invalid config for ${descriptor.pluginId}", error)
+            }
         }
 
-        return runCatching {
-            json.decodeFromString<PluginRuntimeConfig>(configFile.readText())
-        }.getOrElse { error ->
-            logger.warn("Failed to load runtime config for ${descriptor.pluginId}: ${error.message}")
-            PluginRuntimeConfig(
-                pluginId = descriptor.pluginId,
-                executionMode = descriptor.defaultExecutionMode
-            )
-        }
+        return config
+            .copy(pluginId = config.pluginId.ifBlank { descriptor.pluginId })
+            .also { validatePluginConfig(descriptor, it) }
     }
+}
+
+fun validatePluginConfig(descriptor: PluginDescriptor, config: PluginConfig) {
+    require(config.pluginId == descriptor.pluginId) {
+        "Config pluginId ${config.pluginId} does not match descriptor pluginId ${descriptor.pluginId}"
+    }
+    require(config.runtimeMode in descriptor.supportedRuntimeModes) {
+        "Plugin ${descriptor.pluginId} does not support runtime mode ${config.runtimeMode}"
+    }
+    require(config.startupTimeoutMs > 0) { "startupTimeoutMs must be > 0" }
+    require(config.callTimeoutMs > 0) { "callTimeoutMs must be > 0" }
+    require(config.stopTimeoutMs > 0) { "stopTimeoutMs must be > 0" }
+    require(config.healthCheckIntervalMs > 0) { "healthCheckIntervalMs must be > 0" }
+    require(config.maxConcurrentCalls > 0) { "maxConcurrentCalls must be > 0" }
+    require(config.eventLogRingBufferSize > 0) { "eventLogRingBufferSize must be > 0" }
+    require(config.criticalEventQueueSize > 0) { "criticalEventQueueSize must be > 0" }
+    require(config.reload.debounceMs >= 0) { "reload.debounceMs must be >= 0" }
 }

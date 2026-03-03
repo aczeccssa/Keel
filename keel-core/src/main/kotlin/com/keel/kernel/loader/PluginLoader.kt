@@ -1,6 +1,6 @@
 package com.keel.kernel.loader
 
-import com.keel.kernel.plugin.KPlugin
+import com.keel.kernel.plugin.KeelPlugin
 
 /**
  * Discovers and loads plugins dynamically at runtime.
@@ -18,9 +18,9 @@ interface PluginLoader {
     /**
      * Load a discovered plugin into the runtime.
      * @param discovered Plugin metadata to load
-     * @return Loaded KPlugin instance
+     * @return Loaded unified plugin instance
      */
-    suspend fun loadPlugin(discovered: DiscoveredPlugin): KPlugin
+    suspend fun loadPlugin(discovered: DiscoveredPlugin): KeelPlugin
 
     /**
      * Unload a plugin from the runtime.
@@ -31,9 +31,9 @@ interface PluginLoader {
     /**
      * Reload a plugin (unload and load again).
      * @param pluginId ID of the plugin to reload
-     * @return Reloaded KPlugin instance
+     * @return Reloaded unified plugin instance
      */
-    suspend fun reloadPlugin(pluginId: String): KPlugin?
+    suspend fun reloadPlugin(pluginId: String): KeelPlugin?
 }
 
 /**
@@ -45,6 +45,7 @@ data class DiscoveredPlugin(
     val mainClass: String,
     val jarPath: String,
     val dependencies: List<String> = emptyList(),
+    val artifactLastModifiedMs: Long,
+    val artifactChecksum: String,
     val pluginClassLoader: ClassLoader? = null
 )
-

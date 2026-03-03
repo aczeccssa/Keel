@@ -3,13 +3,12 @@ package com.keel.kernel.config
 import com.keel.kernel.loader.DefaultPluginLoader
 import com.keel.kernel.logging.KeelLoggerService
 import com.keel.kernel.logging.LogLevel
-import com.keel.kernel.plugin.HybridPluginManager
-import com.keel.kernel.plugin.KPlugin
-import com.keel.kernel.plugin.KeelPluginV2
+import com.keel.kernel.plugin.KeelPlugin
+import com.keel.kernel.plugin.UnifiedPluginManager
 import com.keel.kernel.routing.GatewayInterceptor
 import com.keel.kernel.routing.docRoutes
-import com.keel.kernel.routing.hybridSystemRoutes
 import com.keel.kernel.routing.logRoutes
+import com.keel.kernel.routing.unifiedSystemRoutes
 import com.lestere.opensource.logger.SoulLoggerPlugin
 import io.ktor.serialization.kotlinx.json.json
 import io.ktor.server.application.Application
@@ -28,11 +27,11 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import org.koin.core.Koin
 import org.koin.core.KoinApplication
 import org.koin.core.context.startKoin
-import java.util.concurrent.CopyOnWriteArrayList
 
 class Kernel(
     private val koin: Koin,
@@ -41,43 +40,46 @@ class Kernel(
     private val logger = KeelLoggerService.getLogger("Kernel")
     private val kernelScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val pluginLoader = DefaultPluginLoader()
-    private val pluginManager = HybridPluginManager()
+    private val pluginManager = UnifiedPluginManager(koin)
+    private val pluginLifecycleHotReloadAdapter = PluginLifecycleHotReloadAdapter(pluginManager)
     private val gatewayInterceptor = GatewayInterceptor(pluginManager)
-    private val legacyPlugins = CopyOnWriteArrayList<KPlugin>()
 
     private val configHotReloader: ConfigHotReloader by lazy {
         ConfigHotReloader.Builder()
             .watchConfigDir(KeelConstants.CONFIG_DIR)
+            .watchAdditionalDir("${KeelConstants.CONFIG_DIR}/plugins")
             .apply {
                 if (enablePluginHotReload) {
                     watchPluginDir(KeelConstants.PLUGINS_DIR)
                 }
             }
             .onConfigChange { event ->
-                logger.info("Config changed: ${event.fileName} (${event.type})")
+                kernelScope.launch {
+                    runCatching {
+                        pluginLifecycleHotReloadAdapter.handleConfigChange(event)
+                    }.onFailure { error ->
+                        logger.warn("Config-triggered lifecycle update failed for ${event.fileName}: ${error.message}")
+                    }
+                }
             }
             .onPluginChange { event ->
-                logger.info("Plugin file change observed for ${event.pluginId} (${event.type}); isolated hot reload is not supported in V1")
+                kernelScope.launch {
+                    runCatching {
+                        pluginLifecycleHotReloadAdapter.handlePluginChange(event)
+                    }.onFailure { error ->
+                        logger.warn("Plugin-triggered lifecycle update failed for ${event.pluginId}: ${error.message}")
+                    }
+                }
             }
             .build()
     }
 
-    fun registerPlugin(plugin: KeelPluginV2): Kernel {
+    fun registerPlugin(plugin: KeelPlugin): Kernel {
         pluginManager.registerPlugin(plugin)
         return this
     }
 
-    fun registerPlugin(plugin: KPlugin): Kernel {
-        legacyPlugins += plugin
-        logger.warn("Registered legacy plugin ${plugin.pluginId}; legacy KPlugin routing is no longer supported by Kernel V2")
-        return this
-    }
-
     fun run(port: Int = 8080) {
-        require(legacyPlugins.isEmpty()) {
-            "Legacy KPlugin registration is no longer supported by Kernel.run(); migrate to KeelPluginV2"
-        }
-
         embeddedServer(Netty, port = port) {
             install(ContentNegotiation) {
                 json(Json {
@@ -97,7 +99,7 @@ class Kernel(
 
             routing {
                 pluginManager.mountRoutes(this)
-                hybridSystemRoutes(pluginManager, pluginLoader)
+                unifiedSystemRoutes(pluginManager, pluginLoader)
                 logRoutes()
                 docRoutes()
                 staticResources("/", "static")
@@ -143,20 +145,15 @@ class Kernel(
 
 class KernelBuilder {
     private var koinConfig: (KoinApplication.() -> Unit)? = null
-    private val v2Plugins = mutableListOf<KeelPluginV2>()
-    private val legacyPlugins = mutableListOf<KPlugin>()
+    private val plugins = mutableListOf<KeelPlugin>()
     private var enablePluginHotReload: Boolean = ConfigHotReloader.isDevelopmentMode()
 
     fun koin(config: KoinApplication.() -> Unit) {
         koinConfig = config
     }
 
-    fun plugin(plugin: KeelPluginV2) {
-        v2Plugins += plugin
-    }
-
-    fun plugin(plugin: KPlugin) {
-        legacyPlugins += plugin
+    fun plugin(plugin: KeelPlugin) {
+        plugins += plugin
     }
 
     fun enablePluginHotReload(enabled: Boolean) {
@@ -166,8 +163,7 @@ class KernelBuilder {
     fun build(): Kernel {
         val koin = startKoin(koinConfig ?: {}).koin
         val kernel = Kernel(koin, enablePluginHotReload)
-        v2Plugins.forEach { kernel.registerPlugin(it) }
-        legacyPlugins.forEach { kernel.registerPlugin(it) }
+        plugins.forEach { kernel.registerPlugin(it) }
         return kernel
     }
 }

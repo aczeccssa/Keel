@@ -60,20 +60,24 @@ plugins/sample-hello     Example plugin (Hello World)
 plugins/sample-dbdemo    Example plugin (CRUD + H2 in-memory)
 ```
 
-## Plugin Development (KeelPluginV2)
+## Plugin Development (KeelPlugin)
 
-Create a plugin by implementing `KeelPluginV2` and declaring endpoints:
+Create a plugin by implementing `KeelPlugin` and declaring endpoints:
 
 ```kotlin
-class MyPlugin : KeelPluginV2 {
+class MyPlugin : KeelPlugin {
     override val descriptor = PluginDescriptor(
         pluginId = "myplugin",
         version = "1.0.0",
         displayName = "My Plugin"
     )
 
-    override suspend fun onInit(context: PluginInitContextV2) {
+    override suspend fun onInit(context: PluginInitContext) {
         // init resources
+    }
+
+    override suspend fun onStart(context: PluginRuntimeContext) {
+        // start background work if needed
     }
 
     override fun endpoints() = pluginEndpoints(descriptor.pluginId) {
@@ -82,7 +86,11 @@ class MyPlugin : KeelPluginV2 {
         }
     }
 
-    override suspend fun onStop() {
+    override suspend fun onStop(context: PluginRuntimeContext) {
+        // stop background work
+    }
+
+    override suspend fun onDispose(context: PluginRuntimeContext) {
         // cleanup
     }
 }
@@ -116,9 +124,13 @@ System management endpoints are mounted at `/api/_system`:
 
 - `GET /api/_system/plugins` list plugins
 - `GET /api/_system/plugins/{pluginId}` plugin details
+- `GET /api/_system/plugins/{pluginId}/health` plugin runtime health
+- `POST /api/_system/plugins/{pluginId}/start` start a plugin
+- `POST /api/_system/plugins/{pluginId}/stop` stop a plugin
+- `POST /api/_system/plugins/{pluginId}/dispose` dispose a plugin
+- `POST /api/_system/plugins/{pluginId}/reload` reload a plugin generation
+- `POST /api/_system/plugins/{pluginId}/replace` replace a plugin artifact
 - `POST /api/_system/plugins/discover` discover plugins under `plugins/`
-- `POST /api/_system/plugins/{pluginId}/load` load a discovered plugin
-- `POST /api/_system/plugins/{pluginId}/unload` unload a dynamic plugin
 - `GET /api/_system/docs` Swagger UI
 - `GET /api/_system/docs/openapi.json` OpenAPI spec
 
@@ -132,7 +144,6 @@ System management endpoints are mounted at `/api/_system`:
 
 ## Notes
 
-- Legacy `KPlugin` is still present, but `Kernel.run()` only supports `KeelPluginV2` for routing.
 - OpenAPI metadata is collected via `@KeelApi` and `@KeelApiPlugin` annotations.
 
 ## Contributing

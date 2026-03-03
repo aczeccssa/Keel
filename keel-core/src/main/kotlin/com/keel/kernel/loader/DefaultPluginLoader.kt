@@ -1,11 +1,13 @@
 package com.keel.kernel.loader
 
 import com.keel.kernel.config.KeelConstants
-import com.keel.kernel.plugin.KPlugin
 import com.keel.kernel.logging.KeelLoggerService
+import com.keel.kernel.plugin.KeelPlugin
 import java.io.File
+import java.io.FileInputStream
 import java.net.URL
 import java.net.URLClassLoader
+import java.security.MessageDigest
 import java.util.ServiceLoader
 import java.util.concurrent.ConcurrentHashMap
 import java.util.jar.JarFile
@@ -22,7 +24,7 @@ class DefaultPluginLoader : PluginLoader {
 
     private val logger = KeelLoggerService.getLogger("PluginLoader")
 
-    private val loadedPlugins = ConcurrentHashMap<String, KPlugin>()
+    private val loadedPlugins = ConcurrentHashMap<String, KeelPlugin>()
     private val pluginClassLoaders = ConcurrentHashMap<String, ClassLoader>()
     private val discoveredPlugins = ConcurrentHashMap<String, DiscoveredPlugin>()
 
@@ -67,6 +69,12 @@ class DefaultPluginLoader : PluginLoader {
                 return null
             }
 
+            if (!isUnifiedPluginArtifact(jar, jarFile, mainClass)) {
+                logger.warn("Ignoring legacy plugin artifact ${jarFile.name}: main class does not expose KeelPlugin")
+                jar.close()
+                return null
+            }
+
             jar.close()
 
             val discovered = DiscoveredPlugin(
@@ -74,7 +82,9 @@ class DefaultPluginLoader : PluginLoader {
                 version = version,
                 mainClass = mainClass,
                 jarPath = jarFile.absolutePath,
-                dependencies = dependencies
+                dependencies = dependencies,
+                artifactLastModifiedMs = jarFile.lastModified(),
+                artifactChecksum = computeSha256(jarFile)
             )
 
             discoveredPlugins[pluginId] = discovered
@@ -86,7 +96,7 @@ class DefaultPluginLoader : PluginLoader {
         }
     }
 
-    override suspend fun loadPlugin(discovered: DiscoveredPlugin): KPlugin {
+    override suspend fun loadPlugin(discovered: DiscoveredPlugin): KeelPlugin {
         // Use putIfAbsent for atomic check-then-act
         loadedPlugins[discovered.pluginId]?.let {
             logger.warn("Plugin ${discovered.pluginId} already loaded")
@@ -152,9 +162,24 @@ class DefaultPluginLoader : PluginLoader {
         return resolved
     }
 
-    private fun loadViaSpi(classLoader: ClassLoader, discovered: DiscoveredPlugin): KPlugin? {
+    private fun isUnifiedPluginArtifact(jar: JarFile, jarFile: File, mainClass: String): Boolean {
+        if (jar.getEntry("META-INF/services/${KeelPlugin::class.java.name}") != null) {
+            return true
+        }
+        return runCatching {
+            URLClassLoader(arrayOf(jarFile.toURI().toURL()), this::class.java.classLoader).use { classLoader ->
+                val clazz = classLoader.loadClass(mainClass)
+                KeelPlugin::class.java.isAssignableFrom(clazz)
+            }
+        }.getOrElse { error ->
+            logger.debug("Unable to validate unified plugin artifact ${jarFile.name}: ${error.message}")
+            false
+        }
+    }
+
+    private fun loadViaSpi(classLoader: ClassLoader, discovered: DiscoveredPlugin): KeelPlugin? {
         return try {
-            val serviceLoader = ServiceLoader.load(KPlugin::class.java, classLoader)
+            val serviceLoader = ServiceLoader.load(KeelPlugin::class.java, classLoader)
             serviceLoader.firstOrNull()
         } catch (e: Exception) {
             logger.debug("No SPI plugin found for ${discovered.pluginId}: ${e.message}")
@@ -162,12 +187,16 @@ class DefaultPluginLoader : PluginLoader {
         }
     }
 
-    private fun loadViaMainClass(classLoader: ClassLoader, discovered: DiscoveredPlugin): KPlugin? {
+    private fun loadViaMainClass(classLoader: ClassLoader, discovered: DiscoveredPlugin): KeelPlugin? {
         return try {
             val clazz = classLoader.loadClass(discovered.mainClass)
+            if (!KeelPlugin::class.java.isAssignableFrom(clazz)) {
+                logger.warn("Skipping non-unified plugin artifact ${discovered.pluginId}: ${discovered.mainClass} does not implement KeelPlugin")
+                return null
+            }
             val plugin = clazz.getDeclaredConstructor().newInstance()
             @Suppress("UNCHECKED_CAST")
-            plugin as? KPlugin
+            plugin as? KeelPlugin
         } catch (e: Exception) {
             logger.error("Failed to load main class ${discovered.mainClass}: ${e.message}", e)
             null
@@ -197,28 +226,50 @@ class DefaultPluginLoader : PluginLoader {
         logger.info("Unloaded plugin: $pluginId")
     }
 
-    override suspend fun reloadPlugin(pluginId: String): KPlugin? {
+    override suspend fun reloadPlugin(pluginId: String): KeelPlugin? {
         val discovered = discoveredPlugins[pluginId] ?: run {
             logger.warn("Plugin $pluginId not found for reload")
             return null
         }
 
         unloadPlugin(pluginId)
-        return loadPlugin(discovered)
+        val refreshedDiscovered = discoverPlugin(File(discovered.jarPath)) ?: return null
+        return loadPlugin(refreshedDiscovered)
     }
 
     /**
      * Get all loaded plugins.
      */
-    fun getLoadedPlugins(): Map<String, KPlugin> = loadedPlugins.toMap()
+    fun getLoadedPlugins(): Map<String, KeelPlugin> = loadedPlugins.toMap()
 
     /**
      * Get a specific loaded plugin.
      */
-    fun getPlugin(pluginId: String): KPlugin? = loadedPlugins[pluginId]
+    fun getPlugin(pluginId: String): KeelPlugin? = loadedPlugins[pluginId]
 
     /**
      * Get all discovered plugins.
      */
     fun getDiscoveredPlugins(): Map<String, DiscoveredPlugin> = discoveredPlugins.toMap()
+
+    fun hasArtifactChanged(pluginId: String): Boolean {
+        val discovered = discoveredPlugins[pluginId] ?: return false
+        val jarFile = File(discovered.jarPath)
+        if (!jarFile.exists()) return true
+        return jarFile.lastModified() != discovered.artifactLastModifiedMs ||
+            computeSha256(jarFile) != discovered.artifactChecksum
+    }
+
+    private fun computeSha256(file: File): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+        FileInputStream(file).use { input ->
+            val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+            while (true) {
+                val read = input.read(buffer)
+                if (read <= 0) break
+                digest.update(buffer, 0, read)
+            }
+        }
+        return digest.digest().joinToString("") { "%02x".format(it) }
+    }
 }

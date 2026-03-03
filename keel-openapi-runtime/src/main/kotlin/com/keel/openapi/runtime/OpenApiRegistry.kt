@@ -2,6 +2,7 @@ package com.keel.openapi.runtime
 
 import io.ktor.http.HttpMethod
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicLong
 import kotlin.reflect.KType
 
 data class OpenApiOperation(
@@ -20,9 +21,13 @@ data class OpenApiOperation(
 
 object OpenApiRegistry {
     private val operations = ConcurrentHashMap<String, OpenApiOperation>()
+    private val topologyVersion = AtomicLong(0)
 
     fun register(operation: OpenApiOperation) {
-        operations[operation.key()] = operation
+        val previous = operations.put(operation.key(), operation)
+        if (previous != operation) {
+            topologyVersion.incrementAndGet()
+        }
     }
 
     fun operations(): List<OpenApiOperation> {
@@ -34,8 +39,13 @@ object OpenApiRegistry {
     fun hasOperations(): Boolean = operations.isNotEmpty()
 
     fun clear() {
-        operations.clear()
+        if (operations.isNotEmpty()) {
+            operations.clear()
+            topologyVersion.incrementAndGet()
+        }
     }
+
+    fun topologyVersion(): Long = topologyVersion.get()
 
     private fun OpenApiOperation.key(): String = "${method.value} $path"
 }

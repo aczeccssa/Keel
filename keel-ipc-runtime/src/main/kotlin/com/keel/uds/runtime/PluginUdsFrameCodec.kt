@@ -1,4 +1,4 @@
-package com.keel.ipc.runtime
+package com.keel.uds.runtime
 
 import java.io.EOFException
 import java.io.InputStream
@@ -8,12 +8,12 @@ import java.nio.ByteOrder
 import java.nio.channels.Channels
 import java.nio.channels.SocketChannel
 
-object PluginFrameCodec {
-    private const val MAX_FRAME_SIZE = 2 * 1024 * 1024
-
+object PluginUdsFrameCodec {
     fun write(socketChannel: SocketChannel, payload: String) {
         val bytes = payload.toByteArray(Charsets.UTF_8)
-        require(bytes.size <= MAX_FRAME_SIZE) { "IPC frame too large: ${bytes.size}" }
+        require(bytes.size <= PluginUdsLimits.MAX_FRAME_BYTES) {
+            "UDS frame too large: ${bytes.size}"
+        }
         val header = ByteBuffer.allocate(Int.SIZE_BYTES)
             .order(ByteOrder.BIG_ENDIAN)
             .putInt(bytes.size)
@@ -36,7 +36,7 @@ object PluginFrameCodec {
         val sizeBuffer = ByteArray(Int.SIZE_BYTES)
         readFully(input, sizeBuffer)
         val size = ByteBuffer.wrap(sizeBuffer).order(ByteOrder.BIG_ENDIAN).int
-        require(size in 0..MAX_FRAME_SIZE) { "Invalid IPC frame size: $size" }
+        require(size in 0..PluginUdsLimits.MAX_FRAME_BYTES) { "Invalid UDS frame size: $size" }
         val body = ByteArray(size)
         readFully(input, body)
         return body.toString(Charsets.UTF_8)
@@ -44,7 +44,9 @@ object PluginFrameCodec {
 
     fun write(output: OutputStream, payload: String) {
         val bytes = payload.toByteArray(Charsets.UTF_8)
-        require(bytes.size <= MAX_FRAME_SIZE) { "IPC frame too large: ${bytes.size}" }
+        require(bytes.size <= PluginUdsLimits.MAX_FRAME_BYTES) {
+            "UDS frame too large: ${bytes.size}"
+        }
         val header = ByteBuffer.allocate(Int.SIZE_BYTES)
             .order(ByteOrder.BIG_ENDIAN)
             .putInt(bytes.size)
@@ -59,7 +61,7 @@ object PluginFrameCodec {
         while (offset < target.size) {
             val read = input.read(target, offset, target.size - offset)
             if (read < 0) {
-                throw EOFException("Unexpected EOF while reading IPC frame")
+                throw EOFException("Unexpected EOF while reading UDS frame")
             }
             offset += read
         }

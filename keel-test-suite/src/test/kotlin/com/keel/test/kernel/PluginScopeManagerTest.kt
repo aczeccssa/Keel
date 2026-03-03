@@ -1,11 +1,15 @@
 package com.keel.test.kernel
 
 import com.keel.kernel.di.PluginScopeManager
+import com.keel.kernel.plugin.PluginConfig
 import kotlinx.coroutines.test.runTest
+import java.util.concurrent.atomic.AtomicInteger
 import org.koin.core.context.startKoin
 import org.koin.core.context.stopKoin
+import org.koin.dsl.module
 import kotlin.test.AfterTest
 import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 
 class PluginScopeManagerTest {
@@ -21,13 +25,36 @@ class PluginScopeManagerTest {
     }
 
     @Test
-    fun createAndCloseScope() = runTest {
-        val koin = startKoin {}.also { koinStarted = true }.koin
+    fun createScopeLoadsPrivateModulesAndRunsTeardownOnClose() = runTest {
+        val koin = startKoin {
+            modules(
+                module {
+                    single { SharedDependency("kernel") }
+                }
+            )
+        }.also { koinStarted = true }.koin
         val manager = PluginScopeManager(koin)
+        val teardownCount = AtomicInteger(0)
 
-        val scope = manager.createScope("plug-1")
-        assertNotNull(scope)
+        val scopeHandle = manager.createScope(
+            pluginId = "plug-1",
+            config = PluginConfig(pluginId = "plug-1"),
+            modules = listOf(
+                module {
+                    single { PrivateDependency("plug-1-private") }
+                }
+            )
+        )
+        scopeHandle.teardownRegistry.register { teardownCount.incrementAndGet() }
 
+        assertNotNull(scopeHandle)
+        assertEquals("plug-1-private", scopeHandle.privateScope.get<PrivateDependency>().id)
+        assertEquals("kernel", koin.get<SharedDependency>().id)
         manager.closeScope("plug-1")
+        assertEquals(1, teardownCount.get())
     }
+
+    private data class SharedDependency(val id: String)
+
+    private data class PrivateDependency(val id: String)
 }
