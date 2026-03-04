@@ -51,8 +51,8 @@ class UnifiedPluginManagerTest {
         val elapsedMs = measureTimeMillis {
             coroutineScope {
                 awaitAll(
-                    async { manager.enablePlugin("plugin-a") },
-                    async { manager.enablePlugin("plugin-b") }
+                    async { manager.startPlugin("plugin-a") },
+                    async { manager.startPlugin("plugin-b") }
                 )
             }
         }
@@ -81,8 +81,8 @@ class UnifiedPluginManagerTest {
 
         manager.registerPlugin(pluginA)
         manager.registerPlugin(pluginB)
-        manager.enablePlugin("plugin-a")
-        manager.enablePlugin("plugin-b")
+        manager.startPlugin("plugin-a")
+        manager.startPlugin("plugin-b")
 
         assertNotEquals(pluginA.startedPrivateIds.single(), pluginB.startedPrivateIds.single())
         assertEquals(pluginA.sharedKernelInstanceIds.single(), pluginB.sharedKernelInstanceIds.single())
@@ -101,13 +101,13 @@ class UnifiedPluginManagerTest {
         val plugin = RecordingScopePlugin("plugin-a")
 
         manager.registerPlugin(plugin)
-        manager.enablePlugin("plugin-a")
+        manager.startPlugin("plugin-a")
         val firstPrivateId = plugin.startedPrivateIds.single()
 
-        manager.disablePlugin("plugin-a")
+        manager.disposePlugin("plugin-a")
         assertEquals(1, plugin.teardownCount.get())
 
-        manager.enablePlugin("plugin-a")
+        manager.startPlugin("plugin-a")
         val secondPrivateId = plugin.startedPrivateIds.last()
         assertNotEquals(firstPrivateId, secondPrivateId)
     }
@@ -223,10 +223,10 @@ class UnifiedPluginManagerTest {
         val plugin = RecordingScopePlugin("plugin-a")
 
         manager.registerPlugin(plugin)
-        manager.enablePlugin("plugin-a")
+        manager.startPlugin("plugin-a")
         val leakedRef = requireNotNull(plugin.privateReferences.singleOrNull())
 
-        manager.disablePlugin("plugin-a")
+        manager.disposePlugin("plugin-a")
         repeat(20) {
             if (leakedRef.get() == null) return@repeat
             System.gc()
@@ -250,7 +250,7 @@ class UnifiedPluginManagerTest {
             delay(initDelayMs)
         }
 
-        override fun endpoints(): List<PluginEndpointDefinition<*, *>> = emptyList()
+        override fun endpoints(): List<PluginRouteDefinition> = emptyList()
     }
 
     private class RecordingScopePlugin(
@@ -281,7 +281,7 @@ class UnifiedPluginManagerTest {
             }
         )
 
-        override fun endpoints(): List<PluginEndpointDefinition<*, *>> = emptyList()
+        override fun endpoints(): List<PluginRouteDefinition> = emptyList()
     }
 
     private class SharedKernelDependency

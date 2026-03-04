@@ -3,6 +3,7 @@ package com.keel.samples
 import com.keel.kernel.config.ConfigHotReloader
 import com.keel.kernel.config.KeelConstants
 import com.keel.kernel.config.runKernel
+import com.keel.samples.observability.ObservabilityPlugin
 import com.keel.samples.dbdemo.DbDemoPlugin
 import com.keel.samples.helloworld.HelloWorldPlugin
 import java.io.File
@@ -65,14 +66,17 @@ fun main() {
     println("  Swagger UI  : $baseUrl/api/_system/docs/")
     println("  OpenAPI JSON: $baseUrl/api/_system/docs/openapi.json")
     println("  System API  : $baseUrl/api/_system/plugins")
+    println("  Observe API : $baseUrl/api/plugins/observability/topology")
+    println("  Observe UI  : $baseUrl/api/plugins/observability/ui")
     println("  Plugin API  : $baseUrl/api/plugins/helloworld")
     println("  DB Demo API : $baseUrl/api/plugins/dbdemo/notes")
     println("========================================")
 
     // Build and run the Kernel - framework handles everything automatically
-    runKernel(port = port) {
+    runKernel(port) {
         plugin(HelloWorldPlugin())
         plugin(DbDemoPlugin())
+        plugin(ObservabilityPlugin())
 
         // Optional: Disable hot reload even in development mode
         enablePluginHotReload(isDev)

@@ -115,7 +115,7 @@ class TestPlugin : KeelPlugin {
         displayName = "test-plugin"
     )
 
-    override fun endpoints(): List<PluginEndpointDefinition<*, *>> = emptyList()
+    override fun endpoints(): List<PluginRouteDefinition> = emptyList()
 }
 
 class LegacyTestPlugin

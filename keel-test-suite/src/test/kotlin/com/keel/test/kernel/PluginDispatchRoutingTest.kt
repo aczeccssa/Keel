@@ -51,7 +51,7 @@ class PluginDispatchRoutingTest {
                 manager.mountRoutes(this)
             }
             kotlinx.coroutines.runBlocking {
-                manager.enablePlugin("timeout-plugin")
+                manager.startPlugin("timeout-plugin")
             }
         }
 
@@ -73,7 +73,7 @@ class PluginDispatchRoutingTest {
                 manager.mountRoutes(this)
             }
             kotlinx.coroutines.runBlocking {
-                manager.enablePlugin("payload-plugin")
+                manager.startPlugin("payload-plugin")
             }
         }
 

@@ -1,6 +1,8 @@
 package com.keel.kernel.plugin
 
 import io.ktor.http.HttpMethod
+import io.ktor.server.sse.ServerSSESession
+import io.ktor.sse.ServerSentEvent
 import kotlin.reflect.KType
 import kotlin.reflect.typeOf
 import org.koin.core.module.Module
@@ -119,18 +121,22 @@ interface KeelPlugin {
 
     fun modules(): List<Module> = emptyList()
 
-    fun endpoints(): List<PluginEndpointDefinition<*, *>>
+    fun endpoints(): List<PluginRouteDefinition>
+}
+
+sealed interface PluginRouteDefinition {
+    val path: String
 }
 
 data class PluginEndpointDefinition<Req : Any, Res : Any>(
     val endpointId: String,
     val method: HttpMethod,
-    val path: String,
+    override val path: String,
     val requestType: KType?,
     val responseType: KType,
     val executionPolicy: EndpointExecutionPolicy = EndpointExecutionPolicy(),
     val handler: suspend PluginRequestContext.(Req?) -> PluginResult<Res>
-) {
+) : PluginRouteDefinition {
     @Suppress("UNCHECKED_CAST")
     suspend fun execute(context: PluginRequestContext, request: Any?): PluginResult<Any?> {
         val result = (handler as suspend PluginRequestContext.(Any?) -> PluginResult<Any?>)
@@ -139,17 +145,37 @@ data class PluginEndpointDefinition<Req : Any, Res : Any>(
     }
 }
 
+data class PluginSseDefinition(
+    override val path: String,
+    val handler: suspend PluginSseSession.() -> Unit
+) : PluginRouteDefinition
+
+data class PluginStaticResourceDefinition(
+    override val path: String,
+    val basePackage: String,
+    val index: String? = null
+) : PluginRouteDefinition
+
+class PluginSseSession internal constructor(
+    val request: PluginRequestContext,
+    private val session: ServerSSESession
+) {
+    suspend fun send(event: ServerSentEvent) {
+        session.send(event)
+    }
+}
+
 fun pluginEndpoints(
     pluginId: String,
     block: PluginEndpointDsl.() -> Unit
-): List<PluginEndpointDefinition<*, *>> = PluginEndpointDsl(pluginId).apply(block).build()
+): List<PluginRouteDefinition> = PluginEndpointDsl(pluginId).apply(block).build()
 
 class PluginEndpointDsl internal constructor(pluginId: String) {
     @PublishedApi
     internal val pluginIdValue: String = pluginId
 
     @PublishedApi
-    internal val endpoints = mutableListOf<PluginEndpointDefinition<*, *>>()
+    internal val endpoints = mutableListOf<PluginRouteDefinition>()
 
     inline fun <reified Res : Any> get(
         path: String = "",
@@ -231,7 +257,27 @@ class PluginEndpointDsl internal constructor(pluginId: String) {
         )
     }
 
-    fun build(): List<PluginEndpointDefinition<*, *>> = endpoints.toList()
+    fun sse(
+        path: String,
+        handler: suspend PluginSseSession.() -> Unit
+    ) {
+        endpoints += PluginSseDefinition(path = normalizePath(path), handler = handler)
+    }
+
+    fun staticResources(
+        path: String,
+        basePackage: String,
+        index: String? = null
+    ) {
+        require(basePackage.isNotBlank()) { "basePackage must not be blank" }
+        endpoints += PluginStaticResourceDefinition(
+            path = normalizePath(path),
+            basePackage = basePackage,
+            index = index
+        )
+    }
+
+    fun build(): List<PluginRouteDefinition> = endpoints.toList()
 
     @PublishedApi
     internal fun normalizePath(path: String): String {

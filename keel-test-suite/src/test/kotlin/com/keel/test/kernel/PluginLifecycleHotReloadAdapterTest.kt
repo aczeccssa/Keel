@@ -99,7 +99,7 @@ class PluginLifecycleHotReloadAdapterTest {
 
         override suspend fun onStop(context: PluginRuntimeContext) = Unit
 
-        override fun endpoints(): List<PluginEndpointDefinition<*, *>> = pluginEndpoints(descriptor.pluginId) {
+        override fun endpoints(): List<PluginRouteDefinition> = pluginEndpoints(descriptor.pluginId) {
             get<String> {
                 PluginResult(body = "ok")
             }

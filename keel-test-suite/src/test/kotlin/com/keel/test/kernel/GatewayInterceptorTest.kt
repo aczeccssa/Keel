@@ -80,7 +80,7 @@ class GatewayInterceptorTest {
             }
 
             kotlinx.coroutines.runBlocking {
-                manager.enablePlugin(plugin.descriptor.pluginId)
+                manager.startPlugin(plugin.descriptor.pluginId)
             }
         }
 

@@ -30,13 +30,18 @@ internal val runtimeJson = Json {
 
 internal object PluginDocumentationLookup {
     private val declaredOperations: Map<String, OpenApiDeclaredOperation> by lazy {
-        OpenApiAggregator.discoverDeclaredOperations().associateBy { key(it.method, it.path) }
+        OpenApiAggregator.discoverDeclaredOperations().associateBy { operationKey(it.method, it.path) }
     }
 
-    fun find(method: HttpMethod, path: String): OpenApiDeclaredOperation? = declaredOperations[key(method, path)]
+    fun find(method: HttpMethod, path: String): OpenApiDeclaredOperation? = declaredOperations[operationKey(method, path)]
 
-    private fun key(method: HttpMethod, path: String): String = "${method.value} $path"
+    fun declaredOperationsForPlugin(pluginId: String): List<OpenApiDeclaredOperation> {
+        val prefix = "/api/plugins/$pluginId"
+        return declaredOperations.values.filter { it.path == prefix || it.path.startsWith("$prefix/") }
+    }
 }
+
+internal fun operationKey(method: HttpMethod, path: String): String = "${method.value} $path"
 
 internal fun registerPluginOperation(pluginId: String, endpoint: PluginEndpointDefinition<*, *>) {
     val fullPath = fullPluginPath(pluginId, endpoint.path)

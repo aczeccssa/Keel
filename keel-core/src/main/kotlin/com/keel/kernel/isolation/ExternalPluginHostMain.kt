@@ -2,6 +2,7 @@ package com.keel.kernel.isolation
 
 import com.keel.kernel.di.PluginScopeManager
 import com.keel.kernel.logging.KeelLoggerService
+import com.keel.kernel.observability.ObservabilityTracing
 import com.keel.kernel.plugin.KeelPlugin
 import com.keel.kernel.plugin.PluginApiException
 import com.keel.kernel.plugin.PluginConfig
@@ -25,6 +26,7 @@ import com.keel.uds.runtime.PluginEventQueueOverflowEvent
 import com.keel.uds.runtime.PluginFailureEvent
 import com.keel.uds.runtime.PluginLogEvent
 import com.keel.uds.runtime.PluginReadyEvent
+import com.keel.uds.runtime.PluginTraceEvent
 import com.keel.uds.runtime.PluginRuntimeEvent
 import com.keel.uds.runtime.PluginStoppingEvent
 import com.keel.uds.runtime.PluginUdsFrameCodec
@@ -97,7 +99,9 @@ object ExternalPluginHostMain {
         val config = hostArgs.configPath?.let { PluginConfigLoader.load(plugin.descriptor, it) }
             ?: PluginConfigLoader.load(plugin.descriptor)
         val startedAt = System.currentTimeMillis()
-        val endpoints = plugin.endpoints().associateBy { it.endpointId }
+        val endpoints = plugin.endpoints()
+            .filterIsInstance<com.keel.kernel.plugin.PluginEndpointDefinition<*, *>>()
+            .associateBy { it.endpointId }
         val running = AtomicBoolean(true)
         val inFlightInvokes = AtomicInteger(0)
         val lifecycleState = AtomicReferenceState("STARTING")
@@ -135,6 +139,33 @@ object ExternalPluginHostMain {
             config = config,
             socketPath = hostArgs.eventSocketPath,
             dispatcher = eventDispatcher
+        )
+        val tracing = ObservabilityTracing.initExternal(
+            object : ObservabilityTracing.PluginTraceSink {
+                override fun emitTrace(event: com.keel.kernel.observability.TraceSpanEvent) {
+                    runBlocking {
+                        eventEmitter.emitCritical(
+                            PluginTraceEvent(
+                                pluginId = plugin.descriptor.pluginId,
+                                generation = hostArgs.generation,
+                                timestamp = System.currentTimeMillis(),
+                                messageId = eventEmitter.newMessageId(),
+                                traceId = event.traceId,
+                                spanId = event.spanId,
+                                parentSpanId = event.parentSpanId,
+                                service = "plugin:${plugin.descriptor.pluginId}",
+                                name = event.operation,
+                                startEpochMs = event.startEpochMs,
+                                endEpochMs = event.endEpochMs,
+                                status = event.status,
+                                attributes = event.attributes,
+                                edgeFrom = event.edgeFrom,
+                                edgeTo = event.edgeTo
+                            )
+                        )
+                    }
+                }
+            }
         )
 
         Files.createDirectories(hostArgs.invokeSocketPath.parent)
@@ -206,7 +237,8 @@ object ExternalPluginHostMain {
                                             generation = hostArgs.generation,
                                             endpoints = endpoints,
                                             inFlightInvokes = inFlightInvokes,
-                                            eventEmitter = eventEmitter
+                                            eventEmitter = eventEmitter,
+                                            tracer = tracing.tracer
                                         )
                                     }
                                 }
@@ -333,7 +365,8 @@ object ExternalPluginHostMain {
         generation: Long,
         endpoints: Map<String, com.keel.kernel.plugin.PluginEndpointDefinition<*, *>>,
         inFlightInvokes: AtomicInteger,
-        eventEmitter: PluginEventEmitter
+        eventEmitter: PluginEventEmitter,
+        tracer: io.opentelemetry.api.trace.Tracer
     ) {
         runCatching {
             handleInvokeConnection(
@@ -344,7 +377,8 @@ object ExternalPluginHostMain {
                 generation = generation,
                 endpoints = endpoints,
                 inFlightInvokes = inFlightInvokes,
-                eventEmitter = eventEmitter
+                eventEmitter = eventEmitter,
+                tracer = tracer
             )
         }.onFailure { error ->
             logger.warn("Malformed or failed invoke frame pluginId=${plugin.descriptor.pluginId}: ${error.message}")
@@ -392,7 +426,9 @@ object ExternalPluginHostMain {
                         correlationId = request.messageId,
                         descriptorVersion = plugin.descriptor.version,
                         runtimeMode = PluginRuntimeMode.EXTERNAL_JVM.name,
-                        endpointInventory = plugin.endpoints().map {
+                        endpointInventory = plugin.endpoints()
+                            .filterIsInstance<com.keel.kernel.plugin.PluginEndpointDefinition<*, *>>()
+                            .map {
                             PluginEndpointInventoryItem(it.endpointId, it.method.value, it.path)
                         },
                         accepted = accepted,
@@ -479,7 +515,8 @@ object ExternalPluginHostMain {
         generation: Long,
         endpoints: Map<String, com.keel.kernel.plugin.PluginEndpointDefinition<*, *>>,
         inFlightInvokes: AtomicInteger,
-        eventEmitter: PluginEventEmitter
+        eventEmitter: PluginEventEmitter,
+        tracer: io.opentelemetry.api.trace.Tracer
     ) {
         val payload = PluginUdsFrameCodec.read(channel)
         val request = PluginUdsJson.instance.decodeFromString(InvokeRequest.serializer(), payload)
@@ -547,7 +584,18 @@ object ExternalPluginHostMain {
         }
 
         inFlightInvokes.incrementAndGet()
+        var scope: io.opentelemetry.context.Scope? = null
+        var span: io.opentelemetry.api.trace.Span? = null
         try {
+            val parentContext = ObservabilityTracing.extract(request.traceparent, request.tracestate)
+            span = tracer.spanBuilder("plugin.handle")
+                .setParent(parentContext)
+                .setAttribute("keel.pluginId", plugin.descriptor.pluginId)
+                .setAttribute("keel.jvm", "plugin")
+                .setAttribute("keel.edge.from", "kernel")
+                .setAttribute("keel.edge.to", plugin.descriptor.pluginId)
+                .startSpan()
+            scope = span?.makeCurrent()
             val requestBody = decodeRequestBody(request.bodyJson, endpoint.requestType)
             val context = object : PluginRequestContext {
                 override val pluginId: String = request.pluginId
@@ -666,6 +714,8 @@ object ExternalPluginHostMain {
                 )
             )
         } finally {
+            scope?.close()
+            span?.end()
             inFlightInvokes.decrementAndGet()
         }
     }
@@ -818,6 +868,7 @@ private class PluginEventEmitter(
         is PluginFailureEvent -> PluginUdsJson.instance.encodeToString(PluginFailureEvent.serializer(), event)
         is PluginLogEvent -> PluginUdsJson.instance.encodeToString(PluginLogEvent.serializer(), event)
         is PluginEventQueueOverflowEvent -> PluginUdsJson.instance.encodeToString(PluginEventQueueOverflowEvent.serializer(), event)
+        is PluginTraceEvent -> PluginUdsJson.instance.encodeToString(PluginTraceEvent.serializer(), event)
         else -> {
             logger.warn("Unsupported runtime event type ${event::class.qualifiedName}")
             PluginUdsJson.instance.encodeToString(

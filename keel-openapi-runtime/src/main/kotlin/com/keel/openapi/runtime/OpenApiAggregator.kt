@@ -59,6 +59,7 @@ object OpenApiAggregator {
             val schemaGenerator = OpenApiSchemaGenerator()
             val tags = buildTags(fragments, operations)
             val paths = buildPaths(operations, schemaGenerator)
+            validateSystemTopology(paths.keys)
 
             val specObject = JsonObject(buildMap {
                 put("openapi", JsonPrimitive("3.1.0"))
@@ -132,6 +133,27 @@ object OpenApiAggregator {
 
     internal fun invalidateCache() {
         specCache = null
+    }
+
+    private fun validateSystemTopology(paths: Set<String>) {
+        val allowedPluginPaths = setOf(
+            "/api/_system/plugins",
+            "/api/_system/plugins/discover",
+            "/api/_system/plugins/{pluginId}",
+            "/api/_system/plugins/{pluginId}/health",
+            "/api/_system/plugins/{pluginId}/start",
+            "/api/_system/plugins/{pluginId}/stop",
+            "/api/_system/plugins/{pluginId}/dispose",
+            "/api/_system/plugins/{pluginId}/reload",
+            "/api/_system/plugins/{pluginId}/replace"
+        )
+        val forbidden = paths.filter { path ->
+            if (!path.startsWith("/api/_system/plugins")) return@filter false
+            path !in allowedPluginPaths
+        }
+        if (forbidden.isNotEmpty()) {
+            error("Deprecated system routes detected in OpenAPI spec: ${forbidden.sorted().joinToString()}")
+        }
     }
 
     private fun buildTags(

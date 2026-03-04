@@ -1,6 +1,9 @@
 package com.keel.kernel.isolation
 
 import com.keel.kernel.logging.KeelLoggerService
+import com.keel.kernel.observability.ObservabilityHub
+import com.keel.kernel.observability.ObservabilityTracing
+import com.keel.kernel.observability.TraceSpanEvent
 import com.keel.kernel.plugin.PluginChannelHealth
 import com.keel.kernel.plugin.PluginConfig
 import com.keel.kernel.plugin.PluginDescriptor
@@ -23,6 +26,7 @@ import com.keel.uds.runtime.PluginDrainCompleteEvent
 import com.keel.uds.runtime.PluginEventQueueOverflowEvent
 import com.keel.uds.runtime.PluginFailureEvent
 import com.keel.uds.runtime.PluginLogEvent
+import com.keel.uds.runtime.PluginTraceEvent
 import com.keel.uds.runtime.PluginDisposedEvent
 import com.keel.uds.runtime.PluginReadyEvent
 import com.keel.uds.runtime.PluginRuntimeEvent
@@ -35,6 +39,7 @@ import com.keel.uds.runtime.ShutdownRequest
 import com.keel.uds.runtime.ShutdownResponse
 import io.ktor.server.application.ApplicationCall
 import io.ktor.server.request.path
+import io.opentelemetry.context.Context
 import java.io.BufferedReader
 import java.io.File
 import java.io.InputStreamReader
@@ -82,7 +87,8 @@ class PluginProcessSupervisor(
     private val generation: PluginGeneration,
     private val onStateChange: (PluginProcessState) -> Unit,
     private val onHealthChange: (PluginHealthState) -> Unit,
-    private val onFailure: (PluginFailureRecord) -> Unit = {}
+    private val onFailure: (PluginFailureRecord) -> Unit = {},
+    private val observabilityHub: ObservabilityHub? = null
 ) {
     private val logger = KeelLoggerService.getLogger("PluginProcessSupervisor")
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -191,6 +197,8 @@ class PluginProcessSupervisor(
             return oversizedResponse(call, "Request payload exceeds $maxPayloadBytes bytes")
         }
 
+        val traceContext = call.attributes.getOrNull(ObservabilityTracing.TRACE_CONTEXT_KEY) ?: Context.current()
+        val (traceparent, tracestate) = ObservabilityTracing.inject(traceContext)
         val request = InvokeRequest(
             pluginId = descriptor.pluginId,
             generation = generation.value,
@@ -204,6 +212,8 @@ class PluginProcessSupervisor(
             pathParameters = call.parameters.entries().associate { it.key to it.value.first() },
             queryParameters = call.request.queryParameters.entries().associate { it.key to it.value },
             headers = call.request.headers.entries().associate { it.key to it.value },
+            traceparent = traceparent,
+            tracestate = tracestate,
             bodyJson = bodyJson,
             maxPayloadBytes = maxPayloadBytes,
             allowChunkedTransfer = endpoint.executionPolicy.allowChunkedTransfer
@@ -495,6 +505,28 @@ class PluginProcessSupervisor(
                 if (validateEvent(event)) {
                     lastEventAtEpochMs = event.timestamp
                     droppedLogCount = event.droppedCount
+                }
+            }
+            "plugin-trace-event" -> {
+                val event = PluginUdsJson.instance.decodeFromString(PluginTraceEvent.serializer(), payload)
+                if (validateEvent(event)) {
+                    val durationMs = event.endEpochMs?.let { it - event.startEpochMs }
+                    observabilityHub?.recordSpan(
+                        TraceSpanEvent(
+                            traceId = event.traceId,
+                            spanId = event.spanId,
+                            parentSpanId = event.parentSpanId,
+                            service = event.service,
+                            operation = event.name,
+                            startEpochMs = event.startEpochMs,
+                            endEpochMs = event.endEpochMs,
+                            durationMs = durationMs,
+                            status = event.status,
+                            attributes = event.attributes,
+                            edgeFrom = event.edgeFrom,
+                            edgeTo = event.edgeTo
+                        )
+                    )
                 }
             }
             "plugin-backpressure-event" -> {

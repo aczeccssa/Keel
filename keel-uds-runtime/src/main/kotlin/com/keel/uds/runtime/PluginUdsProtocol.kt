@@ -75,6 +75,8 @@ data class InvokeRequest(
     val pathParameters: Map<String, String>,
     val queryParameters: Map<String, List<String>>,
     val headers: Map<String, List<String>>,
+    val traceparent: String? = null,
+    val tracestate: String? = null,
     val bodyJson: String?,
     val maxPayloadBytes: Long?,
     val allowChunkedTransfer: Boolean
@@ -226,6 +228,27 @@ data class PluginLogEvent(
     val level: String,
     val message: String,
     val droppedCount: Long = 0
+) : PluginRuntimeEvent
+
+@Serializable
+data class PluginTraceEvent(
+    val kind: String = "plugin-trace-event",
+    override val protocolVersion: Int = PLUGIN_UDS_PROTOCOL_VERSION,
+    override val pluginId: String,
+    override val generation: Long,
+    override val timestamp: Long,
+    override val messageId: String,
+    val traceId: String,
+    val spanId: String,
+    val parentSpanId: String? = null,
+    val service: String,
+    val name: String,
+    val startEpochMs: Long,
+    val endEpochMs: Long? = null,
+    val status: String,
+    val attributes: Map<String, String> = emptyMap(),
+    val edgeFrom: String? = null,
+    val edgeTo: String? = null
 ) : PluginRuntimeEvent
 
 @Serializable

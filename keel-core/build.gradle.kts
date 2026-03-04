@@ -43,10 +43,16 @@ dependencies {
     // Micrometer
     implementation(libs.micrometer.core)
 
+    // OpenTelemetry
+    implementation(libs.opentelemetry.api)
+    implementation(libs.opentelemetry.context)
+    implementation(libs.opentelemetry.sdk)
+    implementation(libs.opentelemetry.sdk.trace)
+
     // Internal modules
     implementation(project(":keel-contract"))
     implementation(project(":keel-exposed-starter"))
-    implementation(project(":keel-ipc-runtime"))
+    implementation(project(":keel-uds-runtime"))
     implementation(project(":keel-openapi-annotations"))
     implementation(project(":keel-openapi-runtime"))
     implementation(kotlin("reflect"))

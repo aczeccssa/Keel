@@ -142,6 +142,6 @@ class UnifiedSystemRoutesTest {
 
         override suspend fun onStop(context: PluginRuntimeContext) = Unit
 
-        override fun endpoints(): List<PluginEndpointDefinition<*, *>> = emptyList()
+        override fun endpoints(): List<PluginRouteDefinition> = emptyList()
     }
 }

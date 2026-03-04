@@ -5,9 +5,13 @@ import com.keel.kernel.di.PluginScopeManager
 import com.keel.kernel.isolation.PluginProcessSupervisor
 import com.keel.kernel.isolation.PluginUdsSocketPaths
 import com.keel.kernel.logging.KeelLoggerService
+import com.keel.kernel.observability.ObservabilityHub
+import com.keel.kernel.observability.ObservabilityTracing
+import io.opentelemetry.context.Context
 import io.ktor.http.HttpMethod
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.request.path
+import io.ktor.server.http.content.staticResources
 import io.ktor.server.routing.Route
 import io.ktor.server.routing.Routing
 import io.ktor.server.routing.delete
@@ -15,6 +19,8 @@ import io.ktor.server.routing.get
 import io.ktor.server.routing.post
 import io.ktor.server.routing.put
 import io.ktor.server.routing.route
+import io.ktor.server.sse.sse
+import io.ktor.sse.ServerSentEvent
 import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
@@ -34,7 +40,8 @@ import org.koin.core.scope.Scope
 class UnifiedPluginManager(
     private val kernelKoin: Koin,
     runtimeRoot: File = File("/tmp/keel"),
-    private val currentClasspath: String = System.getProperty("java.class.path")
+    private val currentClasspath: String = System.getProperty("java.class.path"),
+    private val observabilityHub: ObservabilityHub? = null
 ) : PluginAvailability {
     private val logger = KeelLoggerService.getLogger("UnifiedPluginManager")
     private val entries = ConcurrentHashMap<String, ManagedPlugin>()
@@ -81,10 +88,6 @@ class UnifiedPluginManager(
         }
     }
 
-    suspend fun enablePlugin(pluginId: String) {
-        startPlugin(pluginId)
-    }
-
     suspend fun stopPlugin(pluginId: String) {
         withPluginLock(pluginId) { entry ->
             stopPluginLocked(entry)
@@ -111,10 +114,6 @@ class UnifiedPluginManager(
                 PluginConfigLoader.load(entry.plugin.descriptor)
             }
         }
-    }
-
-    suspend fun disablePlugin(pluginId: String) {
-        disposePlugin(pluginId)
     }
 
     suspend fun stopAll() {
@@ -227,7 +226,7 @@ class UnifiedPluginManager(
             descriptor = entry.plugin.descriptor,
             pluginClassName = entry.pluginClassName,
             config = entry.config,
-            expectedEndpoints = entry.plugin.endpoints(),
+            expectedEndpoints = entry.plugin.endpoints().filterIsInstance<PluginEndpointDefinition<*, *>>(),
             classpath = currentClasspath,
             socketPaths = socketPaths,
             runtimeDir = kernelRuntimeDir.toPath(),
@@ -244,7 +243,8 @@ class UnifiedPluginManager(
             },
             onFailure = { failure ->
                 entry.lastFailure = failure
-            }
+            },
+            observabilityHub = observabilityHub
         )
         supervisor.start()
         entry.supervisor = supervisor
@@ -443,8 +443,45 @@ class UnifiedPluginManager(
 
     private fun mountPluginRoutes(routing: Routing, entry: ManagedPlugin) {
         val pluginId = entry.plugin.descriptor.pluginId
+        val routes = entry.plugin.endpoints()
+        val endpoints = routes.filterIsInstance<PluginEndpointDefinition<*, *>>()
+        val sseRoutes = routes.filterIsInstance<PluginSseDefinition>()
+        val staticRoutes = routes.filterIsInstance<PluginStaticResourceDefinition>()
+        val endpointKeys = endpoints.map { operationKey(it.method, fullPluginPath(pluginId, it.path)) }
+        val duplicates = endpointKeys.groupingBy { it }.eachCount().filterValues { it > 1 }.keys
+        if (duplicates.isNotEmpty()) {
+            error("Duplicate plugin endpoint registration for pluginId=$pluginId: ${duplicates.joinToString()}")
+        }
+        val sseKeys = sseRoutes.map { operationKey(HttpMethod.Get, fullPluginPath(pluginId, it.path)) }
+        val duplicateSse = sseKeys.groupingBy { it }.eachCount().filterValues { it > 1 }.keys
+        if (duplicateSse.isNotEmpty()) {
+            error("Duplicate plugin SSE registration for pluginId=$pluginId: ${duplicateSse.joinToString()}")
+        }
+        val pathCollisions = endpointKeys.toSet().intersect(sseKeys.toSet())
+        if (pathCollisions.isNotEmpty()) {
+            error("Plugin endpoint/SSE path conflict for pluginId=$pluginId: ${pathCollisions.joinToString()}")
+        }
+        val staticConflicts = staticRoutes.filter { definition ->
+            val prefix = fullPluginPath(pluginId, definition.path)
+            endpointKeys.any { it == operationKey(HttpMethod.Get, prefix) || it.startsWith("${HttpMethod.Get.value} $prefix/") } ||
+                sseKeys.any { it == operationKey(HttpMethod.Get, prefix) || it.startsWith("${HttpMethod.Get.value} $prefix/") }
+        }
+        if (staticConflicts.isNotEmpty()) {
+            error("Plugin static resource path conflict for pluginId=$pluginId: ${staticConflicts.joinToString { it.path }}")
+        }
+        val declaredKeys = PluginDocumentationLookup.declaredOperationsForPlugin(pluginId)
+            .map { operationKey(it.method, it.path) }
+            .toSet()
+        val routeKeySet = endpointKeys.toMutableSet().apply {
+            addAll(sseKeys)
+            addAll(staticRoutes.map { operationKey(HttpMethod.Get, fullPluginPath(pluginId, it.path)) })
+        }
+        val missing = declaredKeys - routeKeySet
+        if (missing.isNotEmpty()) {
+            error("OpenAPI declared operations for pluginId=$pluginId are not backed by KeelPlugin.endpoints(): ${missing.sorted().joinToString()}")
+        }
         routing.route("/api/plugins/$pluginId") {
-            for (endpoint in entry.plugin.endpoints()) {
+            for (endpoint in endpoints) {
                 registerPluginOperation(pluginId, endpoint)
                 val fullPath = endpoint.path.ifBlank { "" }
                 val responseEnvelope = PluginDocumentationLookup.find(endpoint.method, fullPluginPath(pluginId, endpoint.path))?.responseEnvelope ?: false
@@ -455,6 +492,12 @@ class UnifiedPluginManager(
                     HttpMethod.Delete -> mountDelete(fullPath, entry, endpoint, responseEnvelope)
                     else -> error("Unsupported method: ${endpoint.method}")
                 }
+            }
+            for (definition in sseRoutes) {
+                mountSse(definition.path, entry, definition)
+            }
+            for (definition in staticRoutes) {
+                staticResources(definition.path, definition.basePackage, definition.index)
             }
         }
     }
@@ -491,12 +534,37 @@ class UnifiedPluginManager(
         }
     }
 
+    private fun Route.mountSse(path: String, entry: ManagedPlugin, definition: PluginSseDefinition) {
+        val handler: suspend io.ktor.server.sse.ServerSSESession.() -> Unit = {
+            when (resolveDispatchDisposition(entry.plugin.descriptor.pluginId)) {
+                PluginDispatchDisposition.NOT_FOUND -> {
+                    close()
+                }
+                PluginDispatchDisposition.UNAVAILABLE -> {
+                    send(ServerSentEvent(data = """{"error":"plugin unavailable"}""", event = "error"))
+                    close()
+                }
+                PluginDispatchDisposition.PASS_THROUGH,
+                PluginDispatchDisposition.AVAILABLE -> {
+                    val context = buildRequestContext(call, entry.plugin.descriptor.pluginId, HttpMethod.Get, call.request.path())
+                    definition.handler.invoke(PluginSseSession(context, this))
+                }
+            }
+        }
+        if (path.isBlank()) {
+            sse(handler)
+        } else {
+            sse(path, handler)
+        }
+    }
+
     private suspend fun io.ktor.server.routing.RoutingContext.handleInvocation(
         entry: ManagedPlugin,
         endpoint: PluginEndpointDefinition<*, *>,
         responseEnvelope: Boolean
     ) {
         try {
+            val tracer = ObservabilityTracing.kernelTracer()
             when (resolveDispatchDisposition(entry.plugin.descriptor.pluginId)) {
                 PluginDispatchDisposition.NOT_FOUND -> {
                     respondPluginResult(
@@ -550,38 +618,65 @@ class UnifiedPluginManager(
             try {
                 entry.inFlightInvocations.incrementAndGet()
                 val timeoutMs = endpoint.executionPolicy.timeoutMs ?: entry.config.callTimeoutMs
+                val parentContext = call.attributes.getOrNull(ObservabilityTracing.TRACE_CONTEXT_KEY) ?: Context.current()
                 when (entry.config.runtimeMode) {
                     PluginRuntimeMode.IN_PROCESS -> {
-                        val request = decodeRequestBody(rawBody, endpoint.requestType)
-                        val context = buildRequestContext(call, entry.plugin.descriptor.pluginId, endpoint.method, call.request.path())
-                        val result = withTimeout(timeoutMs) {
-                            endpoint.execute(context, request)
+                        val span = tracer?.spanBuilder("plugin.invoke")
+                            ?.setParent(parentContext)
+                            ?.setAttribute("keel.pluginId", entry.plugin.descriptor.pluginId)
+                            ?.setAttribute("keel.jvm", "kernel")
+                            ?.setAttribute("keel.edge.from", "kernel")
+                            ?.setAttribute("keel.edge.to", entry.plugin.descriptor.pluginId)
+                            ?.startSpan()
+                        val scope = span?.makeCurrent()
+                        try {
+                            val request = decodeRequestBody(rawBody, endpoint.requestType)
+                            val context = buildRequestContext(call, entry.plugin.descriptor.pluginId, endpoint.method, call.request.path())
+                            val result = withTimeout(timeoutMs) {
+                                endpoint.execute(context, request)
+                            }
+                            val responseBytes = encodeResponseBody(result.body, endpoint.responseType)
+                                ?.toByteArray(Charsets.UTF_8)?.size?.toLong() ?: 0L
+                            if (maxPayloadBytes != null && responseBytes > maxPayloadBytes && !endpoint.executionPolicy.allowChunkedTransfer) {
+                                respondPluginResult(
+                                    call = call,
+                                    result = PluginResult(status = HttpStatusCode.PayloadTooLarge.value, body = null),
+                                    responseType = endpoint.responseType,
+                                    responseEnvelope = responseEnvelope,
+                                    errorMessage = "Response payload exceeds $maxPayloadBytes bytes"
+                                )
+                                return
+                            }
+                            respondPluginResult(call, result, endpoint.responseType, responseEnvelope)
+                        } finally {
+                            scope?.close()
+                            span?.end()
                         }
-                        val responseBytes = encodeResponseBody(result.body, endpoint.responseType)
-                            ?.toByteArray(Charsets.UTF_8)?.size?.toLong() ?: 0L
-                        if (maxPayloadBytes != null && responseBytes > maxPayloadBytes && !endpoint.executionPolicy.allowChunkedTransfer) {
-                            respondPluginResult(
-                                call = call,
-                                result = PluginResult(status = HttpStatusCode.PayloadTooLarge.value, body = null),
-                                responseType = endpoint.responseType,
-                                responseEnvelope = responseEnvelope,
-                                errorMessage = "Response payload exceeds $maxPayloadBytes bytes"
-                            )
-                            return
-                        }
-                        respondPluginResult(call, result, endpoint.responseType, responseEnvelope)
                     }
                     PluginRuntimeMode.EXTERNAL_JVM -> {
-                        val response = requireNotNull(entry.supervisor) { "No supervisor available for isolated plugin ${entry.plugin.descriptor.pluginId}" }
-                            .invoke(endpoint, call, rawBody)
-                        val body = response.bodyJson?.let { runtimeJson.decodeFromString(serializer(endpoint.responseType), it) }
-                        respondPluginResult(
-                            call = call,
-                            result = PluginResult(status = response.status, headers = response.headers, body = body),
-                            responseType = endpoint.responseType,
-                            responseEnvelope = responseEnvelope,
-                            errorMessage = response.errorMessage
-                        )
+                        val span = tracer?.spanBuilder("plugin.dispatch")
+                            ?.setParent(parentContext)
+                            ?.setAttribute("keel.pluginId", entry.plugin.descriptor.pluginId)
+                            ?.setAttribute("keel.jvm", "kernel")
+                            ?.setAttribute("keel.edge.from", "kernel")
+                            ?.setAttribute("keel.edge.to", entry.plugin.descriptor.pluginId)
+                            ?.startSpan()
+                        val scope = span?.makeCurrent()
+                        try {
+                            val response = requireNotNull(entry.supervisor) { "No supervisor available for isolated plugin ${entry.plugin.descriptor.pluginId}" }
+                                .invoke(endpoint, call, rawBody)
+                            val body = response.bodyJson?.let { runtimeJson.decodeFromString(serializer(endpoint.responseType), it) }
+                            respondPluginResult(
+                                call = call,
+                                result = PluginResult(status = response.status, headers = response.headers, body = body),
+                                responseType = endpoint.responseType,
+                                responseEnvelope = responseEnvelope,
+                                errorMessage = response.errorMessage
+                            )
+                        } finally {
+                            scope?.close()
+                            span?.end()
+                        }
                     }
                 }
             } finally {

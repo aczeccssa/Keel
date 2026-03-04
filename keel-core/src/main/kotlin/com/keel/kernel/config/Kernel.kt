@@ -3,6 +3,10 @@ package com.keel.kernel.config
 import com.keel.kernel.loader.DefaultPluginLoader
 import com.keel.kernel.logging.KeelLoggerService
 import com.keel.kernel.logging.LogLevel
+import com.keel.kernel.observability.ObservabilityConfig
+import com.keel.kernel.observability.ObservabilityHub
+import com.keel.kernel.observability.ObservabilityTracing
+import com.keel.kernel.observability.KeelObservability
 import com.keel.kernel.plugin.KeelPlugin
 import com.keel.kernel.plugin.UnifiedPluginManager
 import com.keel.kernel.routing.GatewayInterceptor
@@ -20,6 +24,8 @@ import io.ktor.server.application.install
 import io.ktor.server.engine.embeddedServer
 import io.ktor.server.http.content.staticResources
 import io.ktor.server.netty.Netty
+import io.ktor.server.request.httpMethod
+import io.ktor.server.request.path
 import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.server.routing.routing
 import io.ktor.server.sse.SSE
@@ -29,9 +35,11 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
+import io.opentelemetry.context.Context
 import org.koin.core.Koin
 import org.koin.core.KoinApplication
 import org.koin.core.context.startKoin
+import org.koin.dsl.module
 
 class Kernel(
     private val koin: Koin,
@@ -40,7 +48,9 @@ class Kernel(
     private val logger = KeelLoggerService.getLogger("Kernel")
     private val kernelScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val pluginLoader = DefaultPluginLoader()
-    private val pluginManager = UnifiedPluginManager(koin)
+    private val observabilityHub = ObservabilityHub(ObservabilityConfig.fromSystem())
+    private val observabilityTracing = ObservabilityTracing.initKernel(observabilityHub)
+    private val pluginManager = UnifiedPluginManager(koin, observabilityHub = observabilityHub)
     private val pluginLifecycleHotReloadAdapter = PluginLifecycleHotReloadAdapter(pluginManager)
     private val gatewayInterceptor = GatewayInterceptor(pluginManager)
 
@@ -95,6 +105,13 @@ class Kernel(
                 loggerService.setLevel(LogLevel.DEBUG)
             }
 
+            koin.loadModules(listOf(
+                module {
+                    single<KeelObservability> { observabilityHub }
+                }
+            ))
+            observabilityHub.setPluginSnapshotProvider { pluginManager.getRuntimeSnapshots() }
+
             configureApplication(this)
 
             routing {
@@ -109,8 +126,23 @@ class Kernel(
 
     fun configureApplication(app: Application) {
         app.intercept(ApplicationCallPipeline.Plugins) {
-            if (gatewayInterceptor.intercept(call)) {
-                finish()
+            val span = observabilityTracing.tracer.spanBuilder("http.request")
+                .setAttribute("http.method", call.request.httpMethod.value)
+                .setAttribute("http.route", call.request.path())
+                .setAttribute("keel.jvm", "kernel")
+                .startSpan()
+            val scope = span.makeCurrent()
+            call.attributes.put(ObservabilityTracing.TRACE_CONTEXT_KEY, Context.current())
+            try {
+                if (gatewayInterceptor.intercept(call)) {
+                    span.setStatus(io.opentelemetry.api.trace.StatusCode.ERROR)
+                    finish()
+                    return@intercept
+                }
+                proceed()
+            } finally {
+                scope.close()
+                span.end()
             }
         }
 
@@ -119,6 +151,7 @@ class Kernel(
             kotlinx.coroutines.runBlocking {
                 pluginManager.startEnabledPlugins()
             }
+            observabilityHub.start(kernelScope)
 
             if (ConfigHotReloader.isDevelopmentMode()) {
                 configHotReloader.startWatching()
@@ -135,6 +168,7 @@ class Kernel(
             kotlinx.coroutines.runBlocking {
                 pluginManager.stopAll()
             }
+            observabilityHub.shutdown()
             kernelScope.cancel()
             KeelLoggerService.getInstance().shutdown()
         }
@@ -162,7 +196,7 @@ class KernelBuilder {
 
     fun build(): Kernel {
         val koin = startKoin(koinConfig ?: {}).koin
-        val kernel = Kernel(koin, enablePluginHotReload)
+        val kernel = Kernel(koin = koin, enablePluginHotReload = enablePluginHotReload)
         plugins.forEach { kernel.registerPlugin(it) }
         return kernel
     }
