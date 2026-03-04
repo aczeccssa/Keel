@@ -1,0 +1,106 @@
+package com.keel.samples.observability
+
+import com.keel.kernel.api.KeelApi
+import com.keel.kernel.logging.KeelLoggerService
+import com.keel.kernel.observability.KeelObservability
+import com.keel.kernel.plugin.KeelPlugin
+import com.keel.kernel.plugin.PluginDescriptor
+import com.keel.kernel.plugin.PluginInitContext
+import com.keel.kernel.plugin.PluginResult
+import com.keel.kernel.plugin.PluginRuntimeContext
+import com.keel.kernel.plugin.pluginEndpoints
+import com.keel.openapi.annotations.KeelApiPlugin
+import io.ktor.http.HttpHeaders
+import io.ktor.util.cio.ChannelWriteException
+import io.ktor.utils.io.ClosedWriteChannelException
+import io.ktor.sse.ServerSentEvent
+import kotlinx.coroutines.flow.collect
+import java.io.IOException
+
+@KeelApiPlugin(
+    pluginId = "observability",
+    title = "Observability Plugin",
+    description = "Example plugin that visualizes multi-JVM topology and flow tracing",
+    version = "1.0.0"
+)
+class ObservabilityPlugin : KeelPlugin {
+    private val logger = KeelLoggerService.getLogger("ObservabilityPlugin")
+    private lateinit var observability: KeelObservability
+
+    override val descriptor: PluginDescriptor = PluginDescriptor(
+        pluginId = "observability",
+        version = "1.0.0",
+        displayName = "Observability Plugin"
+    )
+
+    override suspend fun onInit(context: PluginInitContext) {
+        observability = context.kernelKoin.get()
+        observability.registerPanel(
+            id = "observability-topology",
+            title = "Observability Topology",
+            dataEndpoint = "/api/plugins/observability/topology"
+        )
+        logger.info("Initialized observability plugin")
+    }
+
+    override fun endpoints() = pluginEndpoints(descriptor.pluginId) {
+        @KeelApi("Open the observability UI", tags = ["observability"])
+        get<RedirectMessage> {
+            PluginResult(
+                status = 302,
+                headers = mapOf(HttpHeaders.Location to listOf("/api/plugins/observability/ui/index.html")),
+                body = RedirectMessage("Open the UI page")
+            )
+        }
+
+        @KeelApi("Get current JVM topology", tags = ["observability"], responseEnvelope = true)
+        get<ObservabilityTopologyData>("/topology") {
+            PluginResult(body = ObservabilityTopologyData(nodes = observability.jvmSnapshot()))
+        }
+
+        @KeelApi("Get recent trace spans", tags = ["observability"], responseEnvelope = true)
+        get<ObservabilityTraceData>("/traces") {
+            val limit = queryParameters["limit"]?.firstOrNull()?.toIntOrNull() ?: 100
+            val since = queryParameters["since"]?.firstOrNull()?.toLongOrNull()
+            PluginResult(body = ObservabilityTraceData(spans = observability.traceSnapshot(limit, since)))
+        }
+
+        @KeelApi("Get recent flow edges", tags = ["observability"], responseEnvelope = true)
+        get<ObservabilityFlowData>("/flows") {
+            val limit = queryParameters["limit"]?.firstOrNull()?.toIntOrNull() ?: 100
+            PluginResult(body = ObservabilityFlowData(flows = observability.flowSnapshot(limit)))
+        }
+
+        @KeelApi("Get registered observability panels", tags = ["observability"], responseEnvelope = true)
+        get<ObservabilityPanelData>("/panels") {
+            PluginResult(body = ObservabilityPanelData(panels = observability.panels()))
+        }
+
+        @KeelApi("Subscribe to live observability events", tags = ["observability"])
+        sse("/stream") {
+            send(ServerSentEvent(data = """{"type":"connected"}""", event = "system"))
+            try {
+                observability.events().collect { event ->
+                    send(ServerSentEvent(data = event.dataJson, event = event.type))
+                }
+            } catch (_: ChannelWriteException) {
+                // Client disconnected.
+            } catch (_: ClosedWriteChannelException) {
+                // Client disconnected.
+            } catch (_: IOException) {
+                // Connection reset or broken pipe.
+            }
+        }
+
+        @KeelApi("Open the observability static UI", tags = ["observability"])
+        staticResources(
+            path = "/ui",
+            basePackage = "observability-ui",
+            index = "index.html"
+        )
+    }
+
+    override suspend fun onStop(context: PluginRuntimeContext) {
+        logger.info("Observability plugin stopped")
+    }
+}

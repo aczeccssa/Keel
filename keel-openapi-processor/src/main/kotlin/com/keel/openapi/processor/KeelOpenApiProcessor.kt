@@ -256,7 +256,7 @@ class KeelOpenApiProcessor(
         annotation: ParsedKeelApi,
         currentPrefix: String
     ): ParsedOperation? {
-        val methodMatch = Regex("""^(typedGet|typedPost|typedPut|typedDelete|documentedGet|documentedPost|documentedPut|documentedDelete|get|post|put|delete)""")
+        val methodMatch = Regex("""^(typedGet|typedPost|typedPut|typedDelete|documentedGet|documentedPost|documentedPut|documentedDelete|get|post|put|delete|sse|staticResources)""")
             .find(callSource.trim())
             ?: return null
 
@@ -266,6 +266,7 @@ class KeelOpenApiProcessor(
             callName.endsWith("Post") || callName == "post" -> "Post"
             callName.endsWith("Put") || callName == "put" -> "Put"
             callName.endsWith("Delete") || callName == "delete" -> "Delete"
+            callName == "sse" || callName == "staticResources" -> "Get"
             else -> return null
         }
 

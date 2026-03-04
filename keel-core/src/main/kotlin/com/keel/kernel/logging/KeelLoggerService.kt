@@ -7,6 +7,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.datetime.Clock
@@ -79,6 +80,8 @@ class KeelLoggerService private constructor() {
         // Emit to SSE flow (non-blocking, drops if no subscriber or buffer full)
         _logFlow.tryEmit(entry)
     }
+
+    fun logStream(): SharedFlow<LogEntry> = _logFlow
 
     fun getRecentLogs(limit: Int = 100): List<LogEntry> {
         return _logs.value.takeLast(limit)

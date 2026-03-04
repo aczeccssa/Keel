@@ -16,4 +16,5 @@ dependencies {
     implementation(project(":keel-core"))
     implementation(project(":plugins:sample-hello"))
     implementation(project(":plugins:sample-dbdemo"))
+    implementation(project(":plugins:sample-observability"))
 }

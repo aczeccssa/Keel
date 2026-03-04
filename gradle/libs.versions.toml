@@ -15,6 +15,7 @@ micrometer = "1.14.2"
 hikari = "5.1.0"
 h2 = "2.2.224"
 inspektor = "0.10.0-alpha"
+opentelemetry = "1.38.0"
 
 [libraries]
 # Kotlin
@@ -58,6 +59,12 @@ netty-all = { group = "io.netty", name = "netty-all", version.ref = "netty" }
 
 # Micrometer
 micrometer-core = { group = "io.micrometer", name = "micrometer-core", version.ref = "micrometer" }
+
+# OpenTelemetry
+opentelemetry-api = { group = "io.opentelemetry", name = "opentelemetry-api", version.ref = "opentelemetry" }
+opentelemetry-context = { group = "io.opentelemetry", name = "opentelemetry-context", version.ref = "opentelemetry" }
+opentelemetry-sdk = { group = "io.opentelemetry", name = "opentelemetry-sdk", version.ref = "opentelemetry" }
+opentelemetry-sdk-trace = { group = "io.opentelemetry", name = "opentelemetry-sdk-trace", version.ref = "opentelemetry" }
 
 # HikariCP
 hikari-cp = { group = "com.zaxxer", name = "HikariCP", version.ref = "hikari" }

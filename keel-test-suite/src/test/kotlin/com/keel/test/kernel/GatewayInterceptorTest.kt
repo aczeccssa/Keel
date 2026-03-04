@@ -1,33 +1,47 @@
 package com.keel.test.kernel
 
 import com.keel.contract.dto.KeelResponse
-import com.keel.kernel.plugin.KPlugin
-import com.keel.kernel.plugin.PluginInitContext
-import com.keel.kernel.plugin.PluginManager
+import com.keel.kernel.plugin.KeelPlugin
+import com.keel.kernel.plugin.PluginDescriptor
+import com.keel.kernel.plugin.PluginResult
+import com.keel.kernel.plugin.PluginRuntimeContext
+import com.keel.kernel.plugin.UnifiedPluginManager
+import com.keel.kernel.plugin.pluginEndpoints
 import com.keel.kernel.routing.GatewayInterceptor
-import io.ktor.client.request.*
-import io.ktor.http.*
-import io.ktor.serialization.kotlinx.json.*
-import io.ktor.server.application.*
+import io.ktor.client.request.get
+import io.ktor.http.HttpStatusCode
+import io.ktor.serialization.kotlinx.json.json
+import io.ktor.server.application.call
+import io.ktor.server.application.ApplicationCallPipeline
+import io.ktor.server.application.install
 import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
-import io.ktor.server.response.*
-import io.ktor.server.routing.*
-import io.ktor.server.testing.*
-import org.koin.core.context.startKoin
-import org.koin.core.context.stopKoin
-import org.koin.core.qualifier.named
-import org.koin.core.scope.Scope
+import io.ktor.server.response.respond
+import io.ktor.server.routing.get
+import io.ktor.server.routing.routing
+import io.ktor.server.testing.testApplication
+import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import org.koin.core.context.startKoin
+import org.koin.core.context.stopKoin
 
 class GatewayInterceptorTest {
 
+    private var koinStarted = false
+
+    @AfterTest
+    fun teardown() {
+        if (koinStarted) {
+            stopKoin()
+            koinStarted = false
+        }
+    }
+
     @Test
-    fun blocksRequestsForDisabledPlugin() = testApplication {
-        val koin = startKoin {}.koin
-        val manager = PluginManager(koin)
-        val plugin = NoopPlugin("plug-a")
-        manager.registerPlugin(plugin)
+    fun blocksRequestsForUnavailablePluginWith503() = testApplication {
+        val koin = startKoin {}.also { koinStarted = true }.koin
+        val manager = UnifiedPluginManager(koin)
+        manager.registerPlugin(NoopPlugin("plug-a"))
 
         application {
             install(ContentNegotiation) {
@@ -38,22 +52,18 @@ class GatewayInterceptorTest {
                 if (interceptor.intercept(call)) finish()
             }
             routing {
-                get("/api/plugins/plug-a") {
-                    call.respond(KeelResponse.success(data = "ok"))
-                }
+                manager.mountRoutes(this)
             }
         }
 
         val response = client.get("/api/plugins/plug-a")
         assertEquals(HttpStatusCode.ServiceUnavailable, response.status)
-
-        stopKoin()
     }
 
     @Test
-    fun allowsRequestsForEnabledPlugin() = testApplication {
-        val koin = startKoin {}.koin
-        val manager = PluginManager(koin)
+    fun allowsRequestsForRunningPlugin() = testApplication {
+        val koin = startKoin {}.also { koinStarted = true }.koin
+        val manager = UnifiedPluginManager(koin)
         val plugin = NoopPlugin("plug-b")
         manager.registerPlugin(plugin)
 
@@ -66,32 +76,55 @@ class GatewayInterceptorTest {
                 if (interceptor.intercept(call)) finish()
             }
             routing {
-                get("/api/plugins/plug-b") {
-                    call.respond(KeelResponse.success(data = "ok"))
-                }
+                manager.mountRoutes(this)
             }
 
-            run {
-                manager.initPlugin(plugin.pluginId)
-                val scope = koin.getOrCreateScope(plugin.pluginId, named(plugin.pluginId))
-                manager.installPlugin(plugin.pluginId, scope)
-                manager.enablePlugin(plugin.pluginId, routing { })
+            kotlinx.coroutines.runBlocking {
+                manager.startPlugin(plugin.descriptor.pluginId)
             }
         }
 
         val response = client.get("/api/plugins/plug-b")
         assertEquals(HttpStatusCode.OK, response.status)
-
-        stopKoin()
     }
 
-    private class NoopPlugin(id: String) : KPlugin {
-        override val pluginId: String = id
-        override val version: String = "1.0.0"
+    @Test
+    fun unknownPluginFallsThroughTo404() = testApplication {
+        val koin = startKoin {}.also { koinStarted = true }.koin
+        val manager = UnifiedPluginManager(koin)
 
-        override suspend fun onInit(context: PluginInitContext) {}
-        override suspend fun onInstall(scope: Scope) {}
-        override suspend fun onEnable(routing: Routing) {}
-        override suspend fun onDisable() {}
+        application {
+            install(ContentNegotiation) {
+                json()
+            }
+            val interceptor = GatewayInterceptor(manager)
+            intercept(ApplicationCallPipeline.Plugins) {
+                if (interceptor.intercept(call)) finish()
+            }
+            routing {
+                get("/healthz") {
+                    call.respond(KeelResponse.success("ok"))
+                }
+            }
+        }
+
+        val response = client.get("/api/plugins/missing")
+        assertEquals(HttpStatusCode.NotFound, response.status)
+    }
+
+    private class NoopPlugin(id: String) : KeelPlugin {
+        override val descriptor: PluginDescriptor = PluginDescriptor(
+            pluginId = id,
+            version = "1.0.0",
+            displayName = id
+        )
+
+        override suspend fun onStop(context: PluginRuntimeContext) = Unit
+
+        override fun endpoints() = pluginEndpoints(descriptor.pluginId) {
+            get<String> {
+                PluginResult(body = "ok")
+            }
+        }
     }
 }

@@ -2,20 +2,22 @@ package com.keel.samples.helloworld
 
 import com.keel.kernel.api.KeelApi
 import com.keel.kernel.logging.KeelLoggerService
-import com.keel.kernel.plugin.KeelPluginV2
+import com.keel.kernel.plugin.KeelPlugin
 import com.keel.kernel.plugin.PluginDescriptor
+import com.keel.kernel.plugin.PluginInitContext
 import com.keel.kernel.plugin.PluginResult
+import com.keel.kernel.plugin.PluginRuntimeContext
 import com.keel.kernel.plugin.pluginEndpoints
 import com.keel.openapi.annotations.KeelApiPlugin
 
 @KeelApiPlugin("helloworld", "Hello World Plugin")
-class HelloWorldPlugin : KeelPluginV2 {
+class HelloWorldPlugin : KeelPlugin {
     private val logger = KeelLoggerService.getLogger("HelloWorldPlugin")
 
     override val descriptor: PluginDescriptor = PluginDescriptor("helloworld", "1.0.0", "Hello World Plugin")
 
-    override suspend fun onInit(context: com.keel.kernel.plugin.PluginInitContextV2) {
-        logger.info("Initialized hello world plugin in ${context.config.executionMode}")
+    override suspend fun onInit(context: PluginInitContext) {
+        logger.info("Initialized hello world plugin in ${context.config.runtimeMode}")
     }
 
     override fun endpoints() = pluginEndpoints(descriptor.pluginId) {
@@ -35,7 +37,7 @@ class HelloWorldPlugin : KeelPluginV2 {
         }
     }
 
-    override suspend fun onStop() {
+    override suspend fun onStop(context: PluginRuntimeContext) {
         logger.info("Hello world plugin stopped")
     }
 }

@@ -718,6 +718,14 @@
             margin-right: 6px;
             font-size: 14px;
         }
+
+        /* 修复表单内部元素的宽度塌陷问题 */
+        .form-group input,
+        .form-group select,
+        .form-group textarea {
+            width: 100%;
+            box-sizing: border-box; /* 确保 padding 不会撑破容器 */
+        }
     </style>
 </head>
 <body>
@@ -1033,29 +1041,30 @@
 
     // ─── Helpers ───
     function escapeHtml(str) {
-        var d = document.createElement('div');
+        let d = document.createElement('div');
         d.textContent = str;
         return d.innerHTML;
     }
 
     function stateBadge(state) {
-        var s = (state || '').toUpperCase();
-        if (s === 'ENABLED') return '<span class="badge enabled">Enabled</span>';
-        if (s === 'DISABLED') return '<span class="badge disabled">Disabled</span>';
-        if (s === 'INSTALLED') return '<span class="badge installed">Installed</span>';
+        let s = (state || '').toUpperCase();
+        if (s === 'RUNNING') return '<span class="badge enabled">Running</span>';
+        if (s === 'STOPPED') return '<span class="badge installed">Stopped</span>';
+        if (s === 'DISPOSED') return '<span class="badge disabled">Disposed</span>';
+        if (s === 'FAILED') return '<span class="badge disabled">Failed</span>';
         return '<span class="badge other">' + escapeHtml(s) + '</span>';
     }
 
     function formatTime(ts) {
-        var d = new Date(ts);
+        let d = new Date(ts);
         return d.toLocaleTimeString('en-US', {hour12: false});
     }
 
     // ─── Plugins ───
     async function fetchPlugins() {
         try {
-            var resp = await fetch(API_BASE + '/api/_system/plugins');
-            var json = await resp.json();
+            let resp = await fetch(API_BASE + '/api/_system/plugins');
+            let json = await resp.json();
             if (json.code === 200 && json.data && json.data.plugins) {
                 renderPlugins(json.data.plugins);
             }
@@ -1064,24 +1073,24 @@
     }
 
     function renderPlugins(plugins) {
-        var tbody = document.getElementById('plugin-table-body');
+        let tbody = document.getElementById('plugin-table-body');
         if (!plugins.length) {
             tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text-muted);">No plugins registered</td></tr>';
             return;
         }
         tbody.innerHTML = plugins.map(function (p) {
-            var state = (p.state || '').toUpperCase();
-            var isEnabled = state === 'ENABLED';
-            var typeLabel = p.isDynamic ? '<span class="badge dynamic">Dynamic</span>' : 'Static';
+            let lifecycleState = (p.lifecycleState || '').toUpperCase();
+            let isRunning = lifecycleState === 'RUNNING';
+            let typeLabel = p.isDynamic ? '<span class="badge dynamic">Dynamic</span>' : 'Static';
             return '<tr>' +
                 '<td><strong>' + escapeHtml(p.pluginId) + '</strong></td>' +
                 '<td>' + escapeHtml(p.version) + '</td>' +
                 '<td>' + typeLabel + '</td>' +
-                '<td>' + stateBadge(p.state) + '</td>' +
+                '<td>' + stateBadge(p.lifecycleState) + '</td>' +
                 '<td class="actions">' +
-                (isEnabled
-                    ? '<button class="btn btn-disable btn-sm" onclick="togglePlugin(\'' + escapeHtml(p.pluginId) + '\', \'disable\')">Disable</button>'
-                    : '<button class="btn btn-enable btn-sm" onclick="togglePlugin(\'' + escapeHtml(p.pluginId) + '\', \'enable\')">Enable</button>') +
+                (isRunning
+                    ? '<button class="btn btn-disable btn-sm" onclick="togglePlugin(\'' + escapeHtml(p.pluginId) + '\', \'stop\')">Stop</button>'
+                    : '<button class="btn btn-enable btn-sm" onclick="togglePlugin(\'' + escapeHtml(p.pluginId) + '\', \'start\')">Start</button>') +
                 '</td>' +
                 '</tr>';
         }).join('');
@@ -1089,7 +1098,7 @@
 
     async function togglePlugin(pluginId, action) {
         try {
-            var resp = await fetch(API_BASE + '/api/_system/plugins/' + encodeURIComponent(pluginId) + '/' + action, {method: 'POST'});
+            let resp = await fetch(API_BASE + '/api/_system/plugins/' + encodeURIComponent(pluginId) + '/' + action, {method: 'POST'});
             await resp.json();
             await fetchPlugins();
         } catch (e) { /* silent */
@@ -1098,11 +1107,11 @@
 
     // ─── Health ───
     async function checkHealth() {
-        var el = document.getElementById('health-status');
-        var tsEl = document.getElementById('health-ts');
+        let el = document.getElementById('health-status');
+        let tsEl = document.getElementById('health-ts');
         try {
-            var resp = await fetch(API_BASE + '/api/_system/health');
-            var json = await resp.json();
+            let resp = await fetch(API_BASE + '/api/_system/health');
+            let json = await resp.json();
             if (json.code === 200 && json.data && json.data.status === 'ok') {
                 el.innerHTML = '<span class="status-dot ok"></span>Healthy';
                 tsEl.textContent = new Date(json.data.timestamp).toLocaleTimeString();
@@ -1117,18 +1126,18 @@
 
     // ─── API Tester ───
     async function sendRequest() {
-        var method = document.getElementById('req-method').value;
-        var url = document.getElementById('req-url').value;
-        var box = document.getElementById('response-box');
+        let method = document.getElementById('req-method').value;
+        let url = document.getElementById('req-url').value;
+        let box = document.getElementById('response-box');
         box.textContent = 'Sending...';
         try {
-            var resp = await fetch(API_BASE + url, {method: method});
-            var status = resp.status;
-            var text = await resp.text();
-            var statusClass = 's5xx';
+            let resp = await fetch(API_BASE + url, {method: method});
+            let status = resp.status;
+            let text = await resp.text();
+            let statusClass = 's5xx';
             if (status >= 200 && status < 300) statusClass = 's2xx';
             else if (status >= 400 && status < 500) statusClass = 's4xx';
-            var body = text;
+            let body = text;
             try {
                 body = JSON.stringify(JSON.parse(text), null, 2);
             } catch (_) {
@@ -1140,18 +1149,18 @@
     }
 
     // ─── Log Stream (SSE) ───
-    var sseConnected = false;
-    var sseSource = null;
-    var paused = false;
-    var allLogEntries = [];
-    var filterLevel = 'ALL';
+    let sseConnected = false;
+    let sseSource = null;
+    let paused = false;
+    let allLogEntries = [];
+    let filterLevel = 'ALL';
 
     function connectSSE() {
         if (sseSource) {
             sseSource.close();
         }
-        var dot = document.getElementById('sse-dot');
-        var label = document.getElementById('sse-label');
+        let dot = document.getElementById('sse-dot');
+        let label = document.getElementById('sse-label');
         dot.className = 'status-dot';
         label.textContent = 'Connecting...';
 
@@ -1159,18 +1168,18 @@
 
         sseSource.addEventListener('log', function (e) {
             try {
-                var evt = JSON.parse(e.data);
-                var entryString = evt.data;
+                let evt = JSON.parse(e.data);
+                let entryString = evt.data;
                 if (entryString) {
-                    var level = 'INFO';
+                    let level = 'INFO';
                     if (entryString.includes('[DEBUG]')) level = 'DEBUG';
                     else if (entryString.includes('[WARN]')) level = 'WARN';
                     else if (entryString.includes('[ERROR]')) level = 'ERROR';
 
-                    var sourceMatch = entryString.match(/\] \[(.*?)\]/);
-                    var source = sourceMatch ? sourceMatch[1] : 'Unknown';
+                    let sourceMatch = entryString.match(/\] \[(.*?)\]/);
+                    let source = sourceMatch ? sourceMatch[1] : 'Unknown';
 
-                    var entry = {
+                    let entry = {
                         raw: entryString,
                         level: level,
                         source: source,
@@ -1205,14 +1214,14 @@
     }
 
     function appendLogLine(entry) {
-        var stream = document.getElementById('log-stream');
-        var line = document.createElement('div');
+        let stream = document.getElementById('log-stream');
+        let line = document.createElement('div');
         line.className = 'log-line ' + entry.level;
 
         if (entry.raw) {
             line.textContent = entry.raw;
         } else {
-            var ts = formatTime(entry.timestamp);
+            let ts = formatTime(entry.timestamp);
             line.textContent = ts + ' [' + entry.source + '] ' + entry.message;
             if (entry.throwable) {
                 line.textContent += '\n' + entry.throwable;
@@ -1238,9 +1247,9 @@
     }
 
     function rebuildStream() {
-        var stream = document.getElementById('log-stream');
+        let stream = document.getElementById('log-stream');
         stream.innerHTML = '';
-        var filtered = filterLevel === 'ALL' ? allLogEntries : allLogEntries.filter(function (e) {
+        let filtered = filterLevel === 'ALL' ? allLogEntries : allLogEntries.filter(function (e) {
             return e.level === filterLevel;
         });
         filtered.slice(-300).forEach(function (entry) {
@@ -1250,8 +1259,8 @@
 
     // ─── Log Analysis ───
     function updateStats() {
-        var counts = {DEBUG: 0, INFO: 0, WARN: 0, ERROR: 0};
-        var sources = {};
+        let counts = {DEBUG: 0, INFO: 0, WARN: 0, ERROR: 0};
+        let sources = {};
         allLogEntries.forEach(function (e) {
             if (counts[e.level] !== undefined) counts[e.level]++;
             if (!sources[e.source]) sources[e.source] = {count: 0, lastLevel: ''};
@@ -1263,8 +1272,8 @@
         document.getElementById('stat-warn').textContent = counts.WARN;
         document.getElementById('stat-error').textContent = counts.ERROR;
 
-        var tbody = document.getElementById('source-table-body');
-        var sourceKeys = Object.keys(sources).sort(function (a, b) {
+        let tbody = document.getElementById('source-table-body');
+        let sourceKeys = Object.keys(sources).sort(function (a, b) {
             return sources[b].count - sources[a].count;
         });
         if (sourceKeys.length === 0) {
@@ -1277,11 +1286,11 @@
     }
 
     function stateBadgeLevel(level) {
-        var cssVar = 'var(--text-muted)';
-        if (level === 'INFO') cssVar = 'var(--info-pure)';
-        if (level === 'WARN') cssVar = 'var(--warn-pure)';
-        if (level === 'ERROR') cssVar = 'var(--danger-pure)';
-        return '<span style="color:' + cssVar + ';font-weight:600;">' + escapeHtml(level) + '</span>';
+        let csslet = 'var(--text-muted)';
+        if (level === 'INFO') csslet = 'var(--info-pure)';
+        if (level === 'WARN') csslet = 'var(--warn-pure)';
+        if (level === 'ERROR') csslet = 'var(--danger-pure)';
+        return '<span style="color:' + csslet + ';font-weight:600;">' + escapeHtml(level) + '</span>';
     }
 
     async function setLogLevel(level) {
@@ -1298,10 +1307,10 @@
 
     async function fetchLevels() {
         try {
-            var resp = await fetch(API_BASE + '/api/_system/logs/levels');
-            var json = await resp.json();
+            let resp = await fetch(API_BASE + '/api/_system/logs/levels');
+            let json = await resp.json();
             if (json.code === 200 && json.data) {
-                var current = json.data.currentLevel;
+                let current = json.data.currentLevel;
                 document.querySelectorAll('.level-btn').forEach(function (b) {
                     b.classList.toggle('active', b.textContent === current);
                 });
@@ -1322,8 +1331,8 @@
 
     async function refreshLogs() {
         try {
-            var resp = await fetch(API_BASE + '/api/_system/logs/recent?limit=1000');
-            var json = await resp.json();
+            let resp = await fetch(API_BASE + '/api/_system/logs/recent?limit=1000');
+            let json = await resp.json();
             if (json.code === 200 && json.data) {
                 allLogEntries = json.data;
                 rebuildStream();
@@ -1339,14 +1348,14 @@
     }
 
     function downloadText() {
-        var text = allLogEntries.map(function (e) {
-            var ts = new Date(e.timestamp).toISOString();
-            var line = ts + ' ' + e.level + ' [' + e.source + '] ' + e.message;
+        let text = allLogEntries.map(function (e) {
+            let ts = new Date(e.timestamp).toISOString();
+            let line = ts + ' ' + e.level + ' [' + e.source + '] ' + e.message;
             if (e.throwable) line += '\n' + e.throwable;
             return line;
         }).join('\n');
-        var blob = new Blob([text], {type: 'text/plain'});
-        var a = document.createElement('a');
+        let blob = new Blob([text], {type: 'text/plain'});
+        let a = document.createElement('a');
         a.href = URL.createObjectURL(blob);
         a.download = 'keel-logs.txt';
         a.click();
@@ -1357,26 +1366,33 @@
     fetchPlugins();
     checkHealth();
     fetchLevels();
+    fetchDbStats(); // 新增
+    fetchNotes();   // 新增
+
     setInterval(function () {
         fetchPlugins();
         checkHealth();
+        // 如果你在 Database 页面，可能也需要定期轮询
+        if(document.getElementById('tab-database').classList.contains('active')) {
+            fetchDbStats();
+            fetchNotes();
+        }
     }, POLL_INTERVAL);
 
     // ─── Database Tab ───
-    var showingAll = false;
+    let showingAll = false;
 
     async function fetchDbStats() {
         try {
-            var resp = await fetch(API_BASE + '/api/plugins/dbdemo/stats');
-            var json = await resp.json();
-            if (json.code === 200 && json.data) {
-                var d = json.data;
-                document.getElementById('db-active').textContent = d.activeNotes;
-                document.getElementById('db-pinned').textContent = d.pinnedNotes;
-                document.getElementById('db-deleted').textContent = d.deletedNotes;
-                document.getElementById('db-total').textContent = d.totalNotes;
-                document.getElementById('db-table-name').textContent = d.tableName;
-                document.getElementById('db-engine').textContent = d.databaseType;
+            let resp = await fetch(API_BASE + '/api/plugins/dbdemo/stats');
+            let json = await resp.json();
+            if (json) {
+                document.getElementById('db-active').textContent = json.activeNotes;
+                document.getElementById('db-pinned').textContent = json.pinnedNotes;
+                document.getElementById('db-deleted').textContent = json.deletedNotes;
+                document.getElementById('db-total').textContent = json.totalNotes;
+                document.getElementById('db-table-name').textContent = json.tableName;
+                document.getElementById('db-engine').textContent = json.databaseType;
             }
         } catch (e) { /* silent */
         }
@@ -1384,14 +1400,14 @@
 
     async function fetchNotes(all) {
         if (all !== undefined) showingAll = all;
-        var endpoint = showingAll ? '/api/plugins/dbdemo/notes/all' : '/api/plugins/dbdemo/notes';
+        let endpoint = showingAll ? '/api/plugins/dbdemo/notes/all' : '/api/plugins/dbdemo/notes';
         document.getElementById('btn-show-active').style.opacity = showingAll ? '0.5' : '1';
         document.getElementById('btn-show-all').style.opacity = showingAll ? '1' : '0.5';
         try {
-            var resp = await fetch(API_BASE + endpoint);
-            var json = await resp.json();
-            if (json.code === 200 && json.data && json.data.notes) {
-                renderNotes(json.data.notes);
+            let resp = await fetch(API_BASE + endpoint);
+            let json = await resp.json();
+            if (json && json.notes) {
+                renderNotes(json.notes);
             }
         } catch (e) {
             document.getElementById('notes-list').innerHTML = '<div style="text-align:center;color:var(--danger-pure);padding:24px;">Failed to load notes. Is the dbdemo plugin enabled?</div>';
@@ -1399,18 +1415,18 @@
     }
 
     function renderNotes(notes) {
-        var container = document.getElementById('notes-list');
+        let container = document.getElementById('notes-list');
         if (!notes.length) {
             container.innerHTML = '<div style="text-align:center;color:var(--text-muted);padding:32px; border: 1px dashed var(--border); border-radius: 8px;">No notes found in the repository</div>';
             return;
         }
         container.innerHTML = notes.map(function (n) {
-            var isDeleted = !!n.deletedAt;
-            var cls = 'note-card';
+            let isDeleted = !!n.deletedAt;
+            let cls = 'note-card';
             if (n.pinned && !isDeleted) cls += ' pinned';
             if (isDeleted) cls += ' soft-deleted';
-            var pin = n.pinned ? '<span class="pin-icon">&#9733;</span>' : '';
-            var actions = '';
+            let pin = n.pinned ? '<span class="pin-icon">&#9733;</span>' : '';
+            let actions = '';
             if (isDeleted) {
                 actions = '<button class="btn btn-sm btn-enable" onclick="restoreNote(' + n.id + ')">Restore</button>' +
                     '<button class="btn btn-sm btn-disable" onclick="hardDeleteNote(' + n.id + ')">Permanently Delete</button>';
@@ -1418,7 +1434,7 @@
                 actions = '<button class="btn btn-sm btn-warn" onclick="softDeleteNote(' + n.id + ')">Soft Delete</button>' +
                     '<button class="btn btn-sm btn-disable" onclick="hardDeleteNote(' + n.id + ')">Hard Delete</button>';
             }
-            var meta = '<span>ID: ' + n.id + '</span>';
+            let meta = '<span>ID: ' + n.id + '</span>';
             if (n.createdAt) meta += '<span>Created: ' + new Date(n.createdAt).toLocaleString() + '</span>';
             if (n.updatedAt) meta += '<span>Updated: ' + new Date(n.updatedAt).toLocaleString() + '</span>';
             if (n.createdBy) meta += '<span>By: ' + escapeHtml(n.createdBy) + '</span>';
@@ -1436,9 +1452,9 @@
     }
 
     async function createNote() {
-        var title = document.getElementById('note-title').value.trim();
+        let title = document.getElementById('note-title').value.trim();
         if (!title) return;
-        var body = {
+        let body = {
             title: title,
             content: document.getElementById('note-content').value,
             author: document.getElementById('note-author').value || 'anonymous',

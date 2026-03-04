@@ -120,6 +120,24 @@ class OpenApiAggregatorTest {
         val schemas = spec["components"]!!.jsonObject["schemas"]!!.jsonObject
         assertTrue("TestPayload" in schemas)
     }
+
+    @Test
+    fun `buildSpec cache invalidates when runtime topology changes`() {
+        val initialSpec = json.parseToJsonElement(OpenApiAggregator.buildSpec()).jsonObject
+        assertTrue("/cache-check" !in initialSpec["paths"]!!.jsonObject)
+
+        OpenApiRegistry.register(
+            OpenApiOperation(
+                method = HttpMethod.Get,
+                path = "/cache-check",
+                responseBodyType = typeOf<TestPayload>(),
+                typeBound = true
+            )
+        )
+
+        val updatedSpec = json.parseToJsonElement(OpenApiAggregator.buildSpec()).jsonObject
+        assertTrue("/cache-check" in updatedSpec["paths"]!!.jsonObject)
+    }
 }
 
 @kotlinx.serialization.Serializable
