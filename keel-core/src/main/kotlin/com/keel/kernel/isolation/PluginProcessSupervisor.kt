@@ -1,5 +1,6 @@
 package com.keel.kernel.isolation
 
+import com.keel.kernel.config.KeelConstants
 import com.keel.kernel.logging.KeelLoggerService
 import com.keel.kernel.observability.ObservabilityHub
 import com.keel.kernel.observability.ObservabilityTracing
@@ -282,7 +283,7 @@ class PluginProcessSupervisor(
             "--event-socket-path=${socketPaths.eventPath.pathString}",
             "--auth-token=$authToken",
             "--generation=${generation.value}",
-            "--config-path=${File("config/plugins/${descriptor.pluginId}.json").absolutePath}",
+            "--config-path=${File(KeelConstants.CONFIG_PLUGINS_DIR, "${descriptor.pluginId}.json").absolutePath}",
             "--runtime-mode=${PluginRuntimeMode.EXTERNAL_JVM.name.lowercase()}"
         )
         process = processBuilder.start()

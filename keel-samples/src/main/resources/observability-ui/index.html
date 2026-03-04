@@ -1,0 +1,675 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Keel Observability Plugin</title>
+    <style>
+        :root {
+            --paper: #f4efe6;
+            --ink: #1f2937;
+            --muted: #6b7280;
+            --line: #d9cfbf;
+            --card: rgba(255, 252, 247, 0.9);
+            --panel-bg: rgba(255, 255, 255, 0.6);
+            --topo-bg: rgba(255, 255, 255, 0.4);
+            --accent: #0f766e;
+            --accent-2: #b45309;
+            --ok: #166534;
+            --warn: #b45309;
+            --bad: #b91c1c;
+            --bg-grad-1: rgba(15, 118, 110, 0.12);
+            --bg-grad-2: rgba(180, 83, 9, 0.12);
+            --bg-grad-start: #f8f3ea;
+            --pill-ok-bg: rgba(22, 101, 52, 0.15);
+            --pill-warn-bg: rgba(180, 83, 9, 0.15);
+            --pill-bad-bg: rgba(185, 28, 28, 0.15);
+            --flow-op-bg: rgba(0, 0, 0, 0.05);
+            --shadow-color: rgba(80, 57, 33, 0.08);
+        }
+
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --paper: #0f172a;       /* Slate 900 */
+                --ink: #f8fafc;         /* Slate 50 */
+                --muted: #94a3b8;       /* Slate 400 */
+                --line: #334155;        /* Slate 700 */
+                --card: rgba(30, 41, 59, 0.85); /* Slate 800 */
+                --panel-bg: rgba(15, 23, 42, 0.6); /* Slate 900 */
+                --topo-bg: rgba(15, 23, 42, 0.4);
+                --accent: #2dd4bf;      /* Teal 400 */
+                --accent-2: #fbbf24;    /* Amber 400 */
+                --ok: #4ade80;          /* Green 400 */
+                --warn: #fbbf24;        /* Amber 400 */
+                --bad: #f87171;         /* Red 400 */
+                --bg-grad-1: rgba(45, 212, 191, 0.08);
+                --bg-grad-2: rgba(251, 191, 36, 0.08);
+                --bg-grad-start: #020617; /* Very dark slate */
+                --pill-ok-bg: rgba(74, 222, 128, 0.15);
+                --pill-warn-bg: rgba(251, 191, 36, 0.15);
+                --pill-bad-bg: rgba(248, 113, 113, 0.15);
+                --flow-op-bg: rgba(255, 255, 255, 0.1);
+                --shadow-color: rgba(0, 0, 0, 0.4);
+            }
+        }
+
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            font-family: "IBM Plex Sans", "Avenir Next", sans-serif;
+            color: var(--ink);
+            background:
+                    radial-gradient(circle at top left, var(--bg-grad-1), transparent 32%),
+                    radial-gradient(circle at top right, var(--bg-grad-2), transparent 26%),
+                    linear-gradient(180deg, var(--bg-grad-start) 0%, var(--paper) 100%);
+        }
+        header {
+            padding: 28px 32px 20px;
+            border-bottom: 1px solid var(--line);
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-end;
+        }
+        .brand-lockup {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+        .brand-mark {
+            width: 58px;
+            height: 58px;
+            flex: 0 0 auto;
+        }
+        .brand-copy {
+            min-width: 0;
+        }
+        h1 {
+            margin: 0;
+            font-size: clamp(24px, 4vw, 36px);
+            letter-spacing: -0.04em;
+        }
+
+        header h1 span {
+            color: var(--accent);
+        }
+
+        header p {
+            margin: 8px 0 0;
+            max-width: 600px;
+            color: var(--muted);
+            font-size: 14px;
+        }
+        .brand-mark .bg-squircle {
+            fill: var(--paper);
+            stroke: var(--line);
+            stroke-width: 2;
+        }
+        .brand-mark .edge-main {
+            stroke: var(--accent);
+            stroke-width: 12;
+            stroke-linecap: round;
+        }
+        .brand-mark .edge-flow {
+            stroke: var(--accent-2);
+            stroke-width: 12;
+            stroke-linecap: round;
+            stroke-dasharray: 0 14;
+        }
+        .brand-mark .node-main {
+            fill: var(--accent);
+        }
+        .brand-mark .node-flow {
+            fill: var(--accent-2);
+        }
+        .brand-mark .node-inner {
+            fill: var(--paper);
+        }
+        .brand-mark .pulse-ring {
+            fill: none;
+            stroke: var(--accent-2);
+            stroke-width: 2;
+            opacity: 0.6;
+            animation: pulse-anim 2s infinite cubic-bezier(0.4, 0, 0.2, 1);
+            transform-origin: 80px 94px;
+        }
+        @media (max-width: 720px) {
+            header {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 16px;
+            }
+            .brand-lockup {
+                align-items: flex-start;
+            }
+            .brand-mark {
+                width: 52px;
+                height: 52px;
+            }
+        }
+        .pulse-indicator {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--ok);
+        }
+        .pulse-dot {
+            width: 10px;
+            height: 10px;
+            background: var(--ok);
+            border-radius: 50%;
+            box-shadow: 0 0 10px var(--ok);
+            animation: pulse 2s infinite;
+        }
+        @keyframes pulse {
+            0% { transform: scale(0.95); opacity: 1; }
+            50% { transform: scale(1.2); opacity: 0.7; }
+            100% { transform: scale(0.95); opacity: 1; }
+        }
+        main {
+            padding: 24px 32px 40px;
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 24px;
+        }
+        @media (min-width: 1200px) {
+            main { grid-template-columns: 1.2fr 0.8fr; }
+        }
+        section {
+            background: var(--card);
+            backdrop-filter: blur(10px);
+            border: 1px solid var(--line);
+            border-radius: 18px;
+            padding: 20px;
+            box-shadow: 0 18px 40px var(--shadow-color);
+            display: flex;
+            flex-direction: column;
+        }
+        section h2 {
+            margin: 0 0 16px;
+            font-size: 14px;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: var(--muted);
+            border-bottom: 1px dashed var(--line);
+            padding-bottom: 8px;
+        }
+
+        /* --- Topology Graph UI --- */
+        .topology-container {
+            position: relative;
+            width: 100%;
+            height: 450px;
+            background: var(--topo-bg);
+            border-radius: 12px;
+            border: 1px solid var(--line);
+            overflow: hidden;
+        }
+        /* SVG for lines and particles */
+        #graph-svg {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 1;
+        }
+        /* Container for HTML nodes */
+        #graph-nodes {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 2;
+        }
+        .topo-node {
+            position: absolute;
+            transform: translate(-50%, -50%); /* Center on coordinate */
+            background: var(--card);
+            border: 2px solid var(--accent);
+            border-radius: 12px;
+            padding: 10px 14px;
+            min-width: 120px;
+            text-align: center;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            cursor: default;
+        }
+        .topo-node:hover {
+            transform: translate(-50%, -50%) scale(1.05);
+            box-shadow: 0 8px 20px var(--shadow-color);
+            z-index: 10;
+        }
+        .topo-node.jvm {
+            border-color: var(--ink);
+            background: var(--ink);
+            color: var(--paper);
+        }
+        .topo-node h3 { margin: 0 0 4px; font-size: 13px; font-weight: 700;}
+        .topo-node.jvm h3 { color: var(--paper); }
+        .topo-node .meta { font-size: 11px; color: var(--muted); }
+        .topo-node.jvm .meta { color: var(--paper); opacity: 0.8; }
+
+        .pill {
+            display: inline-block;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 10px;
+            font-weight: 700;
+            margin-top: 4px;
+        }
+        .pill.ok { background: var(--pill-ok-bg); color: var(--ok); }
+        .pill.warn { background: var(--pill-warn-bg); color: var(--warn); }
+        .pill.bad { background: var(--pill-bad-bg); color: var(--bad); }
+
+        /* --- Other Lists --- */
+        .stack { display: grid; gap: 24px; }
+        .traces, .flows { display: grid; gap: 10px; max-height: 400px; overflow: auto; padding-right: 8px;}
+        .trace, .flow-row {
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            padding: 10px 14px;
+            background: var(--panel-bg);
+            font-size: 13px;
+        }
+        .trace strong { display: block; font-size: 14px; color: var(--accent); margin-bottom: 4px;}
+        .trace small { color: var(--muted); display: block; font-family: monospace;}
+
+        .flow-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .flow-route {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-weight: 600;
+        }
+        .flow-arrow { color: var(--accent-2); }
+        .flow-op {
+            font-family: monospace;
+            background: var(--flow-op-bg);
+            padding: 2px 6px;
+            border-radius: 4px;
+        }
+
+        .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; }
+        .metric {
+            background: var(--panel-bg);
+            border: 1px solid var(--line);
+            padding: 16px;
+            border-radius: 12px;
+            text-align: center;
+        }
+        .metric span { display: block; font-size: 12px; color: var(--muted); text-transform: uppercase; margin-bottom: 8px; letter-spacing: 0.05em;}
+        .metric strong { font-size: 24px; color: var(--ink); }
+
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: var(--line); border-radius: 10px; }
+        ::-webkit-scrollbar-thumb:hover { background: var(--muted); }
+    </style>
+</head>
+<body>
+<header>
+    <div class="brand-lockup">
+        <div class="brand-mark" aria-hidden="true">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" width="100%" height="100%">
+                <rect class="bg-squircle" x="4" y="4" width="112" height="112" rx="28"></rect>
+                <line class="edge-main" x1="40" y1="26" x2="40" y2="94"></line>
+                <line class="edge-main" x1="40" y1="60" x2="80" y2="26"></line>
+                <line class="edge-flow" x1="40" y1="60" x2="80" y2="94"></line>
+                <circle class="node-main" cx="40" cy="26" r="12"></circle>
+                <circle class="node-inner" cx="40" cy="26" r="5"></circle>
+                <circle class="node-main" cx="40" cy="60" r="10"></circle>
+                <circle class="node-main" cx="40" cy="94" r="12"></circle>
+                <circle class="node-inner" cx="40" cy="94" r="5"></circle>
+                <circle class="node-main" cx="80" cy="26" r="12"></circle>
+                <circle class="node-inner" cx="80" cy="26" r="5"></circle>
+                <circle class="pulse-ring" cx="80" cy="94" r="14"></circle>
+                <circle class="node-flow" cx="80" cy="94" r="14"></circle>
+                <circle class="node-inner" cx="80" cy="94" r="6"></circle>
+                <circle class="node-flow" cx="80" cy="94" r="3"></circle>
+            </svg>
+        </div>
+        <div class="brand-copy">
+            <h1><span>Keel</span> Observability</h1>
+        </div>
+    </div>
+    <div class="pulse-indicator">
+        <div class="pulse-dot"></div>
+        Live Stream Active
+    </div>
+</header>
+
+<main>
+    <div class="stack">
+        <section style="flex: 1;">
+            <h2>Live Topology & Data Flow</h2>
+            <div class="topology-container" id="graph-area">
+                <svg id="graph-svg"></svg>
+                <div id="graph-nodes"></div>
+            </div>
+        </section>
+
+        <section>
+            <h2>System Metrics</h2>
+            <div id="metrics" class="metrics"></div>
+        </section>
+    </div>
+
+    <div class="stack">
+        <section>
+            <h2>Recent Packets (Log)</h2>
+            <div id="flows" class="flows"></div>
+        </section>
+
+        <section>
+            <h2>Trace Timeline</h2>
+            <div id="traces" class="traces"></div>
+        </section>
+    </div>
+</main>
+
+<script>
+    // 核心状态
+    const state = {
+        nodes: new Map(),
+        plugins: new Map(),
+        traces: [],
+        flows: [],
+        nodeCoords: new Map() // 用于存储节点在画布上的计算坐标
+    };
+
+    function pillClass(status) {
+        if (status === "HEALTHY" || status === "RUNNING") return "ok";
+        if (status === "DEGRADED" || status === "STOPPED") return "warn";
+        return "bad";
+    }
+
+    async function getJson(path) {
+        try {
+            const response = await fetch(path);
+            if (!response.ok) return { data: {} }; // fallback for disconnected testing
+            return await response.json();
+        } catch (e) {
+            console.warn("API Error, using fallback data for:", path);
+            return { data: {} };
+        }
+    }
+
+    // ─── Topology Graph Engine ───
+    function renderTopology() {
+        const container = document.getElementById("graph-area");
+        const svg = document.getElementById("graph-svg");
+        const nodeContainer = document.getElementById("graph-nodes");
+
+        const width = container.clientWidth;
+        const height = container.clientHeight;
+        const centerX = width / 2;
+        const centerY = height / 2;
+
+        nodeContainer.innerHTML = "";
+        svg.innerHTML = ""; // 清空 SVG 连线
+
+        const nodesList = Array.from(state.nodes.values()).sort((a, b) => a.id.localeCompare(b.id));
+        if(nodesList.length === 0) return;
+
+        // 布局算法：明确优先将 Kernel 作为中心节点，避免外部 JVM 插件占据中心位。
+        let coreNode =
+            nodesList.find(n => n.id === "kernel" || n.kind === "kernel") ||
+            nodesList.find(n => (n.label || "").toLowerCase().includes("kernel")) ||
+            nodesList.find(n => n.id.toLowerCase().includes('jvm') || n.kind === 'jvm') ||
+            nodesList[0];
+        let satelliteNodes = nodesList.filter(n => n !== coreNode);
+
+        const radiusX = Math.max(100, (width / 2) - 100);
+        const radiusY = Math.max(100, (height / 2) - 80);
+
+        // 渲染并记录坐标
+        const registerNode = (node, x, y) => {
+            state.nodeCoords.set(node.id, { x, y });
+
+            const isCore = node === coreNode;
+            const el = document.createElement("div");
+            el.className = `topo-node ${isCore ? 'jvm' : ''}`;
+            el.style.left = `${x}px`;
+            el.style.top = `${y}px`;
+
+            const pidText = node.pid ? ` (${node.pid})` : '';
+            const runtimeText = (node.runtimeMode || "IN_PROCESS") + pidText;
+
+            el.innerHTML = `
+            <h3>${node.label || node.id}</h3>
+            <div class="meta">${runtimeText}</div>
+            <div class="pill ${pillClass(node.lifecycleState)}">${node.lifecycleState || "ACTIVE"}</div>
+          `;
+            nodeContainer.appendChild(el);
+        };
+
+        // 放置核心节点
+        registerNode(coreNode, centerX, centerY);
+
+        // 放置卫星节点（环状排列）
+        satelliteNodes.forEach((node, index) => {
+            const angle = (index / satelliteNodes.length) * 2 * Math.PI - (Math.PI / 2); // 从顶部开始
+            const x = centerX + radiusX * Math.cos(angle);
+            const y = centerY + radiusY * Math.sin(angle);
+            registerNode(node, x, y);
+
+            // 绘制到核心的基础连线 (作为架构示意)
+            drawBaseEdge(centerX, centerY, x, y);
+        });
+    }
+
+    function drawBaseEdge(x1, y1, x2, y2) {
+        const svg = document.getElementById("graph-svg");
+        const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+        line.setAttribute("x1", x1);
+        line.setAttribute("y1", y1);
+        line.setAttribute("x2", x2);
+        line.setAttribute("y2", y2);
+        line.setAttribute("stroke", "var(--line)");
+        line.setAttribute("opacity", "0.6");
+        line.setAttribute("stroke-width", "1");
+        line.setAttribute("stroke-dasharray", "4 4");
+        svg.appendChild(line);
+    }
+
+    function triggerFlowAnimation(flow) {
+        const fromCoord = state.nodeCoords.get(flow.edgeFrom);
+        const toCoord = state.nodeCoords.get(flow.edgeTo);
+
+        if (!fromCoord || !toCoord) return; // Node doesn't exist on canvas yet
+
+        const svg = document.getElementById("graph-svg");
+
+        // 1. 动态绘制一条加粗连线，呈现数据流通道的连贯状态
+        const path = document.createElementNS("http://www.w3.org/2000/svg", "line");
+        path.setAttribute("x1", fromCoord.x);
+        path.setAttribute("y1", fromCoord.y);
+        path.setAttribute("x2", toCoord.x);
+        path.setAttribute("y2", toCoord.y);
+        path.setAttribute("stroke", "var(--accent-2)");
+        path.setAttribute("stroke-width", "2");
+        path.setAttribute("stroke-dasharray", "8 8"); // 虚线化以便做流动动画
+        path.setAttribute("opacity", "0.8");
+        svg.appendChild(path);
+
+        // 让通道连线产生“数据流持续”的视觉动效 (Marching ants)
+        path.animate([
+            { strokeDashoffset: 32 },
+            { strokeDashoffset: 0 }
+        ], {
+            duration: 800,
+            iterations: 4 // 维持 3.2 秒通道活跃
+        }).onfinish = () => {
+            // 活跃结束后缓慢淡出通道
+            const fadeOut = path.animate([{ opacity: 0.8 }, { opacity: 0 }], { duration: 1200, fill: "forwards" });
+            fadeOut.onfinish = () => path.remove();
+        };
+
+        // 2. 绘制移动的粒子实体
+        const particle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+        particle.setAttribute("r", "5");
+        particle.setAttribute("fill", "var(--accent-2)");
+        particle.setAttribute("style", "filter: drop-shadow(0 0 6px var(--accent-2))");
+        svg.appendChild(particle);
+
+        // 放慢粒子动画速度，并且增加缓动，使视觉更连贯平滑
+        const animation = particle.animate([
+            { cx: fromCoord.x, cy: fromCoord.y, opacity: 1, r: "4" },
+            { cx: toCoord.x, cy: toCoord.y, opacity: 1, r: "6" }
+        ], {
+            duration: 1200,
+            easing: "ease-in-out",
+        });
+
+        // 动画结束清理
+        animation.onfinish = () => {
+            particle.remove();
+        };
+    }
+
+    // ─── Standard Renderers ───
+    function renderFlows() {
+        const root = document.getElementById("flows");
+        root.innerHTML = "";
+        state.flows.slice(-20).reverse().forEach((flow) => {
+            const row = document.createElement("div");
+            row.className = "flow-row";
+            row.innerHTML = `
+            <div class="flow-route">
+              <span>${flow.edgeFrom}</span>
+              <span class="flow-arrow">⟶</span>
+              <span>${flow.edgeTo}</span>
+            </div>
+            <div class="flow-op">${flow.operation || "data_sync"}</div>
+          `;
+            root.appendChild(row);
+        });
+    }
+
+    function renderTraces() {
+        const root = document.getElementById("traces");
+        root.innerHTML = "";
+        state.traces.slice(0, 30).forEach((trace) => {
+            const row = document.createElement("article");
+            row.className = "trace";
+            row.innerHTML = `
+            <strong>${trace.operation}</strong>
+            <small>Trace ID: ${trace.traceId}</small>
+            <div style="margin-top: 6px; font-size: 12px; display:flex; justify-content: space-between;">
+              <span>${trace.service}</span>
+              <span class="${trace.status === 'ERROR' ? 'pill bad' : 'pill ok'}">${trace.status} · ${trace.durationMs ?? "-"}ms</span>
+            </div>
+          `;
+            root.appendChild(row);
+        });
+    }
+
+    function renderMetrics() {
+        const nodes = Array.from(state.nodes.values());
+        const metrics = [
+            ["Active Nodes", nodes.length],
+            ["Inflight", nodes.reduce((sum, node) => sum + (node.inflightInvocations || 0), 0)],
+            ["Queued Events", nodes.reduce((sum, node) => sum + (node.eventQueueDepth || 0), 0)],
+            ["Captured Traces", state.traces.length]
+        ];
+        const root = document.getElementById("metrics");
+        root.innerHTML = metrics.map(([label, value]) => `
+          <div class="metric">
+            <span>${label}</span>
+            <strong>${value}</strong>
+          </div>
+        `).join("");
+    }
+
+    // ─── Data Management ───
+    function upsertNode(node) {
+        state.nodes.set(node.id, node);
+        renderTopology();
+        renderMetrics();
+    }
+
+    function addTrace(trace) {
+        state.traces.unshift(trace);
+        if(state.traces.length > 50) state.traces.pop();
+        renderTraces();
+        renderMetrics();
+    }
+
+    function addFlow(flow) {
+        state.flows.push(flow);
+        if(state.flows.length > 50) state.flows.shift();
+        renderFlows();
+        triggerFlowAnimation(flow); // 触发视觉动效
+    }
+
+    // ─── Initialization & Mock Data (Fallback) ───
+    function injectMockDataIfEmpty() {
+        if(state.nodes.size === 0) {
+            upsertNode({ id: "keel-jvm-core", label: "Keel Core", kind: "jvm", lifecycleState: "RUNNING", pid: 14202 });
+            upsertNode({ id: "plugin-dbdemo", label: "DB Demo", kind: "plugin", lifecycleState: "RUNNING", pid: 14202 });
+            upsertNode({ id: "plugin-observability", label: "Observability", kind: "plugin", lifecycleState: "RUNNING", pid: 14202 });
+            upsertNode({ id: "plugin-auth", label: "Auth Agent", kind: "plugin", lifecycleState: "RUNNING", pid: 14218 });
+
+            // 模拟源源不断的数据流
+            setInterval(() => {
+                const nodes = Array.from(state.nodes.keys());
+                const from = nodes[Math.floor(Math.random() * nodes.length)];
+                let to = nodes[Math.floor(Math.random() * nodes.length)];
+                while(to === from) to = nodes[Math.floor(Math.random() * nodes.length)];
+
+                addFlow({ edgeFrom: from, edgeTo: to, operation: "rpc_invoke" });
+                addTrace({ traceId: "tr-" + Math.floor(Math.random()*10000), operation: "Mock_Request", service: from, status: "OK", durationMs: Math.floor(Math.random()*50) })
+            }, 3000);
+        }
+    }
+
+    async function bootstrap() {
+        // 请求初始数据
+        const [topology, traces, flows] = await Promise.all([
+            getJson("/api/plugins/observability/topology"),
+            getJson("/api/plugins/observability/traces?limit=20"),
+            getJson("/api/plugins/observability/flows?limit=20")
+        ]);
+
+        (topology.data?.nodes || topology.nodes || []).forEach(n => state.nodes.set(n.id, n));
+        state.traces = traces.data?.spans || traces.spans || [];
+        state.flows = flows.data?.flows || flows.flows || [];
+
+        // 如果后端未运行，注入 Mock 数据以便演示动效
+        injectMockDataIfEmpty();
+
+        renderTopology();
+        renderTraces();
+        renderFlows();
+        renderMetrics();
+
+        // 窗口缩放时重绘拓扑图以确保坐标准确
+        window.addEventListener('resize', () => {
+            renderTopology();
+        });
+
+        // 建立 SSE 实时监听
+        try {
+            const source = new EventSource("/api/plugins/observability/stream");
+            source.addEventListener("jvm_status", (e) => upsertNode(JSON.parse(e.data)));
+            source.addEventListener("plugin_status", (e) => upsertNode(JSON.parse(e.data)));
+            source.addEventListener("trace_event", (e) => addTrace(JSON.parse(e.data)));
+            source.addEventListener("flow_event", (e) => addFlow(JSON.parse(e.data)));
+        } catch (error) {
+            console.warn("SSE stream not available.");
+        }
+    }
+
+    bootstrap().catch(console.error);
+</script>
+</body>
+</html>

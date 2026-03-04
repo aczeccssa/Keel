@@ -4,10 +4,10 @@ import com.keel.kernel.api.KeelApi
 import com.keel.kernel.logging.KeelLoggerService
 import com.keel.kernel.plugin.KeelPlugin
 import com.keel.kernel.plugin.PluginDescriptor
+import com.keel.kernel.plugin.PluginEndpointBuilders
 import com.keel.kernel.plugin.PluginInitContext
 import com.keel.kernel.plugin.PluginResult
 import com.keel.kernel.plugin.PluginRuntimeContext
-import com.keel.kernel.plugin.pluginEndpoints
 import com.keel.openapi.annotations.KeelApiPlugin
 
 @KeelApiPlugin("helloworld", "Hello World Plugin")
@@ -20,7 +20,7 @@ class HelloWorldPlugin : KeelPlugin {
         logger.info("Initialized hello world plugin in ${context.config.runtimeMode}")
     }
 
-    override fun endpoints() = pluginEndpoints(descriptor.pluginId) {
+    override fun endpoints() = PluginEndpointBuilders.pluginEndpoints(descriptor.pluginId) {
         @KeelApi("Hello World greeting", tags = ["helloworld"])
         get<GreetingData> {
             PluginResult(body = GreetingData("Hello from HelloWorldPlugin!"))

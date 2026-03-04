@@ -3,10 +3,10 @@ package com.keel.test.kernel
 import com.keel.contract.dto.KeelResponse
 import com.keel.kernel.plugin.KeelPlugin
 import com.keel.kernel.plugin.PluginDescriptor
+import com.keel.kernel.plugin.PluginEndpointBuilders
 import com.keel.kernel.plugin.PluginResult
 import com.keel.kernel.plugin.PluginRuntimeContext
 import com.keel.kernel.plugin.UnifiedPluginManager
-import com.keel.kernel.plugin.pluginEndpoints
 import com.keel.kernel.routing.GatewayInterceptor
 import io.ktor.client.request.get
 import io.ktor.http.HttpStatusCode
@@ -121,7 +121,7 @@ class GatewayInterceptorTest {
 
         override suspend fun onStop(context: PluginRuntimeContext) = Unit
 
-        override fun endpoints() = pluginEndpoints(descriptor.pluginId) {
+        override fun endpoints() = PluginEndpointBuilders.pluginEndpoints(descriptor.pluginId) {
             get<String> {
                 PluginResult(body = "ok")
             }

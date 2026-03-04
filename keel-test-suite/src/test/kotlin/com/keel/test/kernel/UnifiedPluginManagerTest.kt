@@ -7,6 +7,7 @@ import com.keel.kernel.plugin.PluginEndpointDefinition
 import com.keel.kernel.plugin.PluginGeneration
 import com.keel.kernel.plugin.PluginInitContext
 import com.keel.kernel.plugin.PluginLifecycleState
+import com.keel.kernel.plugin.PluginRouteDefinition
 import com.keel.kernel.plugin.PluginRuntimeContext
 import com.keel.kernel.plugin.UnifiedPluginManager
 import java.lang.ref.WeakReference

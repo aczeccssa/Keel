@@ -9,6 +9,7 @@ import io.ktor.server.routing.delete
 import io.ktor.server.routing.get
 import io.ktor.server.routing.post
 import io.ktor.server.routing.put
+import io.ktor.server.routing.route
 import io.ktor.util.AttributeKey
 import kotlin.jvm.JvmName
 import kotlin.reflect.KType
@@ -86,6 +87,14 @@ internal fun Route.invokePut(path: String, body: suspend RoutingContext.() -> Un
 @PublishedApi
 internal fun Route.invokeDelete(path: String, body: suspend RoutingContext.() -> Unit) {
     if (path.isBlank()) delete(body) else delete(path, body)
+}
+
+fun Route.typedRoute(path: String, block: Route.() -> Unit) {
+    val resolvedPath = fullTypedPath(path)
+    route(path) {
+        attributes.put(TypedRouteBasePathKey, resolvedPath)
+        block()
+    }
 }
 
 inline fun <reified Res : Any> Route.typedGet(

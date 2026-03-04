@@ -6,7 +6,7 @@ import com.keel.kernel.config.runKernel
 import com.keel.samples.observability.ObservabilityPlugin
 import com.keel.samples.dbdemo.DbDemoPlugin
 import com.keel.samples.helloworld.HelloWorldPlugin
-import java.io.File
+import io.ktor.server.http.content.staticResources
 
 /**
  * Sample Application demonstrating the Keel framework.
@@ -46,10 +46,6 @@ import java.io.File
  *   KEEL_ENV=development java -jar keel-samples.jar
  */
 fun main() {
-    // Ensure required directories exist
-    File(KeelConstants.CONFIG_DIR).mkdirs()
-    File(KeelConstants.PLUGINS_DIR).mkdirs()
-
     // Server port
     val port = ConfigHotReloader.getServerPort()
     val baseUrl = "http://localhost:$port"
@@ -80,5 +76,10 @@ fun main() {
 
         // Optional: Disable hot reload even in development mode
         enablePluginHotReload(isDev)
+
+        // Global: Register global static resources
+        routing {
+            staticResources("/", "static")
+        }
     }
 }
