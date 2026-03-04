@@ -565,55 +565,9 @@ class UnifiedPluginManager(
     ) {
         try {
             val tracer = ObservabilityTracing.kernelTracer()
-            when (resolveDispatchDisposition(entry.plugin.descriptor.pluginId)) {
-                PluginDispatchDisposition.NOT_FOUND -> {
-                    respondPluginResult(
-                        call = call,
-                        result = PluginResult(status = HttpStatusCode.NotFound.value, body = null),
-                        responseType = endpoint.responseType,
-                        responseEnvelope = responseEnvelope,
-                        errorMessage = "Plugin '${entry.plugin.descriptor.pluginId}' is disposed"
-                    )
-                    return
-                }
-                PluginDispatchDisposition.UNAVAILABLE -> {
-                    respondPluginResult(
-                        call = call,
-                        result = PluginResult(status = HttpStatusCode.ServiceUnavailable.value, body = null),
-                        responseType = endpoint.responseType,
-                        responseEnvelope = responseEnvelope,
-                        errorMessage = "Plugin '${entry.plugin.descriptor.pluginId}' is currently unavailable"
-                    )
-                    return
-                }
-                PluginDispatchDisposition.PASS_THROUGH,
-                PluginDispatchDisposition.AVAILABLE -> Unit
-            }
-
-            if (!entry.invokeLimiter.tryAcquire()) {
-                respondPluginResult(
-                    call = call,
-                    result = PluginResult(status = HttpStatusCode.ServiceUnavailable.value, body = null),
-                    responseType = endpoint.responseType,
-                    responseEnvelope = responseEnvelope,
-                    errorMessage = "Plugin '${entry.plugin.descriptor.pluginId}' is at max concurrency"
-                )
-                return
-            }
-
-            val rawBody = readValidatedRequestBody(call, endpoint.requestType)
-            val requestBytes = rawBody?.toByteArray(Charsets.UTF_8)?.size?.toLong() ?: 0L
-            val maxPayloadBytes = endpoint.executionPolicy.maxPayloadBytes
-            if (maxPayloadBytes != null && requestBytes > maxPayloadBytes && !endpoint.executionPolicy.allowChunkedTransfer) {
-                respondPluginResult(
-                    call = call,
-                    result = PluginResult(status = HttpStatusCode.PayloadTooLarge.value, body = null),
-                    responseType = endpoint.responseType,
-                    responseEnvelope = responseEnvelope,
-                    errorMessage = "Request payload exceeds $maxPayloadBytes bytes"
-                )
-                return
-            }
+            if (!ensureDispatchAvailable(entry, endpoint, responseEnvelope)) return
+            if (!tryAcquireInvokeLimiter(entry, endpoint, responseEnvelope)) return
+            val requestPayload = readRequestPayload(entry, endpoint, responseEnvelope) ?: return
 
             try {
                 entry.inFlightInvocations.incrementAndGet()
@@ -621,62 +575,26 @@ class UnifiedPluginManager(
                 val parentContext = call.attributes.getOrNull(ObservabilityTracing.TRACE_CONTEXT_KEY) ?: Context.current()
                 when (entry.config.runtimeMode) {
                     PluginRuntimeMode.IN_PROCESS -> {
-                        val span = tracer?.spanBuilder("plugin.invoke")
-                            ?.setParent(parentContext)
-                            ?.setAttribute("keel.pluginId", entry.plugin.descriptor.pluginId)
-                            ?.setAttribute("keel.jvm", "kernel")
-                            ?.setAttribute("keel.edge.from", "kernel")
-                            ?.setAttribute("keel.edge.to", entry.plugin.descriptor.pluginId)
-                            ?.startSpan()
-                        val scope = span?.makeCurrent()
-                        try {
-                            val request = decodeRequestBody(rawBody, endpoint.requestType)
-                            val context = buildRequestContext(call, entry.plugin.descriptor.pluginId, endpoint.method, call.request.path())
-                            val result = withTimeout(timeoutMs) {
-                                endpoint.execute(context, request)
-                            }
-                            val responseBytes = encodeResponseBody(result.body, endpoint.responseType)
-                                ?.toByteArray(Charsets.UTF_8)?.size?.toLong() ?: 0L
-                            if (maxPayloadBytes != null && responseBytes > maxPayloadBytes && !endpoint.executionPolicy.allowChunkedTransfer) {
-                                respondPluginResult(
-                                    call = call,
-                                    result = PluginResult(status = HttpStatusCode.PayloadTooLarge.value, body = null),
-                                    responseType = endpoint.responseType,
-                                    responseEnvelope = responseEnvelope,
-                                    errorMessage = "Response payload exceeds $maxPayloadBytes bytes"
-                                )
-                                return
-                            }
-                            respondPluginResult(call, result, endpoint.responseType, responseEnvelope)
-                        } finally {
-                            scope?.close()
-                            span?.end()
-                        }
+                        invokeInProcess(
+                            entry = entry,
+                            endpoint = endpoint,
+                            responseEnvelope = responseEnvelope,
+                            rawBody = requestPayload.rawBody,
+                            maxPayloadBytes = requestPayload.maxPayloadBytes,
+                            timeoutMs = timeoutMs,
+                            tracer = tracer,
+                            parentContext = parentContext
+                        )
                     }
                     PluginRuntimeMode.EXTERNAL_JVM -> {
-                        val span = tracer?.spanBuilder("plugin.dispatch")
-                            ?.setParent(parentContext)
-                            ?.setAttribute("keel.pluginId", entry.plugin.descriptor.pluginId)
-                            ?.setAttribute("keel.jvm", "kernel")
-                            ?.setAttribute("keel.edge.from", "kernel")
-                            ?.setAttribute("keel.edge.to", entry.plugin.descriptor.pluginId)
-                            ?.startSpan()
-                        val scope = span?.makeCurrent()
-                        try {
-                            val response = requireNotNull(entry.supervisor) { "No supervisor available for isolated plugin ${entry.plugin.descriptor.pluginId}" }
-                                .invoke(endpoint, call, rawBody)
-                            val body = response.bodyJson?.let { runtimeJson.decodeFromString(serializer(endpoint.responseType), it) }
-                            respondPluginResult(
-                                call = call,
-                                result = PluginResult(status = response.status, headers = response.headers, body = body),
-                                responseType = endpoint.responseType,
-                                responseEnvelope = responseEnvelope,
-                                errorMessage = response.errorMessage
-                            )
-                        } finally {
-                            scope?.close()
-                            span?.end()
-                        }
+                        invokeExternal(
+                            entry = entry,
+                            endpoint = endpoint,
+                            responseEnvelope = responseEnvelope,
+                            rawBody = requestPayload.rawBody,
+                            tracer = tracer,
+                            parentContext = parentContext
+                        )
                     }
                 }
             } finally {
@@ -708,6 +626,155 @@ class UnifiedPluginManager(
                 responseEnvelope = responseEnvelope,
                 errorMessage = error.message ?: "Internal server error"
             )
+        }
+    }
+
+    private suspend fun io.ktor.server.routing.RoutingContext.ensureDispatchAvailable(
+        entry: ManagedPlugin,
+        endpoint: PluginEndpointDefinition<*, *>,
+        responseEnvelope: Boolean
+    ): Boolean {
+        return when (resolveDispatchDisposition(entry.plugin.descriptor.pluginId)) {
+            PluginDispatchDisposition.NOT_FOUND -> {
+                respondPluginResult(
+                    call = call,
+                    result = PluginResult(status = HttpStatusCode.NotFound.value, body = null),
+                    responseType = endpoint.responseType,
+                    responseEnvelope = responseEnvelope,
+                    errorMessage = "Plugin '${entry.plugin.descriptor.pluginId}' is disposed"
+                )
+                false
+            }
+            PluginDispatchDisposition.UNAVAILABLE -> {
+                respondPluginResult(
+                    call = call,
+                    result = PluginResult(status = HttpStatusCode.ServiceUnavailable.value, body = null),
+                    responseType = endpoint.responseType,
+                    responseEnvelope = responseEnvelope,
+                    errorMessage = "Plugin '${entry.plugin.descriptor.pluginId}' is currently unavailable"
+                )
+                false
+            }
+            PluginDispatchDisposition.PASS_THROUGH,
+            PluginDispatchDisposition.AVAILABLE -> true
+        }
+    }
+
+    private suspend fun io.ktor.server.routing.RoutingContext.tryAcquireInvokeLimiter(
+        entry: ManagedPlugin,
+        endpoint: PluginEndpointDefinition<*, *>,
+        responseEnvelope: Boolean
+    ): Boolean {
+        if (entry.invokeLimiter.tryAcquire()) return true
+        respondPluginResult(
+            call = call,
+            result = PluginResult(status = HttpStatusCode.ServiceUnavailable.value, body = null),
+            responseType = endpoint.responseType,
+            responseEnvelope = responseEnvelope,
+            errorMessage = "Plugin '${entry.plugin.descriptor.pluginId}' is at max concurrency"
+        )
+        return false
+    }
+
+    private data class RequestPayload(
+        val rawBody: String?,
+        val maxPayloadBytes: Long?
+    )
+
+    private suspend fun io.ktor.server.routing.RoutingContext.readRequestPayload(
+        entry: ManagedPlugin,
+        endpoint: PluginEndpointDefinition<*, *>,
+        responseEnvelope: Boolean
+    ): RequestPayload? {
+        val rawBody = readValidatedRequestBody(call, endpoint.requestType)
+        val requestBytes = rawBody?.toByteArray(Charsets.UTF_8)?.size?.toLong() ?: 0L
+        val maxPayloadBytes = endpoint.executionPolicy.maxPayloadBytes
+        if (maxPayloadBytes != null && requestBytes > maxPayloadBytes && !endpoint.executionPolicy.allowChunkedTransfer) {
+            respondPluginResult(
+                call = call,
+                result = PluginResult(status = HttpStatusCode.PayloadTooLarge.value, body = null),
+                responseType = endpoint.responseType,
+                responseEnvelope = responseEnvelope,
+                errorMessage = "Request payload exceeds $maxPayloadBytes bytes"
+            )
+            return null
+        }
+        return RequestPayload(rawBody, maxPayloadBytes)
+    }
+
+    private suspend fun io.ktor.server.routing.RoutingContext.invokeInProcess(
+        entry: ManagedPlugin,
+        endpoint: PluginEndpointDefinition<*, *>,
+        responseEnvelope: Boolean,
+        rawBody: String?,
+        maxPayloadBytes: Long?,
+        timeoutMs: Long,
+        tracer: io.opentelemetry.api.trace.Tracer?,
+        parentContext: Context
+    ) {
+        val span = tracer?.spanBuilder("plugin.invoke")
+            ?.setParent(parentContext)
+            ?.setAttribute("keel.pluginId", entry.plugin.descriptor.pluginId)
+            ?.setAttribute("keel.jvm", "kernel")
+            ?.setAttribute("keel.edge.from", "kernel")
+            ?.setAttribute("keel.edge.to", entry.plugin.descriptor.pluginId)
+            ?.startSpan()
+        val scope = span?.makeCurrent()
+        try {
+            val request = decodeRequestBody(rawBody, endpoint.requestType)
+            val context = buildRequestContext(call, entry.plugin.descriptor.pluginId, endpoint.method, call.request.path())
+            val result = withTimeout(timeoutMs) {
+                endpoint.execute(context, request)
+            }
+            val responseBytes = encodeResponseBody(result.body, endpoint.responseType)
+                ?.toByteArray(Charsets.UTF_8)?.size?.toLong() ?: 0L
+            if (maxPayloadBytes != null && responseBytes > maxPayloadBytes && !endpoint.executionPolicy.allowChunkedTransfer) {
+                respondPluginResult(
+                    call = call,
+                    result = PluginResult(status = HttpStatusCode.PayloadTooLarge.value, body = null),
+                    responseType = endpoint.responseType,
+                    responseEnvelope = responseEnvelope,
+                    errorMessage = "Response payload exceeds $maxPayloadBytes bytes"
+                )
+                return
+            }
+            respondPluginResult(call, result, endpoint.responseType, responseEnvelope)
+        } finally {
+            scope?.close()
+            span?.end()
+        }
+    }
+
+    private suspend fun io.ktor.server.routing.RoutingContext.invokeExternal(
+        entry: ManagedPlugin,
+        endpoint: PluginEndpointDefinition<*, *>,
+        responseEnvelope: Boolean,
+        rawBody: String?,
+        tracer: io.opentelemetry.api.trace.Tracer?,
+        parentContext: Context
+    ) {
+        val span = tracer?.spanBuilder("plugin.dispatch")
+            ?.setParent(parentContext)
+            ?.setAttribute("keel.pluginId", entry.plugin.descriptor.pluginId)
+            ?.setAttribute("keel.jvm", "kernel")
+            ?.setAttribute("keel.edge.from", "kernel")
+            ?.setAttribute("keel.edge.to", entry.plugin.descriptor.pluginId)
+            ?.startSpan()
+        val scope = span?.makeCurrent()
+        try {
+            val response = requireNotNull(entry.supervisor) { "No supervisor available for isolated plugin ${entry.plugin.descriptor.pluginId}" }
+                .invoke(endpoint, call, rawBody)
+            val body = response.bodyJson?.let { runtimeJson.decodeFromString(serializer(endpoint.responseType), it) }
+            respondPluginResult(
+                call = call,
+                result = PluginResult(status = response.status, headers = response.headers, body = body),
+                responseType = endpoint.responseType,
+                responseEnvelope = responseEnvelope,
+                errorMessage = response.errorMessage
+            )
+        } finally {
+            scope?.close()
+            span?.end()
         }
     }
 

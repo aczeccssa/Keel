@@ -51,6 +51,7 @@ import kotlin.io.path.deleteIfExists
 import kotlin.time.Duration.Companion.milliseconds
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.delay
@@ -91,56 +92,53 @@ fun parseExternalPluginHostArgs(args: Array<String>): ExternalPluginHostArgs {
 
 object ExternalPluginHostMain {
     private val logger = KeelLoggerService.getLogger("ExternalPluginHostMain")
+    private const val MAX_INVOKE_THREADS = 8
+    private const val MIN_INVOKE_THREADS = 2
 
     @JvmStatic
     fun main(args: Array<String>) {
         val hostArgs = parseExternalPluginHostArgs(args)
-        val plugin = instantiatePlugin(hostArgs.pluginClass)
-        val config = hostArgs.configPath?.let { PluginConfigLoader.load(plugin.descriptor, it) }
+        ExternalPluginHost(hostArgs).run()
+    }
+
+    private class ExternalPluginHost(
+        private val hostArgs: ExternalPluginHostArgs
+    ) {
+        private val plugin = instantiatePlugin(hostArgs.pluginClass)
+        private val config = hostArgs.configPath?.let { PluginConfigLoader.load(plugin.descriptor, it) }
             ?: PluginConfigLoader.load(plugin.descriptor)
-        val startedAt = System.currentTimeMillis()
-        val endpoints = plugin.endpoints()
+        private val startedAt = System.currentTimeMillis()
+        private val endpoints = plugin.endpoints()
             .filterIsInstance<com.keel.kernel.plugin.PluginEndpointDefinition<*, *>>()
             .associateBy { it.endpointId }
-        val running = AtomicBoolean(true)
-        val inFlightInvokes = AtomicInteger(0)
-        val lifecycleState = AtomicReferenceState("STARTING")
+        private val running = AtomicBoolean(true)
+        private val inFlightInvokes = AtomicInteger(0)
+        private val lifecycleState = AtomicReferenceState("STARTING")
 
-        val koin = startKoin {}.koin
-        val pluginScopeManager = PluginScopeManager(koin)
-        val privateScopeHandle = pluginScopeManager.createScope(
+        private val koin = startKoin {}.koin
+        private val pluginScopeManager = PluginScopeManager(koin)
+        private val privateScopeHandle = pluginScopeManager.createScope(
             pluginId = plugin.descriptor.pluginId,
             config = config,
             modules = plugin.modules()
         )
-        val initContext = object : com.keel.kernel.plugin.PluginInitContext {
-            override val pluginId: String = plugin.descriptor.pluginId
-            override val config: PluginConfig = config
-            override val kernelKoin = koin
-        }
-        val runtimeContext = object : com.keel.kernel.plugin.PluginRuntimeContext {
-            override val pluginId: String = plugin.descriptor.pluginId
-            override val config: PluginConfig = config
-            override val kernelKoin = koin
-            override val privateScope = privateScopeHandle.privateScope
+        private val initContext: com.keel.kernel.plugin.PluginInitContext
+        private val runtimeContext: com.keel.kernel.plugin.PluginRuntimeContext
 
-            override fun registerTeardown(action: () -> Unit) {
-                privateScopeHandle.teardownRegistry.register(action)
-            }
-        }
-
-        val invokeDispatcher = Executors.newFixedThreadPool(config.maxConcurrentCalls.coerceAtMost(8).coerceAtLeast(2)).asCoroutineDispatcher()
-        val adminDispatcher = Executors.newSingleThreadExecutor().asCoroutineDispatcher()
-        val eventDispatcher = Executors.newSingleThreadExecutor().asCoroutineDispatcher()
-        val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-        val eventEmitter = PluginEventEmitter(
+        private val invokeDispatcher = Executors.newFixedThreadPool(
+            config.maxConcurrentCalls.coerceAtMost(MAX_INVOKE_THREADS).coerceAtLeast(MIN_INVOKE_THREADS)
+        ).asCoroutineDispatcher()
+        private val adminDispatcher = Executors.newSingleThreadExecutor().asCoroutineDispatcher()
+        private val eventDispatcher = Executors.newSingleThreadExecutor().asCoroutineDispatcher()
+        private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        private val eventEmitter = PluginEventEmitter(
             pluginId = plugin.descriptor.pluginId,
             generation = hostArgs.generation,
             config = config,
             socketPath = hostArgs.eventSocketPath,
             dispatcher = eventDispatcher
         )
-        val tracing = ObservabilityTracing.initExternal(
+        private val tracing = ObservabilityTracing.initExternal(
             object : ObservabilityTracing.PluginTraceSink {
                 override fun emitTrace(event: com.keel.kernel.observability.TraceSpanEvent) {
                     runBlocking {
@@ -168,12 +166,45 @@ object ExternalPluginHostMain {
             }
         )
 
-        Files.createDirectories(hostArgs.invokeSocketPath.parent)
-        Files.createDirectories(hostArgs.adminSocketPath.parent)
-        hostArgs.invokeSocketPath.deleteIfExists()
-        hostArgs.adminSocketPath.deleteIfExists()
+        init {
+            initContext = object : com.keel.kernel.plugin.PluginInitContext {
+                override val pluginId: String = plugin.descriptor.pluginId
+                override val config: PluginConfig = this@ExternalPluginHost.config
+                override val kernelKoin = koin
+            }
+            runtimeContext = object : com.keel.kernel.plugin.PluginRuntimeContext {
+                override val pluginId: String = plugin.descriptor.pluginId
+                override val config: PluginConfig = this@ExternalPluginHost.config
+                override val kernelKoin = koin
+                override val privateScope = privateScopeHandle.privateScope
 
-        try {
+                override fun registerTeardown(action: () -> Unit) {
+                    privateScopeHandle.teardownRegistry.register(action)
+                }
+            }
+        }
+
+        fun run() {
+            prepareSockets()
+            try {
+                startPlugin()
+                serveConnections()
+            } catch (error: Throwable) {
+                recordFailure(error)
+                throw error
+            } finally {
+                shutdown()
+            }
+        }
+
+        private fun prepareSockets() {
+            Files.createDirectories(hostArgs.invokeSocketPath.parent)
+            Files.createDirectories(hostArgs.adminSocketPath.parent)
+            hostArgs.invokeSocketPath.deleteIfExists()
+            hostArgs.adminSocketPath.deleteIfExists()
+        }
+
+        private fun startPlugin() {
             runBlocking {
                 plugin.onInit(initContext)
                 plugin.onStart(runtimeContext)
@@ -189,7 +220,9 @@ object ExternalPluginHostMain {
                 )
             }
             lifecycleState.set("RUNNING")
+        }
 
+        private fun serveConnections() {
             ServerSocketChannel.open(StandardProtocolFamily.UNIX).use { adminServer ->
                 adminServer.bind(UnixDomainSocketAddress.of(hostArgs.adminSocketPath))
                 ServerSocketChannel.open(StandardProtocolFamily.UNIX).use { invokeServer ->
@@ -254,36 +287,42 @@ object ExternalPluginHostMain {
                         }
                     }
 
-                    runBlocking {
-                        waitForDrain(inFlightInvokes, config.stopTimeoutMs)
-                        eventEmitter.emitCritical(
-                            PluginDrainCompleteEvent(
-                                pluginId = plugin.descriptor.pluginId,
-                                generation = hostArgs.generation,
-                                timestamp = System.currentTimeMillis(),
-                                messageId = eventEmitter.newMessageId(),
-                                remainingInvokes = inFlightInvokes.get()
-                            )
-                        )
-                        plugin.onStop(runtimeContext)
-                        lifecycleState.set("DISPOSING")
-                        plugin.onDispose(runtimeContext)
-                        eventEmitter.emitCritical(
-                            PluginDisposedEvent(
-                                pluginId = plugin.descriptor.pluginId,
-                                generation = hostArgs.generation,
-                                timestamp = System.currentTimeMillis(),
-                                messageId = eventEmitter.newMessageId()
-                            )
-                        )
-                        eventEmitter.flush(config.stopTimeoutMs)
-                    }
-                    lifecycleState.set("STOPPED")
-                    adminJob.cancel()
-                    invokeJob.cancel()
+                    stopRuntime(adminJob, invokeJob)
                 }
             }
-        } catch (error: Throwable) {
+        }
+
+        private fun stopRuntime(adminJob: Job, invokeJob: Job) {
+            runBlocking {
+                waitForDrain(inFlightInvokes, config.stopTimeoutMs)
+                eventEmitter.emitCritical(
+                    PluginDrainCompleteEvent(
+                        pluginId = plugin.descriptor.pluginId,
+                        generation = hostArgs.generation,
+                        timestamp = System.currentTimeMillis(),
+                        messageId = eventEmitter.newMessageId(),
+                        remainingInvokes = inFlightInvokes.get()
+                    )
+                )
+                plugin.onStop(runtimeContext)
+                lifecycleState.set("DISPOSING")
+                plugin.onDispose(runtimeContext)
+                eventEmitter.emitCritical(
+                    PluginDisposedEvent(
+                        pluginId = plugin.descriptor.pluginId,
+                        generation = hostArgs.generation,
+                        timestamp = System.currentTimeMillis(),
+                        messageId = eventEmitter.newMessageId()
+                    )
+                )
+                eventEmitter.flush(config.stopTimeoutMs)
+            }
+            lifecycleState.set("STOPPED")
+            adminJob.cancel()
+            invokeJob.cancel()
+        }
+
+        private fun recordFailure(error: Throwable) {
             logger.error("External plugin host failed pluginId=${plugin.descriptor.pluginId}", error)
             runBlocking {
                 eventEmitter.emitCritical(
@@ -298,8 +337,9 @@ object ExternalPluginHostMain {
                 )
                 eventEmitter.flush(config.stopTimeoutMs)
             }
-            throw error
-        } finally {
+        }
+
+        private fun shutdown() {
             runBlocking {
                 eventEmitter.close()
             }
