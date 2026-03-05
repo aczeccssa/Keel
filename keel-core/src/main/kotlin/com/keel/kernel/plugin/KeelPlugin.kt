@@ -312,7 +312,7 @@ internal fun joinPaths(basePath: String, path: String): String {
     val baseClean = baseTrimmed.trim('/')
     val pathClean = pathTrimmed.trim('/')
     return when {
-        baseClean.isBlank() && pathClean.isBlank() -> ""
+        baseClean.isBlank() && pathClean.isBlank() -> "/"
         baseClean.isBlank() -> "/$pathClean"
         pathClean.isBlank() -> "/$baseClean"
         else -> "/$baseClean/$pathClean"

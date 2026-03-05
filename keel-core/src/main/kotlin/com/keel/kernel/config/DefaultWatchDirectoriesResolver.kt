@@ -15,7 +15,7 @@ internal data class DefaultWatchDirectories(
 }
 
 internal object DefaultWatchDirectoriesResolver {
-    private val projectDependencyRegex = Regex("""project\("(:.+?)"\)""")
+    private val projectDependencyRegex = Regex("""project\(\s*(?:path\s*=\s*)?["'](:[^"']+)["']\s*\)""")
 
     fun resolve(): DefaultWatchDirectories? {
         val callerModuleDir = resolveCallerModuleDir() ?: return null
@@ -106,7 +106,7 @@ internal object DefaultWatchDirectoriesResolver {
             return emptyList()
         }
         return projectDependencyRegex.findAll(buildFile.readText())
-            .map { it.groupValues[1] }
+            .map { it.groupValues[1].trim() }
             .toList()
     }
 
