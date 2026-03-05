@@ -233,7 +233,7 @@ class UnifiedPluginManager(
         return null
     }
 
-    private fun performGenerationSwap(
+    private suspend fun performGenerationSwap(
         entry: ManagedPlugin,
         source: PluginDevelopmentSource,
         newGeneration: NewGeneration,
@@ -261,7 +261,7 @@ class UnifiedPluginManager(
         )
     }
 
-    private fun rollbackGenerationSwap(entry: ManagedPlugin, snapshot: EntrySnapshot) {
+    private suspend fun rollbackGenerationSwap(entry: ManagedPlugin, snapshot: EntrySnapshot) {
         runCatching {
             entry.plugin = snapshot.plugin
             entry.pluginClassName = snapshot.pluginClassName
