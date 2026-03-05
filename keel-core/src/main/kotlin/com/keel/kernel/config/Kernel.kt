@@ -198,7 +198,7 @@ class Kernel(
             }
         }
 
-        app.environment.monitor.subscribe(ApplicationStarted) {
+        app.monitor.subscribe(ApplicationStarted) {
             logger.info("Kernel started")
             BannerPrinter.print(port = serverPort, enablePluginHotReload = enablePluginHotReload)
             kotlinx.coroutines.runBlocking {
@@ -219,7 +219,7 @@ class Kernel(
             }
         }
 
-        app.environment.monitor.subscribe(ApplicationStopping) {
+        app.monitor.subscribe(ApplicationStopping) {
             logger.info("Kernel stopping")
             configHotReloader.stopWatching()
             kotlinx.coroutines.runBlocking {
@@ -254,11 +254,11 @@ class Kernel(
         }
     }
 
-    private fun locateRepoRoot(start: File): File {
-        return generateSequence(start) { it.parentFile }
-            .firstOrNull { File(it, "settings.gradle.kts").exists() }
-            ?: start
-    }
+    // Test support: avoid reflection in external test modules.
+    fun pluginManager(): UnifiedPluginManager = pluginManager
+
+    // Test support: avoid reflection in external test modules.
+    fun pluginDevelopmentSourceIds(): Set<String> = pluginDevelopmentSources.map { it.pluginId }.toSet()
 }
 
 class KernelBuilder {
@@ -399,14 +399,14 @@ class KernelBuilder {
         }
         return instance
     }
-
-    private fun locateRepoRoot(start: File): File {
-        return generateSequence(start) { it.parentFile }
-            .firstOrNull { File(it, "settings.gradle.kts").exists() }
-            ?: start
-    }
 }
 
 fun buildKernel(block: KernelBuilder.() -> Unit) = KernelBuilder().apply(block).build()
 
 fun runKernel(port: Int = 8080, block: KernelBuilder.() -> Unit) = buildKernel(block).run(port)
+
+private fun locateRepoRoot(start: File): File {
+    return generateSequence(start) { it.parentFile }
+        .firstOrNull { File(it, "settings.gradle.kts").exists() }
+        ?: start
+}

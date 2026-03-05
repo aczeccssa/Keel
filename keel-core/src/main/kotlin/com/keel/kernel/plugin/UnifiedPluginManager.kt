@@ -109,95 +109,170 @@ class UnifiedPluginManager(
     ): ReloadAttemptResult {
         registerPluginSource(source)
         return withPluginLock(source.pluginId) { entry ->
-            val previousPlugin = entry.plugin
-            val previousPluginClassName = entry.pluginClassName
-            val previousEndpointById = entry.endpointById.toMap()
-            val previousTopology = entry.endpointTopology.toSet()
-            val previousSseByPath = entry.sseByPath.toMap()
-            val previousSourceClassLoader = entry.sourceClassLoader
-            val previousConfig = entry.config
-            val previousGeneration = entry.generation
-
-            val newClassLoader = buildSourceClassLoader(classpathModulePaths, source)
-            val newPlugin = runCatching {
-                val clazz = newClassLoader.loadClass(source.implementationClassName)
-                require(KeelPlugin::class.java.isAssignableFrom(clazz)) {
-                    "Class ${source.implementationClassName} does not implement KeelPlugin"
-                }
-                @Suppress("UNCHECKED_CAST")
-                clazz.getDeclaredConstructor().newInstance() as KeelPlugin
-            }.getOrElse { error ->
-                newClassLoader.close()
-                return@withPluginLock ReloadAttemptResult(
-                    pluginId = source.pluginId,
-                    outcome = DevReloadOutcome.RELOAD_FAILED,
-                    message = "Source load failed: ${error.message}"
-                )
-            }
-
-            if (newPlugin.descriptor.pluginId != source.pluginId) {
-                newClassLoader.close()
-                return@withPluginLock ReloadAttemptResult(
-                    pluginId = source.pluginId,
-                    outcome = DevReloadOutcome.RELOAD_FAILED,
-                    message = "Descriptor pluginId mismatch: expected ${source.pluginId}, actual ${newPlugin.descriptor.pluginId}"
-                )
-            }
-
-            val newEndpoints = newPlugin.endpoints().filterIsInstance<PluginEndpointDefinition<*, *>>()
-            val newEndpointById = newEndpoints.associateBy { it.endpointId }
-            val newTopology = newEndpoints.map { operationKey(it.method, fullPluginPath(source.pluginId, it.path)) }.toSet()
-            val newSseByPath = newPlugin.endpoints().filterIsInstance<PluginSseDefinition>().associateBy { it.path }
-            if (newTopology != previousTopology) {
-                newClassLoader.close()
-                return@withPluginLock ReloadAttemptResult(
-                    pluginId = source.pluginId,
-                    outcome = DevReloadOutcome.RESTART_REQUIRED,
-                    message = "Endpoint topology changed and requires restart"
-                )
+            val snapshot = snapshotEntry(entry)
+            val loadResult = loadNewPluginGeneration(source, classpathModulePaths)
+            val newGeneration = loadResult.generation ?: return@withPluginLock ReloadAttemptResult(
+                pluginId = source.pluginId,
+                outcome = DevReloadOutcome.RELOAD_FAILED,
+                message = "Source load failed: ${loadResult.error ?: "unknown error"}"
+            )
+            val validationFailure = validateNewPluginGeneration(source, newGeneration, snapshot)
+            if (validationFailure != null) {
+                runCatching { newGeneration.classLoader.close() }
+                return@withPluginLock validationFailure
             }
 
             return@withPluginLock runCatching {
-                stopPluginLocked(entry)
-                disposePluginLocked(entry)
-                entry.plugin = newPlugin
-                entry.pluginClassName = source.implementationClassName
-                entry.endpointById = newEndpointById.toMutableMap()
-                entry.endpointTopology = newTopology
-                entry.sseByPath = newSseByPath.toMutableMap()
-                entry.sourceClassLoader = newClassLoader
-                entry.config = PluginConfigLoader.load(newPlugin.descriptor).copy(runtimeMode = source.runtimeMode)
-                entry.generation = previousGeneration.next()
-                normalizeProcessState(entry)
-                entry.lastFailure = null
-                startPluginLocked(entry)
-                previousSourceClassLoader?.close()
-                ReloadAttemptResult(
-                    pluginId = source.pluginId,
-                    outcome = DevReloadOutcome.RELOADED,
-                    message = "Reloaded from source ($reason)"
-                )
+                performGenerationSwap(entry, source, newGeneration, snapshot, reason)
             }.getOrElse { error ->
                 logger.warn("Source reload failed for ${source.pluginId}: ${error.message}")
-                runCatching {
-                    entry.plugin = previousPlugin
-                    entry.pluginClassName = previousPluginClassName
-                    entry.endpointById = previousEndpointById.toMutableMap()
-                    entry.endpointTopology = previousTopology
-                    entry.sseByPath = previousSseByPath.toMutableMap()
-                    entry.sourceClassLoader = previousSourceClassLoader
-                    entry.config = previousConfig
-                    entry.generation = previousGeneration
-                    normalizeProcessState(entry)
-                    startPluginLocked(entry)
-                }
-                runCatching { newClassLoader.close() }
+                rollbackGenerationSwap(entry, snapshot)
+                runCatching { newGeneration.classLoader.close() }
                 ReloadAttemptResult(
                     pluginId = source.pluginId,
                     outcome = DevReloadOutcome.RELOAD_FAILED,
                     message = "Source reload failed: ${error.message}"
                 )
             }
+        }
+    }
+
+    private data class EntrySnapshot(
+        val plugin: KeelPlugin,
+        val pluginClassName: String,
+        val endpointById: Map<String, PluginEndpointDefinition<*, *>>,
+        val topology: Set<String>,
+        val sseByPath: Map<String, PluginSseDefinition>,
+        val sourceClassLoader: URLClassLoader?,
+        val config: PluginConfig,
+        val generation: PluginGeneration
+    )
+
+    private data class NewGeneration(
+        val plugin: KeelPlugin,
+        val classLoader: URLClassLoader,
+        val endpointById: Map<String, PluginEndpointDefinition<*, *>>,
+        val topology: Set<String>,
+        val sseByPath: Map<String, PluginSseDefinition>
+    )
+
+    private data class LoadResult(
+        val generation: NewGeneration? = null,
+        val error: String? = null
+    )
+
+    private fun snapshotEntry(entry: ManagedPlugin): EntrySnapshot {
+        return EntrySnapshot(
+            plugin = entry.plugin,
+            pluginClassName = entry.pluginClassName,
+            endpointById = entry.endpointById.toMap(),
+            topology = entry.endpointTopology.toSet(),
+            sseByPath = entry.sseByPath.toMap(),
+            sourceClassLoader = entry.sourceClassLoader,
+            config = entry.config,
+            generation = entry.generation
+        )
+    }
+
+    private fun loadNewPluginGeneration(
+        source: PluginDevelopmentSource,
+        classpathModulePaths: Set<String>
+    ): LoadResult {
+        val classLoader = buildSourceClassLoader(classpathModulePaths, source)
+        val plugin = runCatching {
+            val clazz = classLoader.loadClass(source.implementationClassName)
+            require(KeelPlugin::class.java.isAssignableFrom(clazz)) {
+                "Class ${source.implementationClassName} does not implement KeelPlugin"
+            }
+            @Suppress("UNCHECKED_CAST")
+            clazz.getDeclaredConstructor().newInstance() as KeelPlugin
+        }.getOrElse { error ->
+            runCatching { classLoader.close() }
+            return LoadResult(error = error.message)
+        }
+
+        val endpoints = plugin.endpoints()
+        val endpointById = endpoints.filterIsInstance<PluginEndpointDefinition<*, *>>()
+            .associateBy { it.endpointId }
+        val topology = endpoints.filterIsInstance<PluginEndpointDefinition<*, *>>()
+            .map { operationKey(it.method, fullPluginPath(source.pluginId, it.path)) }
+            .toSet()
+        val sseByPath = endpoints.filterIsInstance<PluginSseDefinition>()
+            .associateBy { it.path }
+
+        return LoadResult(
+            generation = NewGeneration(
+                plugin = plugin,
+                classLoader = classLoader,
+                endpointById = endpointById,
+                topology = topology,
+                sseByPath = sseByPath
+            )
+        )
+    }
+
+    private fun validateNewPluginGeneration(
+        source: PluginDevelopmentSource,
+        newGeneration: NewGeneration,
+        snapshot: EntrySnapshot
+    ): ReloadAttemptResult? {
+        if (newGeneration.plugin.descriptor.pluginId != source.pluginId) {
+            return ReloadAttemptResult(
+                pluginId = source.pluginId,
+                outcome = DevReloadOutcome.RELOAD_FAILED,
+                message = "Descriptor pluginId mismatch: expected ${source.pluginId}, actual ${newGeneration.plugin.descriptor.pluginId}"
+            )
+        }
+        if (newGeneration.topology != snapshot.topology) {
+            return ReloadAttemptResult(
+                pluginId = source.pluginId,
+                outcome = DevReloadOutcome.RESTART_REQUIRED,
+                message = "Endpoint topology changed and requires restart"
+            )
+        }
+        return null
+    }
+
+    private fun performGenerationSwap(
+        entry: ManagedPlugin,
+        source: PluginDevelopmentSource,
+        newGeneration: NewGeneration,
+        snapshot: EntrySnapshot,
+        reason: String
+    ): ReloadAttemptResult {
+        stopPluginLocked(entry)
+        disposePluginLocked(entry)
+        entry.plugin = newGeneration.plugin
+        entry.pluginClassName = source.implementationClassName
+        entry.endpointById = newGeneration.endpointById.toMutableMap()
+        entry.endpointTopology = newGeneration.topology
+        entry.sseByPath = newGeneration.sseByPath.toMutableMap()
+        entry.sourceClassLoader = newGeneration.classLoader
+        entry.config = PluginConfigLoader.load(newGeneration.plugin.descriptor).copy(runtimeMode = source.runtimeMode)
+        entry.generation = snapshot.generation.next()
+        normalizeProcessState(entry)
+        entry.lastFailure = null
+        startPluginLocked(entry)
+        snapshot.sourceClassLoader?.close()
+        return ReloadAttemptResult(
+            pluginId = source.pluginId,
+            outcome = DevReloadOutcome.RELOADED,
+            message = "Reloaded from source ($reason)"
+        )
+    }
+
+    private fun rollbackGenerationSwap(entry: ManagedPlugin, snapshot: EntrySnapshot) {
+        runCatching {
+            entry.plugin = snapshot.plugin
+            entry.pluginClassName = snapshot.pluginClassName
+            entry.endpointById = snapshot.endpointById.toMutableMap()
+            entry.endpointTopology = snapshot.topology
+            entry.sseByPath = snapshot.sseByPath.toMutableMap()
+            entry.sourceClassLoader = snapshot.sourceClassLoader
+            entry.config = snapshot.config
+            entry.generation = snapshot.generation
+            normalizeProcessState(entry)
+            startPluginLocked(entry)
         }
     }
 
@@ -963,50 +1038,37 @@ class UnifiedPluginManager(
         urls += classpathEntries
         return SourceFirstClassLoader(
             urls = urls.toTypedArray(),
-            parent = this::class.java.classLoader,
-            protectedPrefixes = setOf(
-                "java.",
-                "javax.",
-                "kotlin.",
-                "kotlinx.",
-                "sun.",
-                "io.ktor.",
-                "org.slf4j.",
-                "com.keel.kernel.",
-                "com.keel.contract.",
-                "com.keel.openapi."
-            ),
-            fallbackPreferredPrefixes = setOf(
-                source.implementationClassName.substringBeforeLast('.', missingDelimiterValue = source.implementationClassName)
-            )
+            parent = this::class.java.classLoader
         )
     }
 
     private class SourceFirstClassLoader(
         urls: Array<java.net.URL>,
-        parent: ClassLoader,
-        private val protectedPrefixes: Set<String>,
-        private val fallbackPreferredPrefixes: Set<String>
+        parent: ClassLoader
     ) : URLClassLoader(urls, parent) {
         override fun loadClass(name: String, resolve: Boolean): Class<*> {
             synchronized(getClassLoadingLock(name)) {
                 findLoadedClass(name)?.let { return it }
-                val parentOnly = protectedPrefixes.any { name.startsWith(it) }
-                if (!parentOnly) {
+                if (!isAlwaysParentLoaded(name) && hasChildResource(name)) {
                     runCatching { findClass(name) }.getOrNull()?.let { loaded ->
                         if (resolve) resolveClass(loaded)
                         return loaded
                     }
-                    val fallbackChildFirst = fallbackPreferredPrefixes.any { prefix -> name == prefix || name.startsWith("$prefix.") }
-                    if (fallbackChildFirst) {
-                        runCatching { findClass(name) }.getOrNull()?.let { loaded ->
-                            if (resolve) resolveClass(loaded)
-                            return loaded
-                        }
-                    }
                 }
                 return super.loadClass(name, resolve)
             }
+        }
+
+        private fun hasChildResource(className: String): Boolean {
+            val resource = className.replace('.', '/') + ".class"
+            return findResource(resource) != null
+        }
+
+        private fun isAlwaysParentLoaded(name: String): Boolean {
+            return name.startsWith("java.") ||
+                name.startsWith("javax.") ||
+                name.startsWith("kotlin.") ||
+                name.startsWith("kotlinx.")
         }
     }
 

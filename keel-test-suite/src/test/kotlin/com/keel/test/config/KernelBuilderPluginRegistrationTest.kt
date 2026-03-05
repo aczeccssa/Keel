@@ -31,8 +31,8 @@ class KernelBuilderPluginRegistrationTest {
         assertFalse("hotreload-off" in sourcePluginIds)
 
         val pluginManager = kernel.pluginManager()
-        val runtimeConfig = pluginManager.runtimeConfigObject("hotreload-off")
-        assertEquals(false, runtimeConfig.enabled())
+        val runtimeConfig = pluginManager.getRuntimeConfig("hotreload-off")
+        assertEquals(false, runtimeConfig?.enabled)
     }
 
     @Test
@@ -51,31 +51,6 @@ class KernelBuilderPluginRegistrationTest {
         val moduleWatchDirectories = field.get(kernel) as List<String>
 
         assertEquals(listOf(dir1, dir2), moduleWatchDirectories)
-    }
-
-    private fun Any.pluginDevelopmentSourceIds(): Set<String> {
-        val field = javaClass.getDeclaredField("pluginDevelopmentSources")
-        field.isAccessible = true
-        val value = field.get(this) as List<*>
-        return value.mapNotNull { source ->
-            source?.javaClass?.getDeclaredMethod("getPluginId")?.invoke(source) as? String
-        }.toSet()
-    }
-
-    private fun Any.runtimeConfigObject(pluginId: String): Any {
-        val method = javaClass.getDeclaredMethod("getRuntimeConfig", String::class.java)
-        return method.invoke(this, pluginId) ?: error("Runtime config not found for $pluginId")
-    }
-
-    private fun Any.enabled(): Boolean {
-        val method = javaClass.getDeclaredMethod("getEnabled")
-        return method.invoke(this) as Boolean
-    }
-
-    private fun Any.pluginManager(): Any {
-        val field = javaClass.getDeclaredField("pluginManager")
-        field.isAccessible = true
-        return field.get(this)
     }
 
     class HotReloadOnPlugin : KeelPlugin {

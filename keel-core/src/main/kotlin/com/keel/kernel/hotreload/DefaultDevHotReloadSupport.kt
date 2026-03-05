@@ -136,7 +136,7 @@ class DefaultPluginImpactAnalyzer(
 
 class GradleDevBuildExecutor(
     private val repoRoot: File,
-    private val gradleCommand: List<String> = listOf("./gradlew")
+    private val gradleCommand: List<String> = if (System.getProperty("os.name").lowercase().contains("win")) listOf("gradlew.bat") else listOf("./gradlew")
 ) : DevBuildExecutor {
     override suspend fun buildModules(moduleProjectPaths: Set<String>): DevBuildResult {
         if (moduleProjectPaths.isEmpty()) {
@@ -163,6 +163,13 @@ class DefaultDevHotReloadEngine(
     private val buildExecutor: DevBuildExecutor,
     private val generationLoader: DevPluginGenerationLoader
 ) : DevHotReloadEngine {
+    private companion object {
+        private const val RELOAD_DEBOUNCE_MS = 500L
+        private const val FAILURE_WINDOW_MS = 60_000L
+        private const val FAILURE_THRESHOLD = 8
+        private const val COOLDOWN_MS = 30_000L
+    }
+
     private val logger = KeelLoggerService.getLogger("DevHotReloadEngine")
     private val _events = MutableSharedFlow<DevReloadEvent>(extraBufferCapacity = 256)
     private val _status = MutableStateFlow(DevHotReloadStatus())
@@ -227,7 +234,7 @@ class DefaultDevHotReloadEngine(
 
         val now = System.currentTimeMillis()
         val lastAttempt = lastAttemptByPlugin[pluginId]
-        if (lastAttempt != null && now - lastAttempt < 500) {
+        if (lastAttempt != null && now - lastAttempt < RELOAD_DEBOUNCE_MS) {
             return ReloadAttemptResult(pluginId, DevReloadOutcome.RELOAD_FAILED, "Debounced")
         }
         if (isCoolingDown(pluginId, now)) {
@@ -306,16 +313,32 @@ class DefaultDevHotReloadEngine(
         outcome: DevReloadOutcome? = null,
         message: String
     ) {
-        val event = DevReloadEvent(stage = stage, pluginId = pluginId, modulePath = modulePath, outcome = outcome, message = message)
+        val event = DevReloadEvent(
+            stage = stage,
+            pluginId = pluginId,
+            modulePath = modulePath?.let(::sanitizeModulePath),
+            outcome = outcome,
+            message = message
+        )
         _events.tryEmit(event)
         _status.value = _status.value.copy(lastEvent = event)
         logger.info("hotreload stage=${stage.name} pluginId=${pluginId ?: "-"} message=$message")
     }
 
+    private fun sanitizeModulePath(path: String): String {
+        val normalized = normalizeModulePath(repoRoot, path)
+        val root = repoRoot.absoluteFile.normalize().invariantSeparatorsPath
+        return when {
+            normalized == root -> ":"
+            normalized.startsWith("$root/") -> normalized.removePrefix("$root/")
+            else -> normalized
+        }
+    }
+
     private fun markFailure(pluginId: String, now: Long) {
         val window = failureWindow.computeIfAbsent(pluginId) { mutableListOf() }
         window += now
-        window.removeAll { now - it > 60_000 }
+        window.removeAll { now - it > FAILURE_WINDOW_MS }
     }
 
     private fun clearFailures(pluginId: String) {
@@ -324,9 +347,9 @@ class DefaultDevHotReloadEngine(
 
     private fun isCoolingDown(pluginId: String, now: Long): Boolean {
         val window = failureWindow[pluginId] ?: return false
-        window.removeAll { now - it > 60_000 }
-        if (window.size < 8) return false
-        return now - window.last() < 30_000
+        window.removeAll { now - it > FAILURE_WINDOW_MS }
+        if (window.size < FAILURE_THRESHOLD) return false
+        return now - window.last() < COOLDOWN_MS
     }
 }
 

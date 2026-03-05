@@ -43,6 +43,7 @@ import io.ktor.server.http.content.*
  *   KEEL_ENV=development java -jar keel-samples.jar
  */
 fun main() = runKernel {
+    // Mount Plugins
     plugin(HelloWorldPlugin())
     plugin(DbDemoPlugin())
     plugin(ObservabilityPlugin())
