@@ -126,6 +126,26 @@ After startup, these endpoints are useful:
 ./gradlew dokka
 ```
 
+### CI/CD
+
+Keel uses GitHub Actions for CI, GitHub Packages releases, and Dokka docs.
+
+CI (Linux) runs:
+
+```bash
+./gradlew build dokkaGenerate
+```
+
+Code quality runs in a dedicated Qodana workflow on `pull_request` and `main`.
+
+Release (tag `v*`) publishes artifacts to GitHub Packages and creates a GitHub Release.
+
+Required GitHub secrets:
+
+- `QODANA_TOKEN` (recommended for Qodana Cloud integration)
+
+Docs are published to GitHub Pages from `dokkaGenerateHtml`.
+
 ## Configuration
 
 Keel supports both system properties and environment variables.
