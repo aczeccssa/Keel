@@ -133,7 +133,7 @@ Keel uses GitHub Actions for CI, GitHub Packages releases, and Dokka docs.
 CI (Linux) runs:
 
 ```bash
-./gradlew build dokkaGenerate
+./gradlew build dokkaGenerateHtml
 ```
 
 Code quality runs in a dedicated Qodana workflow on `pull_request` and `main`.
@@ -144,7 +144,7 @@ Required GitHub secrets:
 
 - `QODANA_TOKEN` (recommended for Qodana Cloud integration)
 
-Docs are published to GitHub Pages from `dokkaGenerateHtml`.
+Docs are published to GitHub Pages from `dokkaGenerateHtml` (Dokka v2; `dokkaHtml` is a v1 task and disabled).
 
 ## Configuration
 

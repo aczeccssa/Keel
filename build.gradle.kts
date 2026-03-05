@@ -142,8 +142,10 @@ subprojects {
                     name = "GitHubPackages"
                     url = uri("https://maven.pkg.github.com/aczeccssa/Keel")
                     credentials {
-                        username = System.getenv("GITHUB_ACTOR") ?: System.getenv("GPR_USER")
-                        password = System.getenv("GITHUB_TOKEN") ?: System.getenv("GPR_TOKEN")
+                        username = providers.environmentVariable("GITHUB_ACTOR").orNull
+                            ?: providers.environmentVariable("GPR_USER").orNull
+                        password = providers.environmentVariable("GITHUB_TOKEN").orNull
+                            ?: providers.environmentVariable("GPR_TOKEN").orNull
                     }
                 }
             }
