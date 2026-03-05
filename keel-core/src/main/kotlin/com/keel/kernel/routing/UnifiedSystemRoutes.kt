@@ -1,6 +1,9 @@
 package com.keel.kernel.routing
 
 import com.keel.contract.dto.KeelResponse
+import com.keel.kernel.config.FrameworkVersion
+import com.keel.kernel.hotreload.DevHotReloadEngine
+import com.keel.kernel.hotreload.DevReloadEvent
 import com.keel.kernel.api.KeelApi
 import com.keel.kernel.loader.DefaultPluginLoader
 import com.keel.kernel.loader.DiscoveredPlugin
@@ -15,14 +18,19 @@ import com.keel.kernel.plugin.UnifiedPluginManager
 import io.ktor.server.application.call
 import io.ktor.server.response.respond
 import io.ktor.server.routing.Route
+import io.ktor.server.sse.sse
+import io.ktor.sse.ServerSentEvent
+import kotlinx.coroutines.flow.collect
 import kotlinx.datetime.Clock
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
 
 object UnifiedSystemRouteInstaller {
     fun install(
         route: Route,
         pluginManager: UnifiedPluginManager,
-        pluginLoader: DefaultPluginLoader? = null
+        pluginLoader: DefaultPluginLoader? = null,
+        hotReloadEngine: DevHotReloadEngine? = null
     ) {
         with(route) {
             systemApi {
@@ -106,9 +114,77 @@ object UnifiedSystemRouteInstaller {
                     }
                 }
 
+                typedRoute("/hotreload") {
+                    @KeelApi("Get dev hot reload status", tags = ["system", "hotreload"], responseEnvelope = true)
+                    typedGet<HotReloadStatusData>("/status") {
+                        val status = hotReloadEngine?.status()
+                        call.respond(
+                            KeelResponse.success(
+                                HotReloadStatusData(
+                                    enabled = hotReloadEngine != null,
+                                    inProgress = status?.inProgress ?: false,
+                                    lastFailureSummary = status?.lastFailureSummary,
+                                    lastEvent = status?.lastEvent
+                                )
+                            )
+                        )
+                    }
+
+                    @KeelApi("Trigger manual dev hot reload", tags = ["system", "hotreload"], responseEnvelope = true)
+                    typedPost<PluginActionResult>("/reload/{pluginId}") {
+                        val pluginId = call.parameters["pluginId"]
+                        if (hotReloadEngine == null || pluginId.isNullOrBlank()) {
+                            call.respond(KeelResponse.failure<Unit>(400, "Hot reload engine unavailable or missing pluginId"))
+                            return@typedPost
+                        }
+                        val result = hotReloadEngine.reloadPlugin(pluginId, reason = "manual-api")
+                        call.respond(
+                            KeelResponse.success(
+                                PluginActionResult(
+                                    pluginId = pluginId,
+                                    message = result.message,
+                                    action = "hotreload",
+                                    lifecycleState = pluginManager.getRuntimeSnapshot(pluginId)?.lifecycleState,
+                                    healthState = pluginManager.getRuntimeSnapshot(pluginId)?.healthState,
+                                    generation = pluginManager.getRuntimeSnapshot(pluginId)?.generation?.value
+                                )
+                            )
+                        )
+                    }
+
+                    // SSE endpoint intentionally kept out of OpenAPI body schema detail.
+                    sse("/events") {
+                        if (hotReloadEngine == null) {
+                            send(ServerSentEvent(data = """{"error":"hotreload disabled"}""", event = "error"))
+                            close()
+                            return@sse
+                        }
+                        send(ServerSentEvent(data = """{"type":"connected"}""", event = "system"))
+                        hotReloadEngine.events.collect { event ->
+                            send(
+                                ServerSentEvent(
+                                    data = Json.encodeToString(DevReloadEvent.serializer(), event),
+                                    event = "hotreload"
+                                )
+                            )
+                        }
+                    }
+                }
+
                 @KeelApi("Health check", tags = ["system"], responseEnvelope = true)
                 typedGet<HealthData>("/health") {
                     call.respond(KeelResponse.success(HealthData("ok", Clock.System.now().toEpochMilliseconds())))
+                }
+
+                @KeelApi("Framework version", tags = ["system"], responseEnvelope = true)
+                typedGet<FrameworkVersionData>("/version") {
+                    call.respond(
+                        KeelResponse.success(
+                            FrameworkVersionData(
+                                frameworkVersion = FrameworkVersion.current()
+                            )
+                        )
+                    )
                 }
             }
         }
@@ -117,9 +193,10 @@ object UnifiedSystemRouteInstaller {
 
 fun Route.unifiedSystemRoutes(
     pluginManager: UnifiedPluginManager,
-    pluginLoader: DefaultPluginLoader? = null
+    pluginLoader: DefaultPluginLoader? = null,
+    hotReloadEngine: DevHotReloadEngine? = null
 ) {
-    UnifiedSystemRouteInstaller.install(this, pluginManager, pluginLoader)
+    UnifiedSystemRouteInstaller.install(this, pluginManager, pluginLoader, hotReloadEngine)
 }
 
 private suspend fun io.ktor.server.routing.RoutingContext.handleLifecycleAction(
@@ -270,4 +347,17 @@ data class PluginActionResult(
 data class HealthData(
     val status: String,
     val timestamp: Long
+)
+
+@Serializable
+data class HotReloadStatusData(
+    val enabled: Boolean,
+    val inProgress: Boolean,
+    val lastFailureSummary: String? = null,
+    val lastEvent: DevReloadEvent? = null
+)
+
+@Serializable
+data class FrameworkVersionData(
+    val frameworkVersion: String
 )

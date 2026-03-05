@@ -29,7 +29,7 @@ This makes Keel suitable for internal platforms, modular SaaS backends, plugin-b
 - Unified plugin gateway under `/api/plugins/{pluginId}`.
 - Runtime plugin lifecycle management: register, start, stop, dispose, reload, replace, discover.
 - Dual runtime modes: `IN_PROCESS` and `EXTERNAL_JVM`.
-- Development hot reload for config and plugin directories.
+- Development hot reload for plugin source modules (enabled per plugin via `plugin(..., hotReloadEnabled = true)`).
 - Typed route DSL for plugin APIs and system APIs.
 - OpenAPI 3.1 aggregation with Swagger UI.
 - Koin-based dependency injection.
@@ -73,7 +73,7 @@ At startup, the kernel:
 2. Registers plugins and mounts their routes.
 3. Exposes system endpoints under `/api/_system`.
 4. Starts enabled plugins and observability services.
-5. Watches config and plugin directories in development mode.
+5. Watches development module directories and applies hot reload rules in development mode.
 
 ## Repository Layout
 
@@ -145,6 +145,34 @@ Hot reload behavior:
 - Development mode enables config watching by default.
 - Plugin directory watching can be toggled through `runKernel { enablePluginHotReload(true | false) }`.
 
+### Dev HotReload Trigger Rules
+
+Dev HotReload is source-oriented and only applies to plugins registered with `hotReloadEnabled = true`.
+
+Will trigger hot reload attempt:
+
+- Files under `src/main/**` in watched plugin modules
+- Files under `src/commonMain/**` in watched plugin modules
+- Files under `src/main/resources/**` or `src/commonMain/resources/**` in watched plugin modules
+
+Will NOT trigger hot reload attempt:
+
+- Changes under `build/**` (compiled artifacts and intermediate outputs)
+- Changes in paths that cannot be classified as plugin source/resource changes
+
+Will be marked as `RESTART_REQUIRED` (no hot swap):
+
+- `build.gradle.kts`, `settings.gradle.kts`, `gradle.properties`
+- Kernel module source changes (for example in `keel-core`)
+
+Notes:
+
+- Default watch scope is caller module + recursive Gradle `project(...)` dependencies.
+- Calling `watchDirectories(...)` overrides the default watch scope.
+- Endpoint topology changes (method/path set changes) are not hot-swapped and are treated as restart-required.
+- Manual dev reload API: `POST /api/_system/hotreload/reload/{pluginId}`.
+- Legacy `pluginSource(...)` remains available for compatibility but is deprecated.
+
 ## Developer Experience
 
 Keel is designed around a typed plugin API instead of raw route wiring. A plugin provides:
@@ -177,7 +205,11 @@ Register the plugin in the kernel:
 ```kotlin
 fun main() {
     runKernel(port = 8080) {
-        plugin(MyPlugin())
+        plugin(
+            plugin = MyPlugin(),
+            enabled = true,
+            hotReloadEnabled = true
+        )
     }
 }
 ```
@@ -198,6 +230,9 @@ Keel exposes system management endpoints under `/api/_system`.
 - `POST /api/_system/plugins/{pluginId}/reload`
 - `POST /api/_system/plugins/{pluginId}/replace`
 - `POST /api/_system/plugins/discover`
+- `GET /api/_system/hotreload/status`
+- `GET /api/_system/hotreload/events` (SSE)
+- `POST /api/_system/hotreload/reload/{pluginId}`
 
 ### Documentation endpoints
 

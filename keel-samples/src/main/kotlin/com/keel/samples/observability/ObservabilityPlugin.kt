@@ -6,6 +6,7 @@ import com.keel.kernel.observability.KeelObservability
 import com.keel.kernel.plugin.KeelPlugin
 import com.keel.kernel.plugin.PluginDescriptor
 import com.keel.kernel.plugin.PluginEndpointBuilders
+import com.keel.kernel.plugin.PluginEndpointBuilders.pluginEndpoints
 import com.keel.kernel.plugin.PluginInitContext
 import com.keel.kernel.plugin.PluginResult
 import com.keel.kernel.plugin.PluginRuntimeContext
@@ -43,7 +44,7 @@ class ObservabilityPlugin : KeelPlugin {
         logger.info("Initialized observability plugin")
     }
 
-    override fun endpoints() = PluginEndpointBuilders.pluginEndpoints(descriptor.pluginId) {
+    override fun endpoints() = pluginEndpoints(descriptor.pluginId) {
         @KeelApi("Open the observability UI", tags = ["observability"])
         get<RedirectMessage> {
             PluginResult(

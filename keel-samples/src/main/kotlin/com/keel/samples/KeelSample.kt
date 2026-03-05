@@ -1,36 +1,33 @@
 package com.keel.samples
 
-import com.keel.kernel.config.ConfigHotReloader
-import com.keel.kernel.config.KeelConstants
 import com.keel.kernel.config.runKernel
-import com.keel.samples.observability.ObservabilityPlugin
 import com.keel.samples.dbdemo.DbDemoPlugin
 import com.keel.samples.helloworld.HelloWorldPlugin
-import io.ktor.server.http.content.staticResources
+import com.keel.samples.observability.ObservabilityPlugin
+import io.ktor.server.http.content.*
 
 /**
- * Sample Application demonstrating the Keel framework.
+ * Sample application demonstrating the Keel framework.
  *
  * This minimal example shows how to:
- * 1. Create a plugin by implementing KeelPlugin
- * 2. Register plugins with the Kernel
- * 3. Framework automatically handles:
+ * 1. Implement plugins via KeelPlugin
+ * 2. Register plugins with per-plugin enable + hot reload switches
+ * 3. Let the framework handle:
  *    - Plugin lifecycle (onInit, onStart, onStop, onDispose)
  *    - Plugin route mounting
  *    - System routes at /api/_system/
  *    - Gateway interceptor for plugin status checking
  *    - Config hot-reloader in development mode
- *    - Plugin hot-reload in development mode
+ *    - Dev HotReload for plugins that opt in via plugin(..., hotReloadEnabled = true)
  *
- * Configuration Options:
- *
- * Environment Mode:
+ * Configuration:
  * - System Property: -Dkeel.env=development (or production)
  * - Environment Variable: KEEL_ENV=development (or production)
  *
- * Hot Reload:
- * - Enabled by default in development mode
- * - Can be disabled with: runKernel { enablePluginHotReload(false) }
+ * Hot reload behavior:
+ * - Dev mode enables hot reload globally by default.
+ * - Each plugin can opt in/out with plugin(..., hotReloadEnabled = true|false).
+ * - Call runKernel { enablePluginHotReload(false) } to disable dev hot reload entirely.
  *
  * Run this app and visit:
  * - http://localhost:8080/api/plugins/helloworld
@@ -45,41 +42,14 @@ import io.ktor.server.http.content.staticResources
  * Or set environment variable:
  *   KEEL_ENV=development java -jar keel-samples.jar
  */
-fun main() {
-    // Server port
-    val port = ConfigHotReloader.getServerPort()
-    val baseUrl = "http://localhost:$port"
+fun main() = runKernel {
+    // Mount Plugins
+    plugin(HelloWorldPlugin())
+    plugin(DbDemoPlugin())
+    plugin(ObservabilityPlugin())
 
-    // Print current environment info
-    val isDev = ConfigHotReloader.isDevelopmentMode()
-    val env = if (isDev) KeelConstants.ENV_DEVELOPMENT else KeelConstants.ENV_PRODUCTION
-    println("========================================")
-    println("  Keel Framework - Keel Sample")
-    println("========================================")
-    println("  Environment : $env")
-    println("  Hot Reload  : $isDev")
-    println("  WebUI       : $baseUrl/")
-    println("  Swagger UI  : $baseUrl/api/_system/docs/")
-    println("  OpenAPI JSON: $baseUrl/api/_system/docs/openapi.json")
-    println("  System API  : $baseUrl/api/_system/plugins")
-    println("  Observe API : $baseUrl/api/plugins/observability/topology")
-    println("  Observe UI  : $baseUrl/api/plugins/observability/ui")
-    println("  Plugin API  : $baseUrl/api/plugins/helloworld")
-    println("  DB Demo API : $baseUrl/api/plugins/dbdemo/notes")
-    println("========================================")
-
-    // Build and run the Kernel - framework handles everything automatically
-    runKernel(port) {
-        plugin(HelloWorldPlugin())
-        plugin(DbDemoPlugin())
-        plugin(ObservabilityPlugin())
-
-        // Optional: Disable hot reload even in development mode
-        enablePluginHotReload(isDev)
-
-        // Global: Register global static resources
-        routing {
-            staticResources("/", "static")
-        }
+    // Global: Register global static resources
+    routing {
+        staticResources("/", "static")
     }
 }

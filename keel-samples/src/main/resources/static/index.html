@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Keel - Control Panel</title>
+    <link rel="shortcut icon" href="/favicon.svg" type="image/x-icon">
     <style>
         /* --- Theme Variables (Strictly Aligned with Observability UI) --- */
         :root {
@@ -1059,6 +1060,11 @@
         return d.toLocaleTimeString('en-US', {hour12: false});
     }
 
+    function unwrapData(json) {
+        if (!json) return null;
+        return json.data !== undefined ? json.data : json;
+    }
+
     // ─── Plugins ───
     async function fetchPlugins() {
         try {
@@ -1385,13 +1391,14 @@
         try {
             let resp = await fetch(API_BASE + '/api/plugins/dbdemo/stats');
             let json = await resp.json();
-            if (json) {
-                document.getElementById('db-active').textContent = json.activeNotes;
-                document.getElementById('db-pinned').textContent = json.pinnedNotes;
-                document.getElementById('db-deleted').textContent = json.deletedNotes;
-                document.getElementById('db-total').textContent = json.totalNotes;
-                document.getElementById('db-table-name').textContent = json.tableName;
-                document.getElementById('db-engine').textContent = json.databaseType;
+            let data = unwrapData(json);
+            if (data) {
+                document.getElementById('db-active').textContent = data.activeNotes;
+                document.getElementById('db-pinned').textContent = data.pinnedNotes;
+                document.getElementById('db-deleted').textContent = data.deletedNotes;
+                document.getElementById('db-total').textContent = data.totalNotes;
+                document.getElementById('db-table-name').textContent = data.tableName;
+                document.getElementById('db-engine').textContent = data.databaseType;
             }
         } catch (e) { /* silent */
         }
@@ -1405,8 +1412,9 @@
         try {
             let resp = await fetch(API_BASE + endpoint);
             let json = await resp.json();
-            if (json && json.notes) {
-                renderNotes(json.notes);
+            let data = unwrapData(json);
+            if (data && data.notes) {
+                renderNotes(data.notes);
             }
         } catch (e) {
             document.getElementById('notes-list').innerHTML = '<div style="text-align:center;color:var(--bad);padding:24px;">Failed to load notes. Is the dbdemo plugin enabled?</div>';

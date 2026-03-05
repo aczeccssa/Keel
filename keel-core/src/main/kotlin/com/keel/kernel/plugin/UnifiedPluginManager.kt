@@ -1,5 +1,21 @@
 package com.keel.kernel.plugin
 
+import com.keel.kernel.hotreload.DevReloadOutcome
+import com.keel.kernel.hotreload.PluginDevelopmentSource
+import com.keel.kernel.hotreload.ReloadAttemptResult
+import com.keel.kernel.plugin.PluginDocumentationLookup
+import com.keel.kernel.plugin.buildRequestContext
+import com.keel.kernel.plugin.decodeRequestBody
+import com.keel.kernel.plugin.encodeResponseBody
+import com.keel.kernel.plugin.fullPluginPath
+import com.keel.kernel.plugin.operationKey
+import com.keel.kernel.plugin.readValidatedRequestBody
+import com.keel.kernel.plugin.registerPluginOperation
+import com.keel.kernel.plugin.registerPluginSseOperation
+import com.keel.kernel.plugin.registerPluginStaticOperation
+import com.keel.kernel.plugin.respondPluginResult
+import com.keel.kernel.plugin.runtimeJson
+import com.keel.kernel.plugin.serializer
 import com.keel.kernel.di.PluginPrivateScopeHandle
 import com.keel.kernel.di.PluginScopeManager
 import com.keel.kernel.isolation.PluginProcessSupervisor
@@ -12,6 +28,7 @@ import io.ktor.http.HttpMethod
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.request.path
 import io.ktor.server.http.content.staticResources
+import io.ktor.server.response.respond
 import io.ktor.server.routing.Route
 import io.ktor.server.routing.Routing
 import io.ktor.server.routing.delete
@@ -22,6 +39,7 @@ import io.ktor.server.routing.route
 import io.ktor.server.sse.sse
 import io.ktor.sse.ServerSentEvent
 import java.util.concurrent.atomic.AtomicInteger
+import java.net.URLClassLoader
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
@@ -45,6 +63,7 @@ class UnifiedPluginManager(
 ) : PluginAvailability {
     private val logger = KeelLoggerService.getLogger("UnifiedPluginManager")
     private val entries = ConcurrentHashMap<String, ManagedPlugin>()
+    private val developmentSources = ConcurrentHashMap<String, PluginDevelopmentSource>()
     private val pluginScopeManager = PluginScopeManager(kernelKoin)
     private var routing: Routing? = null
 
@@ -52,12 +71,22 @@ class UnifiedPluginManager(
     private val kernelInstanceId = Uuid.random().toString()
     private val kernelRuntimeDir = runtimeRoot.toPath().resolve(kernelInstanceId.take(8)).createDirectories().toFile()
 
-    fun registerPlugin(plugin: KeelPlugin) {
+    fun registerPlugin(plugin: KeelPlugin, enabledOverride: Boolean? = null) {
         val descriptor = plugin.descriptor
-        val config = PluginConfigLoader.load(descriptor)
+        val config = PluginConfigLoader.load(descriptor).let { loaded ->
+            enabledOverride?.let { loaded.copy(enabled = it) } ?: loaded
+        }
+        val routeDefinitions = plugin.endpoints()
+        val endpointDefinitions = routeDefinitions.filterIsInstance<PluginEndpointDefinition<*, *>>()
+        val endpointById = endpointDefinitions.associateBy { it.endpointId }.toMutableMap()
+        val endpointTopology = endpointDefinitions.map { operationKey(it.method, fullPluginPath(descriptor.pluginId, it.path)) }.toSet()
+        val sseByPath = routeDefinitions.filterIsInstance<PluginSseDefinition>().associateBy { it.path }.toMutableMap()
         entries[descriptor.pluginId] = ManagedPlugin(
             plugin = plugin,
             pluginClassName = plugin.javaClass.name,
+            endpointById = endpointById,
+            endpointTopology = endpointTopology,
+            sseByPath = sseByPath,
             config = config,
             lifecycleState = PluginLifecycleState.REGISTERED,
             healthState = PluginHealthState.UNKNOWN,
@@ -65,6 +94,186 @@ class UnifiedPluginManager(
             processState = if (config.runtimeMode == PluginRuntimeMode.EXTERNAL_JVM) PluginProcessState.STOPPED else null
         )
         logger.info("Registered unified plugin ${descriptor.pluginId} mode=${config.runtimeMode}")
+    }
+
+    fun registerPluginSource(source: PluginDevelopmentSource) {
+        developmentSources[source.pluginId] = source
+    }
+
+    fun hasPluginSource(pluginId: String): Boolean = developmentSources.containsKey(pluginId)
+
+    suspend fun reloadPluginFromSource(
+        source: PluginDevelopmentSource,
+        classpathModulePaths: Set<String>,
+        reason: String
+    ): ReloadAttemptResult {
+        registerPluginSource(source)
+        return withPluginLock(source.pluginId) { entry ->
+            val snapshot = snapshotEntry(entry)
+            val loadResult = loadNewPluginGeneration(source, classpathModulePaths)
+            val newGeneration = loadResult.generation ?: return@withPluginLock ReloadAttemptResult(
+                pluginId = source.pluginId,
+                outcome = DevReloadOutcome.RELOAD_FAILED,
+                message = "Source load failed: ${loadResult.error ?: "unknown error"}"
+            )
+            val validationFailure = validateNewPluginGeneration(source, newGeneration, snapshot)
+            if (validationFailure != null) {
+                runCatching { newGeneration.classLoader.close() }
+                return@withPluginLock validationFailure
+            }
+
+            return@withPluginLock runCatching {
+                performGenerationSwap(entry, source, newGeneration, snapshot, reason)
+            }.getOrElse { error ->
+                logger.warn("Source reload failed for ${source.pluginId}: ${error.message}")
+                rollbackGenerationSwap(entry, snapshot)
+                runCatching { newGeneration.classLoader.close() }
+                ReloadAttemptResult(
+                    pluginId = source.pluginId,
+                    outcome = DevReloadOutcome.RELOAD_FAILED,
+                    message = "Source reload failed: ${error.message}"
+                )
+            }
+        }
+    }
+
+    private data class EntrySnapshot(
+        val plugin: KeelPlugin,
+        val pluginClassName: String,
+        val endpointById: Map<String, PluginEndpointDefinition<*, *>>,
+        val topology: Set<String>,
+        val sseByPath: Map<String, PluginSseDefinition>,
+        val sourceClassLoader: URLClassLoader?,
+        val config: PluginConfig,
+        val generation: PluginGeneration
+    )
+
+    private data class NewGeneration(
+        val plugin: KeelPlugin,
+        val classLoader: URLClassLoader,
+        val endpointById: Map<String, PluginEndpointDefinition<*, *>>,
+        val topology: Set<String>,
+        val sseByPath: Map<String, PluginSseDefinition>
+    )
+
+    private data class LoadResult(
+        val generation: NewGeneration? = null,
+        val error: String? = null
+    )
+
+    private fun snapshotEntry(entry: ManagedPlugin): EntrySnapshot {
+        return EntrySnapshot(
+            plugin = entry.plugin,
+            pluginClassName = entry.pluginClassName,
+            endpointById = entry.endpointById.toMap(),
+            topology = entry.endpointTopology.toSet(),
+            sseByPath = entry.sseByPath.toMap(),
+            sourceClassLoader = entry.sourceClassLoader,
+            config = entry.config,
+            generation = entry.generation
+        )
+    }
+
+    private fun loadNewPluginGeneration(
+        source: PluginDevelopmentSource,
+        classpathModulePaths: Set<String>
+    ): LoadResult {
+        val classLoader = buildSourceClassLoader(classpathModulePaths, source)
+        val plugin = runCatching {
+            val clazz = classLoader.loadClass(source.implementationClassName)
+            require(KeelPlugin::class.java.isAssignableFrom(clazz)) {
+                "Class ${source.implementationClassName} does not implement KeelPlugin"
+            }
+            @Suppress("UNCHECKED_CAST")
+            clazz.getDeclaredConstructor().newInstance() as KeelPlugin
+        }.getOrElse { error ->
+            runCatching { classLoader.close() }
+            return LoadResult(error = error.message)
+        }
+
+        val endpoints = plugin.endpoints()
+        val endpointById = endpoints.filterIsInstance<PluginEndpointDefinition<*, *>>()
+            .associateBy { it.endpointId }
+        val topology = endpoints.filterIsInstance<PluginEndpointDefinition<*, *>>()
+            .map { operationKey(it.method, fullPluginPath(source.pluginId, it.path)) }
+            .toSet()
+        val sseByPath = endpoints.filterIsInstance<PluginSseDefinition>()
+            .associateBy { it.path }
+
+        return LoadResult(
+            generation = NewGeneration(
+                plugin = plugin,
+                classLoader = classLoader,
+                endpointById = endpointById,
+                topology = topology,
+                sseByPath = sseByPath
+            )
+        )
+    }
+
+    private fun validateNewPluginGeneration(
+        source: PluginDevelopmentSource,
+        newGeneration: NewGeneration,
+        snapshot: EntrySnapshot
+    ): ReloadAttemptResult? {
+        if (newGeneration.plugin.descriptor.pluginId != source.pluginId) {
+            return ReloadAttemptResult(
+                pluginId = source.pluginId,
+                outcome = DevReloadOutcome.RELOAD_FAILED,
+                message = "Descriptor pluginId mismatch: expected ${source.pluginId}, actual ${newGeneration.plugin.descriptor.pluginId}"
+            )
+        }
+        if (newGeneration.topology != snapshot.topology) {
+            return ReloadAttemptResult(
+                pluginId = source.pluginId,
+                outcome = DevReloadOutcome.RESTART_REQUIRED,
+                message = "Endpoint topology changed and requires restart"
+            )
+        }
+        return null
+    }
+
+    private suspend fun performGenerationSwap(
+        entry: ManagedPlugin,
+        source: PluginDevelopmentSource,
+        newGeneration: NewGeneration,
+        snapshot: EntrySnapshot,
+        reason: String
+    ): ReloadAttemptResult {
+        stopPluginLocked(entry)
+        disposePluginLocked(entry)
+        entry.plugin = newGeneration.plugin
+        entry.pluginClassName = source.implementationClassName
+        entry.endpointById = newGeneration.endpointById.toMutableMap()
+        entry.endpointTopology = newGeneration.topology
+        entry.sseByPath = newGeneration.sseByPath.toMutableMap()
+        entry.sourceClassLoader = newGeneration.classLoader
+        entry.config = PluginConfigLoader.load(newGeneration.plugin.descriptor).copy(runtimeMode = source.runtimeMode)
+        entry.generation = snapshot.generation.next()
+        normalizeProcessState(entry)
+        entry.lastFailure = null
+        startPluginLocked(entry)
+        snapshot.sourceClassLoader?.close()
+        return ReloadAttemptResult(
+            pluginId = source.pluginId,
+            outcome = DevReloadOutcome.RELOADED,
+            message = "Reloaded from source ($reason)"
+        )
+    }
+
+    private suspend fun rollbackGenerationSwap(entry: ManagedPlugin, snapshot: EntrySnapshot) {
+        runCatching {
+            entry.plugin = snapshot.plugin
+            entry.pluginClassName = snapshot.pluginClassName
+            entry.endpointById = snapshot.endpointById.toMutableMap()
+            entry.endpointTopology = snapshot.topology
+            entry.sseByPath = snapshot.sseByPath.toMutableMap()
+            entry.sourceClassLoader = snapshot.sourceClassLoader
+            entry.config = snapshot.config
+            entry.generation = snapshot.generation
+            normalizeProcessState(entry)
+            startPluginLocked(entry)
+        }
     }
 
     fun mountRoutes(routing: Routing) {
@@ -333,6 +542,8 @@ class UnifiedPluginManager(
         entry.supervisor = null
         entry.processId = null
         entry.processHandle = null
+        runCatching { entry.sourceClassLoader?.close() }
+        entry.sourceClassLoader = null
         entry.initialized = false
         entry.healthState = PluginHealthState.UNKNOWN
         entry.lifecycleState = PluginLifecycleState.DISPOSED
@@ -491,16 +702,16 @@ class UnifiedPluginManager(
                 val fullPath = endpoint.path.ifBlank { "" }
                 val responseEnvelope = PluginDocumentationLookup.find(endpoint.method, fullPluginPath(pluginId, endpoint.path))?.responseEnvelope ?: false
                 when (endpoint.method) {
-                    HttpMethod.Get -> mountGet(fullPath, entry, endpoint, responseEnvelope)
-                    HttpMethod.Post -> mountPost(fullPath, entry, endpoint, responseEnvelope)
-                    HttpMethod.Put -> mountPut(fullPath, entry, endpoint, responseEnvelope)
-                    HttpMethod.Delete -> mountDelete(fullPath, entry, endpoint, responseEnvelope)
+                    HttpMethod.Get -> mountGet(fullPath, pluginId, endpoint.endpointId, responseEnvelope)
+                    HttpMethod.Post -> mountPost(fullPath, pluginId, endpoint.endpointId, responseEnvelope)
+                    HttpMethod.Put -> mountPut(fullPath, pluginId, endpoint.endpointId, responseEnvelope)
+                    HttpMethod.Delete -> mountDelete(fullPath, pluginId, endpoint.endpointId, responseEnvelope)
                     else -> error("Unsupported method: ${endpoint.method}")
                 }
             }
             for (definition in sseRoutes) {
                 registerPluginSseOperation(pluginId, definition.path)
-                mountSse(definition.path, entry, definition)
+                mountSse(definition.path, pluginId, definition.path)
             }
             for (definition in staticRoutes) {
                 registerPluginStaticOperation(pluginId, definition.path, definition.index != null)
@@ -509,41 +720,41 @@ class UnifiedPluginManager(
         }
     }
 
-    private fun Route.mountGet(path: String, entry: ManagedPlugin, endpoint: PluginEndpointDefinition<*, *>, responseEnvelope: Boolean) {
+    private fun Route.mountGet(path: String, pluginId: String, endpointId: String, responseEnvelope: Boolean) {
         if (path.isBlank()) {
-            get { handleInvocation(entry, endpoint, responseEnvelope) }
+            get { handleInvocation(pluginId, endpointId, responseEnvelope) }
         } else {
-            get(path) { handleInvocation(entry, endpoint, responseEnvelope) }
+            get(path) { handleInvocation(pluginId, endpointId, responseEnvelope) }
         }
     }
 
-    private fun Route.mountPost(path: String, entry: ManagedPlugin, endpoint: PluginEndpointDefinition<*, *>, responseEnvelope: Boolean) {
+    private fun Route.mountPost(path: String, pluginId: String, endpointId: String, responseEnvelope: Boolean) {
         if (path.isBlank()) {
-            post { handleInvocation(entry, endpoint, responseEnvelope) }
+            post { handleInvocation(pluginId, endpointId, responseEnvelope) }
         } else {
-            post(path) { handleInvocation(entry, endpoint, responseEnvelope) }
+            post(path) { handleInvocation(pluginId, endpointId, responseEnvelope) }
         }
     }
 
-    private fun Route.mountPut(path: String, entry: ManagedPlugin, endpoint: PluginEndpointDefinition<*, *>, responseEnvelope: Boolean) {
+    private fun Route.mountPut(path: String, pluginId: String, endpointId: String, responseEnvelope: Boolean) {
         if (path.isBlank()) {
-            put { handleInvocation(entry, endpoint, responseEnvelope) }
+            put { handleInvocation(pluginId, endpointId, responseEnvelope) }
         } else {
-            put(path) { handleInvocation(entry, endpoint, responseEnvelope) }
+            put(path) { handleInvocation(pluginId, endpointId, responseEnvelope) }
         }
     }
 
-    private fun Route.mountDelete(path: String, entry: ManagedPlugin, endpoint: PluginEndpointDefinition<*, *>, responseEnvelope: Boolean) {
+    private fun Route.mountDelete(path: String, pluginId: String, endpointId: String, responseEnvelope: Boolean) {
         if (path.isBlank()) {
-            delete { handleInvocation(entry, endpoint, responseEnvelope) }
+            delete { handleInvocation(pluginId, endpointId, responseEnvelope) }
         } else {
-            delete(path) { handleInvocation(entry, endpoint, responseEnvelope) }
+            delete(path) { handleInvocation(pluginId, endpointId, responseEnvelope) }
         }
     }
 
-    private fun Route.mountSse(path: String, entry: ManagedPlugin, definition: PluginSseDefinition) {
+    private fun Route.mountSse(path: String, pluginId: String, ssePath: String) {
         val handler: suspend io.ktor.server.sse.ServerSSESession.() -> Unit = {
-            when (resolveDispatchDisposition(entry.plugin.descriptor.pluginId)) {
+            when (resolveDispatchDisposition(pluginId)) {
                 PluginDispatchDisposition.NOT_FOUND -> {
                     close()
                 }
@@ -553,8 +764,14 @@ class UnifiedPluginManager(
                 }
                 PluginDispatchDisposition.PASS_THROUGH,
                 PluginDispatchDisposition.AVAILABLE -> {
-                    val context = buildRequestContext(call, entry.plugin.descriptor.pluginId, HttpMethod.Get, call.request.path())
-                    definition.handler.invoke(PluginSseSession(context, this))
+                    val definition = resolveSseDefinition(pluginId, ssePath)
+                    if (definition == null) {
+                        send(ServerSentEvent(data = """{"error":"plugin route unavailable"}""", event = "error"))
+                        close()
+                    } else {
+                        val context = buildRequestContext(call, pluginId, HttpMethod.Get, call.request.path())
+                        definition.handler.invoke(PluginSseSession(context, this))
+                    }
                 }
             }
         }
@@ -566,10 +783,15 @@ class UnifiedPluginManager(
     }
 
     private suspend fun io.ktor.server.routing.RoutingContext.handleInvocation(
-        entry: ManagedPlugin,
-        endpoint: PluginEndpointDefinition<*, *>,
+        pluginId: String,
+        endpointId: String,
         responseEnvelope: Boolean
     ) {
+        val entry = entries[pluginId] ?: return
+        val endpoint = resolveEndpoint(pluginId, endpointId) ?: run {
+            call.respond(HttpStatusCode.NotFound, "Plugin endpoint not found")
+            return
+        }
         try {
             val tracer = ObservabilityTracing.kernelTracer()
             if (!ensureDispatchAvailable(entry, endpoint, responseEnvelope)) return
@@ -787,9 +1009,75 @@ class UnifiedPluginManager(
 
     fun applicationRouting(): Routing = requireNotNull(routing) { "Routing has not been mounted yet" }
 
+    private fun resolveEndpoint(pluginId: String, endpointId: String): PluginEndpointDefinition<*, *>? {
+        return entries[pluginId]?.endpointById?.get(endpointId)
+    }
+
+    private fun resolveSseDefinition(pluginId: String, path: String): PluginSseDefinition? {
+        return entries[pluginId]?.sseByPath?.get(path)
+    }
+
+    private fun buildSourceClassLoader(
+        classpathModulePaths: Set<String>,
+        source: PluginDevelopmentSource
+    ): URLClassLoader {
+        val urls = linkedSetOf<java.net.URL>()
+        classpathModulePaths.forEach { modulePath ->
+            val moduleDir = File(modulePath)
+            val classDirs = listOf(
+                File(moduleDir, "build/classes/kotlin/main"),
+                File(moduleDir, "build/classes/java/main"),
+                File(moduleDir, "build/resources/main")
+            )
+            classDirs.filter { it.exists() }.forEach { urls += it.toURI().toURL() }
+        }
+        val classpathEntries = currentClasspath.split(File.pathSeparator)
+            .map(::File)
+            .filter(File::exists)
+            .map { it.toURI().toURL() }
+        urls += classpathEntries
+        return SourceFirstClassLoader(
+            urls = urls.toTypedArray(),
+            parent = this::class.java.classLoader
+        )
+    }
+
+    private class SourceFirstClassLoader(
+        urls: Array<java.net.URL>,
+        parent: ClassLoader
+    ) : URLClassLoader(urls, parent) {
+        override fun loadClass(name: String, resolve: Boolean): Class<*> {
+            synchronized(getClassLoadingLock(name)) {
+                findLoadedClass(name)?.let { return it }
+                if (!isAlwaysParentLoaded(name) && hasChildResource(name)) {
+                    runCatching { findClass(name) }.getOrNull()?.let { loaded ->
+                        if (resolve) resolveClass(loaded)
+                        return loaded
+                    }
+                }
+                return super.loadClass(name, resolve)
+            }
+        }
+
+        private fun hasChildResource(className: String): Boolean {
+            val resource = className.replace('.', '/') + ".class"
+            return findResource(resource) != null
+        }
+
+        private fun isAlwaysParentLoaded(name: String): Boolean {
+            return name.startsWith("java.") ||
+                name.startsWith("javax.") ||
+                name.startsWith("kotlin.") ||
+                name.startsWith("kotlinx.")
+        }
+    }
+
     private data class ManagedPlugin(
-        val plugin: KeelPlugin,
-        val pluginClassName: String,
+        var plugin: KeelPlugin,
+        var pluginClassName: String,
+        var endpointById: MutableMap<String, PluginEndpointDefinition<*, *>>,
+        var endpointTopology: Set<String>,
+        var sseByPath: MutableMap<String, PluginSseDefinition>,
         var config: PluginConfig,
         var lifecycleState: PluginLifecycleState,
         var healthState: PluginHealthState,
@@ -804,7 +1092,8 @@ class UnifiedPluginManager(
         val inFlightInvocations: AtomicInteger = AtomicInteger(0),
         var privateScopeHandle: PluginPrivateScopeHandle? = null,
         var lastFailure: PluginFailureRecord? = null,
-        var runtimeContext: BasicPluginRuntimeContext? = null
+        var runtimeContext: BasicPluginRuntimeContext? = null,
+        var sourceClassLoader: URLClassLoader? = null
     )
 
     private data class BasicPluginInitContext(

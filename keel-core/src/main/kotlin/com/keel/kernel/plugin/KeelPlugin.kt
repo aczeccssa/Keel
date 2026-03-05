@@ -172,11 +172,6 @@ object PluginEndpointBuilders {
     ): List<PluginRouteDefinition> = PluginEndpointDsl(pluginId).apply(block).build()
 }
 
-fun pluginEndpoints(
-    pluginId: String,
-    block: PluginEndpointDsl.() -> Unit
-): List<PluginRouteDefinition> = PluginEndpointBuilders.pluginEndpoints(pluginId, block)
-
 class PluginEndpointDsl internal constructor(
     pluginId: String,
     private val basePath: String = "",

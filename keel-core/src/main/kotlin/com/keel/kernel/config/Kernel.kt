@@ -1,5 +1,12 @@
 package com.keel.kernel.config
 
+import com.keel.kernel.hotreload.DefaultDevHotReloadEngine
+import com.keel.kernel.hotreload.DefaultModuleChangeClassifier
+import com.keel.kernel.hotreload.DefaultPluginImpactAnalyzer
+import com.keel.kernel.hotreload.GradleDevBuildExecutor
+import com.keel.kernel.hotreload.ManagerBackedGenerationLoader
+import com.keel.kernel.hotreload.PluginDevelopmentSource
+import com.keel.kernel.hotreload.PluginSourceInference
 import com.keel.kernel.loader.DefaultPluginLoader
 import com.keel.kernel.logging.KeelLoggerService
 import com.keel.kernel.logging.LogLevel
@@ -8,11 +15,14 @@ import com.keel.kernel.observability.ObservabilityHub
 import com.keel.kernel.observability.ObservabilityTracing
 import com.keel.kernel.observability.KeelObservability
 import com.keel.kernel.plugin.KeelPlugin
+import com.keel.kernel.plugin.PluginRuntimeMode
 import com.keel.kernel.plugin.UnifiedPluginManager
 import com.keel.kernel.routing.DocRouteInstaller
 import com.keel.kernel.routing.GatewayInterceptor
 import com.keel.kernel.routing.LogRouteInstaller
 import com.keel.kernel.routing.UnifiedSystemRouteInstaller
+import com.lestere.opensource.ApplicationMode
+import com.lestere.opensource.logger.SoulLogger
 import com.lestere.opensource.logger.SoulLoggerPlugin
 import io.ktor.serialization.kotlinx.json.json
 import io.ktor.server.application.Application
@@ -37,6 +47,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import io.opentelemetry.context.Context
+import java.io.File
 import org.koin.core.Koin
 import org.koin.core.KoinApplication
 import org.koin.core.context.startKoin
@@ -46,16 +57,29 @@ class Kernel(
     private val koin: Koin,
     private val enablePluginHotReload: Boolean = ConfigHotReloader.isDevelopmentMode(),
     private val moduleWatchDirectories: List<String> = emptyList(),
+    private val pluginDevelopmentSources: List<PluginDevelopmentSource> = emptyList(),
     private val customRouting: (Route.() -> Unit)? = null
 ) {
     private val logger = KeelLoggerService.getLogger("Kernel")
+    private val repoRoot: File = locateRepoRoot(File(System.getProperty("user.dir")).absoluteFile.normalize())
     private val kernelScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val pluginLoader = DefaultPluginLoader()
     private val observabilityHub = ObservabilityHub(ObservabilityConfig.fromSystem())
     private val observabilityTracing = ObservabilityTracing.initKernel(observabilityHub)
     private val pluginManager = UnifiedPluginManager(koin, observabilityHub = observabilityHub)
-    private val pluginLifecycleHotReloadAdapter = PluginLifecycleHotReloadAdapter(pluginManager)
+    private val devHotReloadEngine = DefaultDevHotReloadEngine(
+        repoRoot = repoRoot,
+        impactAnalyzer = DefaultPluginImpactAnalyzer(repoRoot),
+        classifier = DefaultModuleChangeClassifier(),
+        buildExecutor = GradleDevBuildExecutor(repoRoot),
+        generationLoader = ManagerBackedGenerationLoader(pluginManager)
+    )
+    private val pluginLifecycleHotReloadAdapter = PluginLifecycleHotReloadAdapter(
+        pluginManager,
+        if (enablePluginHotReload) devHotReloadEngine else null
+    )
     private val gatewayInterceptor = GatewayInterceptor(pluginManager)
+    private var serverPort: Int = ConfigHotReloader.getServerPort()
 
     private val configHotReloader: ConfigHotReloader by lazy {
         ConfigHotReloader.Builder()
@@ -86,18 +110,30 @@ class Kernel(
                 }
             }
             .onModuleChange { event ->
-                handleModuleChange(event)
+                kernelScope.launch {
+                    if (enablePluginHotReload && pluginDevelopmentSources.isNotEmpty()) {
+                        devHotReloadEngine.handleModuleChange(event)
+                    } else {
+                        handleModuleChange(event)
+                    }
+                }
             }
             .build()
     }
 
-    fun registerPlugin(plugin: KeelPlugin): Kernel {
-        pluginManager.registerPlugin(plugin)
+    fun registerPlugin(plugin: KeelPlugin, enabledOverride: Boolean? = null): Kernel {
+        pluginManager.registerPlugin(plugin, enabledOverride)
         return this
     }
 
     fun run(port: Int = 8080) {
-        embeddedServer(Netty, port = port) {
+        serverPort = port
+        if (ConfigHotReloader.isDevelopmentMode()) {
+            System.setProperty("io.ktor.development", "true")
+        } else {
+            System.setProperty("io.ktor.development", "false")
+        }
+        embeddedServer(Netty, port = port, watchPaths = emptyList()) {
             install(ContentNegotiation) {
                 json(Json {
                     prettyPrint = true
@@ -105,7 +141,15 @@ class Kernel(
                 })
             }
             install(SSE)
-            install(SoulLoggerPlugin)
+            install(SoulLoggerPlugin) {
+                if (ConfigHotReloader.isDevelopmentMode()) {
+                    mode = ApplicationMode.DEVELOPMENT
+                    level = SoulLogger.Level.DEBUG
+                } else {
+                    mode = ApplicationMode.PRODUCTION
+                    level = SoulLogger.Level.INFO
+                }
+            }
 
             val loggerService = KeelLoggerService.initialize()
             if (ConfigHotReloader.isDevelopmentMode()) {
@@ -123,7 +167,7 @@ class Kernel(
 
             routing {
                 pluginManager.mountRoutes(this)
-                UnifiedSystemRouteInstaller.install(this, pluginManager, pluginLoader)
+                UnifiedSystemRouteInstaller.install(this, pluginManager, pluginLoader, devHotReloadEngine)
                 LogRouteInstaller.install(this)
                 DocRouteInstaller.install(this)
                 staticResources("/", "static")
@@ -154,10 +198,15 @@ class Kernel(
             }
         }
 
-        app.environment.monitor.subscribe(ApplicationStarted) {
+        app.monitor.subscribe(ApplicationStarted) {
             logger.info("Kernel started")
+            BannerPrinter.print(port = serverPort, enablePluginHotReload = enablePluginHotReload)
             kotlinx.coroutines.runBlocking {
                 pluginManager.startEnabledPlugins()
+            }
+            pluginDevelopmentSources.forEach { source ->
+                pluginManager.registerPluginSource(source)
+                devHotReloadEngine.registerSource(source)
             }
             observabilityHub.start(kernelScope)
 
@@ -170,7 +219,7 @@ class Kernel(
             }
         }
 
-        app.environment.monitor.subscribe(ApplicationStopping) {
+        app.monitor.subscribe(ApplicationStopping) {
             logger.info("Kernel stopping")
             configHotReloader.stopWatching()
             kotlinx.coroutines.runBlocking {
@@ -204,21 +253,61 @@ class Kernel(
             }
         }
     }
+
+    // Test support: avoid reflection in external test modules.
+    fun pluginManager(): UnifiedPluginManager = pluginManager
+
+    // Test support: avoid reflection in external test modules.
+    fun pluginDevelopmentSourceIds(): Set<String> = pluginDevelopmentSources.map { it.pluginId }.toSet()
 }
 
 class KernelBuilder {
+    private data class PluginRegistration(
+        val plugin: KeelPlugin,
+        val enabled: Boolean,
+        val hotReloadEnabled: Boolean
+    )
+
+    private val logger = KeelLoggerService.getLogger("KernelBuilder")
     private var koinConfig: (KoinApplication.() -> Unit)? = null
-    private val plugins = mutableListOf<KeelPlugin>()
+    private val plugins = mutableListOf<PluginRegistration>()
+    private val pluginSources = mutableListOf<PluginDevelopmentSource>()
     private var enablePluginHotReload: Boolean = ConfigHotReloader.isDevelopmentMode()
     private val watchDirectories = linkedSetOf<String>()
+    private var watchDirectoriesExplicitlySet: Boolean = false
     private var customRouting: (Route.() -> Unit)? = null
 
     fun koin(config: KoinApplication.() -> Unit) {
         koinConfig = config
     }
 
-    fun plugin(plugin: KeelPlugin) {
-        plugins += plugin
+    fun plugin(
+        plugin: KeelPlugin,
+        enabled: Boolean = true,
+        hotReloadEnabled: Boolean = ConfigHotReloader.isDevelopmentMode()
+    ) {
+        plugins += PluginRegistration(
+            plugin = plugin,
+            enabled = enabled,
+            hotReloadEnabled = hotReloadEnabled
+        )
+    }
+
+    @Deprecated(
+        message = "Use plugin(plugin, enabled, hotReloadEnabled) instead. Source metadata is inferred from plugin class."
+    )
+    fun pluginSource(
+        pluginId: String,
+        owningModulePath: String,
+        implementationClassName: String,
+        runtimeMode: PluginRuntimeMode = PluginRuntimeMode.IN_PROCESS
+    ) {
+        pluginSources += PluginDevelopmentSource(
+            pluginId = pluginId,
+            owningModulePath = owningModulePath,
+            implementationClassName = implementationClassName,
+            runtimeMode = runtimeMode
+        )
     }
 
     fun enablePluginHotReload(enabled: Boolean) {
@@ -226,6 +315,7 @@ class KernelBuilder {
     }
 
     fun watchDirectories(dirs: Iterable<String>) {
+        watchDirectoriesExplicitlySet = true
         dirs.map(String::trim)
             .filter(String::isNotEmpty)
             .forEach(watchDirectories::add)
@@ -240,23 +330,83 @@ class KernelBuilder {
     }
 
     fun build(): Kernel {
+        val cwd = File(System.getProperty("user.dir")).absoluteFile.normalize()
+        val repoRoot = locateRepoRoot(cwd)
         val koin = startKoin(koinConfig ?: {}).koin
         val defaultWatchDirectories = DefaultWatchDirectoriesResolver.resolveForCallingModule()
         val effectiveWatchDirectories = buildList {
-            addAll(defaultWatchDirectories)
-            addAll(watchDirectories)
+            if (watchDirectoriesExplicitlySet) {
+                addAll(watchDirectories)
+            } else {
+                addAll(defaultWatchDirectories)
+            }
         }.distinct()
+
+        val pluginSourceById = linkedMapOf<String, PluginDevelopmentSource>()
+        pluginSources.forEach { source ->
+            pluginSourceById[source.pluginId] = source
+        }
+        plugins
+            .asSequence()
+            .filter { it.hotReloadEnabled }
+            .forEach { registration ->
+                val pluginId = registration.plugin.descriptor.pluginId
+                if (pluginSourceById.containsKey(pluginId)) {
+                    return@forEach
+                }
+                val inferred = PluginSourceInference.infer(
+                    plugin = registration.plugin,
+                    repoRoot = repoRoot
+                )
+                if (inferred != null) {
+                    pluginSourceById[pluginId] = inferred
+                } else {
+                    logger.warn("Unable to infer plugin source for $pluginId; dev hot reload disabled for this plugin")
+                }
+            }
+
         val kernel = Kernel(
             koin = koin,
             enablePluginHotReload = enablePluginHotReload,
             moduleWatchDirectories = effectiveWatchDirectories,
+            pluginDevelopmentSources = pluginSourceById.values.toList(),
             customRouting = customRouting
         )
-        plugins.forEach { kernel.registerPlugin(it) }
+        val registeredPluginIds = linkedSetOf<String>()
+        plugins.forEach { registration ->
+            val plugin = registration.plugin
+            registeredPluginIds += plugin.descriptor.pluginId
+            kernel.registerPlugin(plugin, enabledOverride = registration.enabled)
+        }
+        pluginSourceById.values.forEach { source ->
+            if (!registeredPluginIds.add(source.pluginId)) {
+                return@forEach
+            }
+            val plugin = instantiatePluginFromSource(source)
+            kernel.registerPlugin(plugin)
+        }
         return kernel
+    }
+
+    private fun instantiatePluginFromSource(source: PluginDevelopmentSource): KeelPlugin {
+        val clazz = Class.forName(source.implementationClassName)
+        require(KeelPlugin::class.java.isAssignableFrom(clazz)) {
+            "pluginSource class ${source.implementationClassName} must implement KeelPlugin"
+        }
+        val instance = clazz.getDeclaredConstructor().newInstance() as KeelPlugin
+        require(instance.descriptor.pluginId == source.pluginId) {
+            "pluginSource pluginId ${source.pluginId} does not match descriptor pluginId ${instance.descriptor.pluginId}"
+        }
+        return instance
     }
 }
 
 fun buildKernel(block: KernelBuilder.() -> Unit) = KernelBuilder().apply(block).build()
 
 fun runKernel(port: Int = 8080, block: KernelBuilder.() -> Unit) = buildKernel(block).run(port)
+
+private fun locateRepoRoot(start: File): File {
+    return generateSequence(start) { it.parentFile }
+        .firstOrNull { File(it, "settings.gradle.kts").exists() }
+        ?: start
+}

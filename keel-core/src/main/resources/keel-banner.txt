@@ -1,0 +1,14 @@
+ ██ ▄█▀▓█████ ▓█████  ██▓
+ ██▄█▒ ▓█   ▀ ▓█   ▀ ▓██▒
+▓███▄░ ▒███   ▒███   ▒██░
+▓██ █▄ ▒▓█  ▄ ▒▓█  ▄ ▒██░
+▒██▒ █▄░▒████▒░▒████▒░██████▒
+▒ ▒▒ ▓▒░░ ▒░ ░░░ ▒░ ░░ ▒░▓  ░
+░ ░▒ ▒░ ░ ░  ░ ░ ░  ░░ ░ ▒  ░
+░ ░░ ░    ░      ░     ░ ░
+░  ░      ░  ░   ░  ░    ░  ░
+
+:: Keel Web Framework ::  (v${keel.version})
+[Ktor: ${ktor.version} | Exposed: ${exposed.version} | Engine: ${engine}]
+[Env: ${env} | Status: ${status} | HotReload: ${hotreload}]
+[Bind: ${ip}:${port} | Time: ${time}]
