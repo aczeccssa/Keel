@@ -2,7 +2,7 @@ package com.keel.openapi.annotations
 
 /**
  * Marks a KPlugin class for OpenAPI spec generation.
- * KSP processor reads this annotation and generates an [OpenApiFragment] registry object
+ * KSP processor reads this annotation and generates an `OpenApiFragment` registry object
  * plus SPI registration for runtime discovery.
  *
  * @param pluginId The unique plugin identifier (e.g., "dbdemo")
