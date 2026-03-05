@@ -27,11 +27,44 @@ fun Route.openApiRoutes() {
         }
 
         get {
-            call.respondText(ResourceReader.readAsString("/openapi/swagger-ui.html"), ContentType.Text.Html)
+            call.respondText(SWAGGER_UI_HTML, ContentType.Text.Html)
         }
 
         get("/") {
-            call.respondText(ResourceReader.readAsString("/openapi/swagger-ui.html"), ContentType.Text.Html)
+            call.respondText(SWAGGER_UI_HTML, ContentType.Text.Html)
         }
     }
 }
+
+private val SWAGGER_UI_HTML = """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Keel API Documentation</title>
+    <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css">
+    <style>
+        body { margin: 0; padding: 0; }
+        #swagger-ui { max-width: 1200px; margin: 0 auto; }
+    </style>
+</head>
+<body>
+    <div id="swagger-ui"></div>
+    <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
+    <script>
+        SwaggerUIBundle({
+            url: '/api/_system/docs/openapi.json',
+            dom_id: '#swagger-ui',
+            presets: [
+                SwaggerUIBundle.presets.apis,
+                SwaggerUIBundle.SwaggerUIStandalonePreset
+            ],
+            layout: 'BaseLayout',
+            deepLinking: true,
+            defaultModelsExpandDepth: 1
+        });
+    </script>
+</body>
+</html>
+""".trimIndent()

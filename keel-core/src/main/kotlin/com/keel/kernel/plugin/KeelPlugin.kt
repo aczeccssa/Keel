@@ -165,44 +165,27 @@ class PluginSseSession internal constructor(
     }
 }
 
-object PluginEndpointBuilders {
-    fun pluginEndpoints(
-        pluginId: String,
-        block: PluginEndpointDsl.() -> Unit
-    ): List<PluginRouteDefinition> = PluginEndpointDsl(pluginId).apply(block).build()
-}
-
 fun pluginEndpoints(
     pluginId: String,
     block: PluginEndpointDsl.() -> Unit
-): List<PluginRouteDefinition> = PluginEndpointBuilders.pluginEndpoints(pluginId, block)
+): List<PluginRouteDefinition> = PluginEndpointDsl(pluginId).apply(block).build()
 
-class PluginEndpointDsl internal constructor(
-    pluginId: String,
-    private val basePath: String = "",
-    @PublishedApi internal val endpoints: MutableList<PluginRouteDefinition> = mutableListOf()
-) {
+class PluginEndpointDsl internal constructor(pluginId: String) {
     @PublishedApi
     internal val pluginIdValue: String = pluginId
 
-    fun route(
-        path: String,
-        block: PluginEndpointDsl.() -> Unit
-    ) {
-        val combinedPath = joinPaths(basePath, path)
-        PluginEndpointDsl(pluginIdValue, combinedPath, endpoints).apply(block)
-    }
+    @PublishedApi
+    internal val endpoints = mutableListOf<PluginRouteDefinition>()
 
     inline fun <reified Res : Any> get(
         path: String = "",
         executionPolicy: EndpointExecutionPolicy = EndpointExecutionPolicy(),
         noinline handler: suspend PluginRequestContext.() -> PluginResult<Res>
     ) {
-        val resolvedPath = resolvePath(path)
         endpoints += PluginEndpointDefinition(
-            endpointId = buildEndpointId(pluginIdValue, HttpMethod.Get, resolvedPath),
+            endpointId = buildEndpointId(pluginIdValue, HttpMethod.Get, path),
             method = HttpMethod.Get,
-            path = resolvedPath,
+            path = normalizePath(path),
             requestType = null,
             responseType = typeOf<Res>(),
             executionPolicy = executionPolicy,
@@ -215,11 +198,10 @@ class PluginEndpointDsl internal constructor(
         executionPolicy: EndpointExecutionPolicy = EndpointExecutionPolicy(),
         noinline handler: suspend PluginRequestContext.(Req) -> PluginResult<Res>
     ) {
-        val resolvedPath = resolvePath(path)
         endpoints += PluginEndpointDefinition<Req, Res>(
-            endpointId = buildEndpointId(pluginIdValue, HttpMethod.Post, resolvedPath),
+            endpointId = buildEndpointId(pluginIdValue, HttpMethod.Post, path),
             method = HttpMethod.Post,
-            path = resolvedPath,
+            path = normalizePath(path),
             requestType = typeOf<Req>(),
             responseType = typeOf<Res>(),
             executionPolicy = executionPolicy,
@@ -232,11 +214,10 @@ class PluginEndpointDsl internal constructor(
         executionPolicy: EndpointExecutionPolicy = EndpointExecutionPolicy(),
         noinline handler: suspend PluginRequestContext.() -> PluginResult<Res>
     ) {
-        val resolvedPath = resolvePath(path)
         endpoints += PluginEndpointDefinition(
-            endpointId = buildEndpointId(pluginIdValue, HttpMethod.Post, resolvedPath),
+            endpointId = buildEndpointId(pluginIdValue, HttpMethod.Post, path),
             method = HttpMethod.Post,
-            path = resolvedPath,
+            path = normalizePath(path),
             requestType = null,
             responseType = typeOf<Res>(),
             executionPolicy = executionPolicy,
@@ -249,11 +230,10 @@ class PluginEndpointDsl internal constructor(
         executionPolicy: EndpointExecutionPolicy = EndpointExecutionPolicy(),
         noinline handler: suspend PluginRequestContext.(Req) -> PluginResult<Res>
     ) {
-        val resolvedPath = resolvePath(path)
         endpoints += PluginEndpointDefinition<Req, Res>(
-            endpointId = buildEndpointId(pluginIdValue, HttpMethod.Put, resolvedPath),
+            endpointId = buildEndpointId(pluginIdValue, HttpMethod.Put, path),
             method = HttpMethod.Put,
-            path = resolvedPath,
+            path = normalizePath(path),
             requestType = typeOf<Req>(),
             responseType = typeOf<Res>(),
             executionPolicy = executionPolicy,
@@ -266,11 +246,10 @@ class PluginEndpointDsl internal constructor(
         executionPolicy: EndpointExecutionPolicy = EndpointExecutionPolicy(),
         noinline handler: suspend PluginRequestContext.() -> PluginResult<Res>
     ) {
-        val resolvedPath = resolvePath(path)
         endpoints += PluginEndpointDefinition(
-            endpointId = buildEndpointId(pluginIdValue, HttpMethod.Delete, resolvedPath),
+            endpointId = buildEndpointId(pluginIdValue, HttpMethod.Delete, path),
             method = HttpMethod.Delete,
-            path = resolvedPath,
+            path = normalizePath(path),
             requestType = null,
             responseType = typeOf<Res>(),
             executionPolicy = executionPolicy,
@@ -282,7 +261,7 @@ class PluginEndpointDsl internal constructor(
         path: String,
         handler: suspend PluginSseSession.() -> Unit
     ) {
-        endpoints += PluginSseDefinition(path = resolvePath(path), handler = handler)
+        endpoints += PluginSseDefinition(path = normalizePath(path), handler = handler)
     }
 
     fun staticResources(
@@ -292,7 +271,7 @@ class PluginEndpointDsl internal constructor(
     ) {
         require(basePackage.isNotBlank()) { "basePackage must not be blank" }
         endpoints += PluginStaticResourceDefinition(
-            path = resolvePath(path),
+            path = normalizePath(path),
             basePackage = basePackage,
             index = index
         )
@@ -301,21 +280,10 @@ class PluginEndpointDsl internal constructor(
     fun build(): List<PluginRouteDefinition> = endpoints.toList()
 
     @PublishedApi
-    internal fun resolvePath(path: String): String = joinPaths(basePath, path)
-}
-
-@PublishedApi
-internal fun joinPaths(basePath: String, path: String): String {
-    val baseTrimmed = basePath.trim()
-    val pathTrimmed = path.trim()
-    if (baseTrimmed.isBlank() && pathTrimmed.isBlank()) return ""
-    val baseClean = baseTrimmed.trim('/')
-    val pathClean = pathTrimmed.trim('/')
-    return when {
-        baseClean.isBlank() && pathClean.isBlank() -> ""
-        baseClean.isBlank() -> "/$pathClean"
-        pathClean.isBlank() -> "/$baseClean"
-        else -> "/$baseClean/$pathClean"
+    internal fun normalizePath(path: String): String {
+        return path.takeIf { it.isNotBlank() }?.let {
+            if (it.startsWith("/")) it else "/$it"
+        } ?: ""
     }
 }
 

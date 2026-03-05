@@ -9,10 +9,10 @@ import com.keel.kernel.observability.ObservabilityTracing
 import com.keel.kernel.observability.KeelObservability
 import com.keel.kernel.plugin.KeelPlugin
 import com.keel.kernel.plugin.UnifiedPluginManager
-import com.keel.kernel.routing.DocRouteInstaller
 import com.keel.kernel.routing.GatewayInterceptor
-import com.keel.kernel.routing.LogRouteInstaller
-import com.keel.kernel.routing.UnifiedSystemRouteInstaller
+import com.keel.kernel.routing.docRoutes
+import com.keel.kernel.routing.logRoutes
+import com.keel.kernel.routing.unifiedSystemRoutes
 import com.lestere.opensource.logger.SoulLoggerPlugin
 import io.ktor.serialization.kotlinx.json.json
 import io.ktor.server.application.Application
@@ -27,7 +27,6 @@ import io.ktor.server.netty.Netty
 import io.ktor.server.request.httpMethod
 import io.ktor.server.request.path
 import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
-import io.ktor.server.routing.Route
 import io.ktor.server.routing.routing
 import io.ktor.server.sse.SSE
 import kotlinx.coroutines.CoroutineScope
@@ -44,9 +43,7 @@ import org.koin.dsl.module
 
 class Kernel(
     private val koin: Koin,
-    private val enablePluginHotReload: Boolean = ConfigHotReloader.isDevelopmentMode(),
-    private val moduleWatchDirectories: List<String> = emptyList(),
-    private val customRouting: (Route.() -> Unit)? = null
+    private val enablePluginHotReload: Boolean = ConfigHotReloader.isDevelopmentMode()
 ) {
     private val logger = KeelLoggerService.getLogger("Kernel")
     private val kernelScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -60,13 +57,12 @@ class Kernel(
     private val configHotReloader: ConfigHotReloader by lazy {
         ConfigHotReloader.Builder()
             .watchConfigDir(KeelConstants.CONFIG_DIR)
-            .watchConfigDir(KeelConstants.CONFIG_PLUGINS_DIR)
+            .watchAdditionalDir("${KeelConstants.CONFIG_DIR}/plugins")
             .apply {
                 if (enablePluginHotReload) {
                     watchPluginDir(KeelConstants.PLUGINS_DIR)
                 }
             }
-            .watchModuleDirectories(moduleWatchDirectories)
             .onConfigChange { event ->
                 kernelScope.launch {
                     runCatching {
@@ -84,9 +80,6 @@ class Kernel(
                         logger.warn("Plugin-triggered lifecycle update failed for ${event.pluginId}: ${error.message}")
                     }
                 }
-            }
-            .onModuleChange { event ->
-                handleModuleChange(event)
             }
             .build()
     }
@@ -123,11 +116,10 @@ class Kernel(
 
             routing {
                 pluginManager.mountRoutes(this)
-                UnifiedSystemRouteInstaller.install(this, pluginManager, pluginLoader)
-                LogRouteInstaller.install(this)
-                DocRouteInstaller.install(this)
+                unifiedSystemRoutes(pluginManager, pluginLoader)
+                logRoutes()
+                docRoutes()
                 staticResources("/", "static")
-                customRouting?.invoke(this)
             }
         }.start(wait = true)
     }
@@ -164,8 +156,8 @@ class Kernel(
             if (ConfigHotReloader.isDevelopmentMode()) {
                 configHotReloader.startWatching()
                 logger.info("Hot-reloader started (development mode: ${ConfigHotReloader.isDevelopmentMode()})")
-                if (moduleWatchDirectories.isNotEmpty()) {
-                    logger.info("Watching module directories: ${moduleWatchDirectories.joinToString(", ")}")
+                if (enablePluginHotReload) {
+                    logger.info("Plugin directory watching enabled")
                 }
             }
         }
@@ -183,35 +175,12 @@ class Kernel(
 
         logger.info("Kernel configured")
     }
-
-    private fun handleModuleChange(event: ModuleChangeEvent) {
-        val path = event.relativePath
-        when {
-            path.startsWith("src/") || path == "build.gradle.kts" || path == "settings.gradle.kts" || path == "gradle.properties" -> {
-                logger.warn(
-                    "Module change detected at ${event.fullPath}. Source/build changes are watched in dev mode, " +
-                        "but they still require rebuild + application restart to apply safely."
-                )
-            }
-            path.startsWith("build/") -> {
-                logger.warn(
-                    "Compiled module output changed at ${event.fullPath}. In-process/kernel classes are already loaded; " +
-                        "restart the application to pick up rebuilt module outputs."
-                )
-            }
-            else -> {
-                logger.info("Module change detected at ${event.fullPath}")
-            }
-        }
-    }
 }
 
 class KernelBuilder {
     private var koinConfig: (KoinApplication.() -> Unit)? = null
     private val plugins = mutableListOf<KeelPlugin>()
     private var enablePluginHotReload: Boolean = ConfigHotReloader.isDevelopmentMode()
-    private val watchDirectories = linkedSetOf<String>()
-    private var customRouting: (Route.() -> Unit)? = null
 
     fun koin(config: KoinApplication.() -> Unit) {
         koinConfig = config
@@ -225,33 +194,9 @@ class KernelBuilder {
         this.enablePluginHotReload = enabled
     }
 
-    fun watchDirectories(dirs: Iterable<String>) {
-        dirs.map(String::trim)
-            .filter(String::isNotEmpty)
-            .forEach(watchDirectories::add)
-    }
-
-    fun watchDirectories(vararg dirs: String) {
-        watchDirectories(dirs.asIterable())
-    }
-
-    fun routing(block: Route.() -> Unit) {
-        customRouting = block
-    }
-
     fun build(): Kernel {
         val koin = startKoin(koinConfig ?: {}).koin
-        val defaultWatchDirectories = DefaultWatchDirectoriesResolver.resolveForCallingModule()
-        val effectiveWatchDirectories = buildList {
-            addAll(defaultWatchDirectories)
-            addAll(watchDirectories)
-        }.distinct()
-        val kernel = Kernel(
-            koin = koin,
-            enablePluginHotReload = enablePluginHotReload,
-            moduleWatchDirectories = effectiveWatchDirectories,
-            customRouting = customRouting
-        )
+        val kernel = Kernel(koin = koin, enablePluginHotReload = enablePluginHotReload)
         plugins.forEach { kernel.registerPlugin(it) }
         return kernel
     }

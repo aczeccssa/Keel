@@ -52,60 +52,11 @@ internal fun registerPluginOperation(pluginId: String, endpoint: PluginEndpointD
             path = fullPath,
             requestBodyType = endpoint.requestType,
             responseBodyType = endpoint.responseType,
-            responseContentTypes = null,
             typeBound = true,
             summary = doc?.summary.orEmpty(),
             description = doc?.description.orEmpty(),
             tags = doc?.tags ?: emptyList(),
             responseEnvelope = doc?.responseEnvelope ?: false,
-            successStatus = doc?.successStatus ?: 200,
-            errorStatuses = doc?.errorStatuses ?: emptySet()
-        )
-    )
-}
-
-internal fun registerPluginSseOperation(pluginId: String, path: String) {
-    val fullPath = fullPluginPath(pluginId, path)
-    val doc = PluginDocumentationLookup.find(HttpMethod.Get, fullPath)
-    OpenApiRegistry.register(
-        OpenApiOperation(
-            method = HttpMethod.Get,
-            path = fullPath,
-            requestBodyType = null,
-            responseBodyType = null,
-            responseContentTypes = listOf("text/event-stream"),
-            typeBound = false,
-            summary = doc?.summary.orEmpty(),
-            description = doc?.description.orEmpty(),
-            tags = doc?.tags ?: emptyList(),
-            responseEnvelope = false,
-            successStatus = doc?.successStatus ?: 200,
-            errorStatuses = doc?.errorStatuses ?: emptySet()
-        )
-    )
-}
-
-internal fun registerPluginStaticOperation(pluginId: String, path: String, hasIndex: Boolean) {
-    val fullPath = fullPluginPath(pluginId, path)
-    val doc = PluginDocumentationLookup.find(HttpMethod.Get, fullPath)
-    val contentTypes = buildList {
-        add("application/octet-stream")
-        if (hasIndex) {
-            add("text/html")
-        }
-    }
-    OpenApiRegistry.register(
-        OpenApiOperation(
-            method = HttpMethod.Get,
-            path = fullPath,
-            requestBodyType = null,
-            responseBodyType = null,
-            responseContentTypes = contentTypes,
-            typeBound = false,
-            summary = doc?.summary.orEmpty(),
-            description = doc?.description.orEmpty(),
-            tags = doc?.tags ?: emptyList(),
-            responseEnvelope = false,
             successStatus = doc?.successStatus ?: 200,
             errorStatuses = doc?.errorStatuses ?: emptySet()
         )

@@ -71,15 +71,6 @@ class OpenApiAggregatorTest {
     }
 
     @Test
-    fun `declared operations preserve nested plugin route prefixes`() {
-        val operation = OpenApiAggregator.discoverDeclaredOperations()
-            .first { it.path == "/api/plugins/dbdemo/notes/{id}/delete" && it.method == HttpMethod.Post }
-
-        assertEquals("Soft-delete a note", operation.summary)
-        assertEquals(listOf("notes"), operation.tags)
-    }
-
-    @Test
     fun `annotation metadata merges with typed route schema metadata`() {
         OpenApiRegistry.register(
             OpenApiOperation(
@@ -131,25 +122,6 @@ class OpenApiAggregatorTest {
     }
 
     @Test
-    fun `runtime plugin routes fall back to plugin tag when annotation metadata is unavailable`() {
-        OpenApiRegistry.register(
-            OpenApiOperation(
-                method = HttpMethod.Get,
-                path = "/api/plugins/observability/runtime-only",
-                responseBodyType = typeOf<TestPayload>(),
-                typeBound = true
-            )
-        )
-
-        val spec = json.parseToJsonElement(OpenApiAggregator.buildSpec()).jsonObject
-        val operation = spec["paths"]!!.jsonObject["/api/plugins/observability/runtime-only"]!!
-            .jsonObject["get"]!!
-            .jsonObject
-
-        assertEquals(listOf("observability"), operation["tags"]!!.jsonArray.map { it.jsonPrimitive.content })
-    }
-
-    @Test
     fun `buildSpec cache invalidates when runtime topology changes`() {
         val initialSpec = json.parseToJsonElement(OpenApiAggregator.buildSpec()).jsonObject
         assertTrue("/cache-check" !in initialSpec["paths"]!!.jsonObject)
@@ -165,39 +137,6 @@ class OpenApiAggregatorTest {
 
         val updatedSpec = json.parseToJsonElement(OpenApiAggregator.buildSpec()).jsonObject
         assertTrue("/cache-check" in updatedSpec["paths"]!!.jsonObject)
-    }
-
-    @Test
-    fun `buildSpec supports non json content types`() {
-        OpenApiRegistry.register(
-            OpenApiOperation(
-                method = HttpMethod.Get,
-                path = "/sse",
-                responseContentTypes = listOf("text/event-stream"),
-                typeBound = false
-            )
-        )
-        OpenApiRegistry.register(
-            OpenApiOperation(
-                method = HttpMethod.Get,
-                path = "/static",
-                responseContentTypes = listOf("application/octet-stream", "text/html"),
-                typeBound = false
-            )
-        )
-
-        val spec = json.parseToJsonElement(OpenApiAggregator.buildSpec()).jsonObject
-        val sseContent = spec["paths"]!!.jsonObject["/sse"]!!.jsonObject["get"]!!
-            .jsonObject["responses"]!!.jsonObject["200"]!!.jsonObject["content"]!!.jsonObject
-        assertTrue("text/event-stream" in sseContent)
-        assertTrue("application/json" !in sseContent)
-        assertTrue(sseContent["text/event-stream"]!!.jsonObject.isEmpty())
-
-        val staticContent = spec["paths"]!!.jsonObject["/static"]!!.jsonObject["get"]!!
-            .jsonObject["responses"]!!.jsonObject["200"]!!.jsonObject["content"]!!.jsonObject
-        assertTrue("application/octet-stream" in staticContent)
-        assertTrue("text/html" in staticContent)
-        assertTrue("application/json" !in staticContent)
     }
 }
 

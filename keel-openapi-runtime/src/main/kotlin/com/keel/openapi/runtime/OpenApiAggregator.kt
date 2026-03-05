@@ -52,10 +52,7 @@ object OpenApiAggregator {
             return cached.spec
         }
         val fragments = discoverFragments()
-        val operations = enrichOperationsWithFallbackTags(
-            fragments = fragments,
-            operations = mergeOperations(discoverDeclaredOperations(), OpenApiRegistry.operations())
-        )
+        val operations = mergeOperations(discoverDeclaredOperations(), OpenApiRegistry.operations())
         val spec = if (operations.isEmpty()) {
             buildMinimalSpec(serverUrl)
         } else {
@@ -194,30 +191,6 @@ object OpenApiAggregator {
         return tags.values.toList()
     }
 
-    private fun enrichOperationsWithFallbackTags(
-        fragments: List<OpenApiFragment>,
-        operations: List<OpenApiOperation>
-    ): List<OpenApiOperation> {
-        return operations.map { operation ->
-            if (operation.tags.isNotEmpty()) {
-                operation
-            } else {
-                operation.copy(tags = fallbackTags(operation.path, fragments))
-            }
-        }
-    }
-
-    private fun fallbackTags(path: String, fragments: List<OpenApiFragment>): List<String> {
-        if (path.startsWith("/api/_system")) {
-            return listOf("system")
-        }
-
-        val fragment = fragments.firstOrNull { candidate ->
-            path == candidate.basePath || path.startsWith("${candidate.basePath}/")
-        }
-        return fragment?.let { listOf(it.pluginId) } ?: emptyList()
-    }
-
     private fun mergeOperations(
         declaredOperations: List<OpenApiDeclaredOperation>,
         runtimeOperations: List<OpenApiOperation>
@@ -244,7 +217,6 @@ object OpenApiAggregator {
                     path = declared.path,
                     requestBodyType = null,
                     responseBodyType = null,
-                    responseContentTypes = null,
                     typeBound = false,
                     summary = declared.summary,
                     description = declared.description,
@@ -405,14 +377,22 @@ object OpenApiAggregator {
         schemaGenerator: OpenApiSchemaGenerator
     ): JsonObject {
         val responses = linkedMapOf<String, JsonElement>()
-        val successContent = buildSuccessContent(operation, schemaGenerator)
         responses[operation.successStatus.toString()] = JsonObject(
-            buildMap {
-                put("description", JsonPrimitive("Successful response"))
-                if (successContent.isNotEmpty()) {
-                    put("content", JsonObject(successContent))
-                }
-            }
+            mapOf(
+                "description" to JsonPrimitive("Successful response"),
+                "content" to JsonObject(
+                    mapOf(
+                        "application/json" to JsonObject(
+                            mapOf(
+                                "schema" to schemaGenerator.schemaForResponse(
+                                    operation.responseBodyType,
+                                    operation.responseEnvelope
+                                )
+                            )
+                        )
+                    )
+                )
+            )
         )
         for (status in operation.errorStatuses.toSortedSet()) {
             responses[status.toString()] = JsonObject(
@@ -429,40 +409,6 @@ object OpenApiAggregator {
             )
         }
         return JsonObject(responses)
-    }
-
-    private fun buildSuccessContent(
-        operation: OpenApiOperation,
-        schemaGenerator: OpenApiSchemaGenerator
-    ): Map<String, JsonElement> {
-        val contentTypes = operation.responseContentTypes
-        if (contentTypes == null) {
-            return mapOf(
-                "application/json" to JsonObject(
-                    mapOf(
-                        "schema" to schemaGenerator.schemaForResponse(
-                            operation.responseBodyType,
-                            operation.responseEnvelope
-                        )
-                    )
-                )
-            )
-        }
-
-        return contentTypes.distinct().associateWith { contentType ->
-            if (contentType == "application/json" && operation.responseBodyType != null) {
-                JsonObject(
-                    mapOf(
-                        "schema" to schemaGenerator.schemaForResponse(
-                            operation.responseBodyType,
-                            operation.responseEnvelope
-                        )
-                    )
-                )
-            } else {
-                JsonObject(emptyMap())
-            }
-        }
     }
 
     private fun inferPathParameters(path: String): List<JsonElement> {

@@ -10,7 +10,6 @@ data class OpenApiOperation(
     val path: String,
     val requestBodyType: KType? = null,
     val responseBodyType: KType? = null,
-    val responseContentTypes: List<String>? = null,
     val typeBound: Boolean = false,
     val summary: String = "",
     val description: String = "",

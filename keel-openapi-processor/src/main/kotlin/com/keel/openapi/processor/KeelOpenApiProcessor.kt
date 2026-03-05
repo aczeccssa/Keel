@@ -205,9 +205,7 @@ class KeelOpenApiProcessor(
                 if (!readingCall) {
                     callBuffer.clear()
                     readingCall = true
-                    currentPrefix = contexts.fold("") { prefix, context ->
-                        buildPath(prefix, context.prefix)
-                    }
+                    currentPrefix = contexts.joinToString(separator = "") { it.prefix }
                 }
                 callBuffer.append(trimmed).append('\n')
                 if (trimmed.contains("{")) {
@@ -245,8 +243,9 @@ class KeelOpenApiProcessor(
             return RouteContext(prefix = "/api/plugins/$resolvedPluginId", activeDepth = braceDepth + 1)
         }
 
-        if ((trimmed.startsWith("route(") || trimmed.startsWith("typedRoute(")) && trimmed.contains("{")) {
-            return RouteContext(prefix = extractPath(trimmed), activeDepth = braceDepth + 1)
+        val routeMatch = Regex("""route\(\s*"([^"]*)"\s*\)\s*\{""").find(trimmed)
+        if (routeMatch != null) {
+            return RouteContext(prefix = routeMatch.groupValues[1], activeDepth = braceDepth + 1)
         }
 
         return null
@@ -300,7 +299,7 @@ class KeelOpenApiProcessor(
             if (it.startsWith("/")) it else "/$it"
         } ?: ""
         val fullPath = "$normalizedPrefix$normalizedPath"
-        return fullPath.ifBlank { "/" }
+        return if (fullPath.isBlank()) "/" else fullPath
     }
 
     private fun parseKeelApi(annotationSource: String): ParsedKeelApi {

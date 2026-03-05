@@ -457,11 +457,6 @@ class UnifiedPluginManager(
         if (duplicateSse.isNotEmpty()) {
             error("Duplicate plugin SSE registration for pluginId=$pluginId: ${duplicateSse.joinToString()}")
         }
-        val staticKeys = staticRoutes.map { fullPluginPath(pluginId, it.path) }
-        val duplicateStatic = staticKeys.groupingBy { it }.eachCount().filterValues { it > 1 }.keys
-        if (duplicateStatic.isNotEmpty()) {
-            error("Duplicate plugin static resource registration for pluginId=$pluginId: ${duplicateStatic.joinToString()}")
-        }
         val pathCollisions = endpointKeys.toSet().intersect(sseKeys.toSet())
         if (pathCollisions.isNotEmpty()) {
             error("Plugin endpoint/SSE path conflict for pluginId=$pluginId: ${pathCollisions.joinToString()}")
@@ -499,11 +494,9 @@ class UnifiedPluginManager(
                 }
             }
             for (definition in sseRoutes) {
-                registerPluginSseOperation(pluginId, definition.path)
                 mountSse(definition.path, entry, definition)
             }
             for (definition in staticRoutes) {
-                registerPluginStaticOperation(pluginId, definition.path, definition.index != null)
                 staticResources(definition.path, definition.basePackage, definition.index)
             }
         }

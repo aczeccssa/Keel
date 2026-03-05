@@ -10,12 +10,7 @@ object PluginConfigLoader {
     private val json = Json { ignoreUnknownKeys = true }
 
     fun load(descriptor: PluginDescriptor, configRoot: String = KeelConstants.CONFIG_DIR): PluginConfig {
-        val pluginConfigDir = if (configRoot == KeelConstants.CONFIG_DIR) {
-            KeelConstants.CONFIG_PLUGINS_DIR
-        } else {
-            "$configRoot/plugins"
-        }
-        return load(descriptor, File(pluginConfigDir, "${descriptor.pluginId}.json"))
+        return load(descriptor, File(configRoot, "plugins/${descriptor.pluginId}.json"))
     }
 
     fun load(descriptor: PluginDescriptor, configFile: File): PluginConfig {

@@ -2,6 +2,9 @@ package com.keel.kernel.routing
 
 import com.keel.contract.dto.KeelResponse
 import com.keel.kernel.api.KeelApi
+import com.keel.kernel.api.systemApi
+import com.keel.kernel.api.typedGet
+import com.keel.kernel.api.typedPost
 import com.keel.kernel.loader.DefaultPluginLoader
 import com.keel.kernel.loader.DiscoveredPlugin
 import com.keel.kernel.plugin.PluginChannelHealth
@@ -18,108 +21,92 @@ import io.ktor.server.routing.Route
 import kotlinx.datetime.Clock
 import kotlinx.serialization.Serializable
 
-object UnifiedSystemRouteInstaller {
-    fun install(
-        route: Route,
-        pluginManager: UnifiedPluginManager,
-        pluginLoader: DefaultPluginLoader? = null
-    ) {
-        with(route) {
-            systemApi {
-                typedRoute("/plugins") {
-                    @KeelApi("List all plugins", tags = ["system", "plugins"], responseEnvelope = true)
-                    typedGet<PluginListData> {
-                        val plugins = pluginManager.getRuntimeSnapshots().map { it.toPluginInfo() }
-                        call.respond(KeelResponse.success(PluginListData(plugins = plugins, total = plugins.size)))
-                    }
-
-                    typedRoute("/{pluginId}") {
-                        @KeelApi("Get plugin details", tags = ["system", "plugins"], errorStatuses = [404], responseEnvelope = true)
-                        typedGet<PluginInfo> {
-                            val pluginId = call.parameters["pluginId"]
-                            val snapshot = pluginId?.let(pluginManager::getRuntimeSnapshot)
-                            if (snapshot == null) {
-                                call.respond(KeelResponse.failure<Unit>(404, "Plugin not found"))
-                                return@typedGet
-                            }
-                            call.respond(KeelResponse.success(snapshot.toPluginInfo()))
-                        }
-
-                        @KeelApi("Get plugin health", tags = ["system", "plugins"], errorStatuses = [404], responseEnvelope = true)
-                        typedGet<PluginInfo>("/health") {
-                            val pluginId = call.parameters["pluginId"]
-                            val snapshot = pluginId?.let(pluginManager::getRuntimeSnapshot)
-                            if (snapshot == null) {
-                                call.respond(KeelResponse.failure<Unit>(404, "Plugin not found"))
-                                return@typedGet
-                            }
-                            call.respond(KeelResponse.success(snapshot.toPluginInfo()))
-                        }
-
-                        @KeelApi("Start a plugin", tags = ["system", "plugins"], errorStatuses = [400, 500], responseEnvelope = true)
-                        typedPost<PluginActionResult>("/start") {
-                            handleLifecycleAction(pluginManager, "start") { pluginId ->
-                                pluginManager.startPlugin(pluginId)
-                            }
-                        }
-
-                        @KeelApi("Stop a plugin", tags = ["system", "plugins"], errorStatuses = [400, 500], responseEnvelope = true)
-                        typedPost<PluginActionResult>("/stop") {
-                            handleLifecycleAction(pluginManager, "stop") { pluginId ->
-                                pluginManager.stopPlugin(pluginId)
-                            }
-                        }
-
-                        @KeelApi("Dispose a plugin", tags = ["system", "plugins"], errorStatuses = [400, 500], responseEnvelope = true)
-                        typedPost<PluginActionResult>("/dispose") {
-                            handleLifecycleAction(pluginManager, "dispose") { pluginId ->
-                                pluginManager.disposePlugin(pluginId)
-                            }
-                        }
-
-                        @KeelApi("Reload a plugin", tags = ["system", "plugins"], errorStatuses = [400, 500], responseEnvelope = true)
-                        typedPost<PluginActionResult>("/reload") {
-                            handleLifecycleAction(pluginManager, "reload") { pluginId ->
-                                pluginManager.reloadPlugin(pluginId)
-                            }
-                        }
-
-                        @KeelApi("Replace a plugin artifact", tags = ["system", "plugins"], errorStatuses = [400, 500], responseEnvelope = true)
-                        typedPost<PluginActionResult>("/replace") {
-                            handleLifecycleAction(pluginManager, "replace") { pluginId ->
-                                pluginManager.replacePlugin(pluginId)
-                            }
-                        }
-                    }
-
-                    @KeelApi("Discover plugins in directory", tags = ["system", "plugins"], responseEnvelope = true)
-                    typedPost<PluginDiscoverData>("/discover") {
-                        val discovered = pluginLoader?.discoverPlugins(com.keel.kernel.config.KeelConstants.PLUGINS_DIR).orEmpty()
-                        call.respond(
-                            KeelResponse.success(
-                                PluginDiscoverData(
-                                    discovered = discovered.map { it.toDiscoveredPluginInfo() },
-                                    total = discovered.size
-                                )
-                            )
-                        )
-                    }
-                }
-
-                @KeelApi("Health check", tags = ["system"], responseEnvelope = true)
-                typedGet<HealthData>("/health") {
-                    call.respond(KeelResponse.success(HealthData("ok", Clock.System.now().toEpochMilliseconds())))
-                }
-            }
-        }
-    }
-}
-
 fun Route.unifiedSystemRoutes(
     pluginManager: UnifiedPluginManager,
     pluginLoader: DefaultPluginLoader? = null
 ) {
-    UnifiedSystemRouteInstaller.install(this, pluginManager, pluginLoader)
+    systemApi {
+        @KeelApi("List all plugins", tags = ["system", "plugins"], responseEnvelope = true)
+        typedGet<PluginListData>("/plugins") {
+            val plugins = pluginManager.getRuntimeSnapshots().map { it.toPluginInfo() }
+            call.respond(KeelResponse.success(PluginListData(plugins = plugins, total = plugins.size)))
+        }
+
+        @KeelApi("Get plugin details", tags = ["system", "plugins"], errorStatuses = [404], responseEnvelope = true)
+        typedGet<PluginInfo>("/plugins/{pluginId}") {
+            val pluginId = call.parameters["pluginId"]
+            val snapshot = pluginId?.let(pluginManager::getRuntimeSnapshot)
+            if (snapshot == null) {
+                call.respond(KeelResponse.failure<Unit>(404, "Plugin not found"))
+                return@typedGet
+            }
+            call.respond(KeelResponse.success(snapshot.toPluginInfo()))
+        }
+
+        @KeelApi("Get plugin health", tags = ["system", "plugins"], errorStatuses = [404], responseEnvelope = true)
+        typedGet<PluginInfo>("/plugins/{pluginId}/health") {
+            val pluginId = call.parameters["pluginId"]
+            val snapshot = pluginId?.let(pluginManager::getRuntimeSnapshot)
+            if (snapshot == null) {
+                call.respond(KeelResponse.failure<Unit>(404, "Plugin not found"))
+                return@typedGet
+            }
+            call.respond(KeelResponse.success(snapshot.toPluginInfo()))
+        }
+
+        @KeelApi("Start a plugin", tags = ["system", "plugins"], errorStatuses = [400, 500], responseEnvelope = true)
+        typedPost<PluginActionResult>("/plugins/{pluginId}/start") {
+            handleLifecycleAction(pluginManager, "start") { pluginId ->
+                pluginManager.startPlugin(pluginId)
+            }
+        }
+
+        @KeelApi("Stop a plugin", tags = ["system", "plugins"], errorStatuses = [400, 500], responseEnvelope = true)
+        typedPost<PluginActionResult>("/plugins/{pluginId}/stop") {
+            handleLifecycleAction(pluginManager, "stop") { pluginId ->
+                pluginManager.stopPlugin(pluginId)
+            }
+        }
+
+        @KeelApi("Dispose a plugin", tags = ["system", "plugins"], errorStatuses = [400, 500], responseEnvelope = true)
+        typedPost<PluginActionResult>("/plugins/{pluginId}/dispose") {
+            handleLifecycleAction(pluginManager, "dispose") { pluginId ->
+                pluginManager.disposePlugin(pluginId)
+            }
+        }
+
+        @KeelApi("Reload a plugin", tags = ["system", "plugins"], errorStatuses = [400, 500], responseEnvelope = true)
+        typedPost<PluginActionResult>("/plugins/{pluginId}/reload") {
+            handleLifecycleAction(pluginManager, "reload") { pluginId ->
+                pluginManager.reloadPlugin(pluginId)
+            }
+        }
+
+        @KeelApi("Replace a plugin artifact", tags = ["system", "plugins"], errorStatuses = [400, 500], responseEnvelope = true)
+        typedPost<PluginActionResult>("/plugins/{pluginId}/replace") {
+            handleLifecycleAction(pluginManager, "replace") { pluginId ->
+                pluginManager.replacePlugin(pluginId)
+            }
+        }
+
+        @KeelApi("Discover plugins in directory", tags = ["system", "plugins"], responseEnvelope = true)
+        typedPost<PluginDiscoverData>("/plugins/discover") {
+            val discovered = pluginLoader?.discoverPlugins(com.keel.kernel.config.KeelConstants.PLUGINS_DIR).orEmpty()
+            call.respond(
+                KeelResponse.success(
+                    PluginDiscoverData(
+                        discovered = discovered.map { it.toDiscoveredPluginInfo() },
+                        total = discovered.size
+                    )
+                )
+            )
+        }
+
+        @KeelApi("Health check", tags = ["system"], responseEnvelope = true)
+        typedGet<HealthData>("/health") {
+            call.respond(KeelResponse.success(HealthData("ok", Clock.System.now().toEpochMilliseconds())))
+        }
+    }
 }
 
 private suspend fun io.ktor.server.routing.RoutingContext.handleLifecycleAction(

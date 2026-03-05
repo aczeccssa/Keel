@@ -112,13 +112,11 @@ class ObservabilityHub(
     }
 
     override fun jvmSnapshot(): List<JvmNode> {
-        val currentPid = ProcessHandle.current().pid()
         val nodes = mutableListOf(
             JvmNode(
                 id = "kernel",
                 kind = "kernel",
                 label = "Kernel JVM",
-                pid = currentPid,
                 runtimeMode = "IN_PROCESS",
                 healthState = "HEALTHY",
                 lifecycleState = "RUNNING"

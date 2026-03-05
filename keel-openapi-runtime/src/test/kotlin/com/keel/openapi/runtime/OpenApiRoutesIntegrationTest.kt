@@ -6,7 +6,6 @@ import com.keel.kernel.api.pluginApi
 import com.keel.kernel.api.systemApi
 import com.keel.kernel.api.typedGet
 import com.keel.kernel.api.typedPost
-import com.keel.kernel.api.typedRoute
 import com.keel.kernel.routing.docRoutes
 import com.keel.samples.dbdemo.CreateNoteRequest
 import com.keel.samples.dbdemo.Note
@@ -54,10 +53,8 @@ class OpenApiRoutesIntegrationTest {
             }
             routing {
                 systemApi {
-                    typedRoute("/plugins") {
-                        typedGet<String> {
-                            call.respond(KeelResponse.success("ok"))
-                        }
+                    typedGet<String>("/plugins") {
+                        call.respond(KeelResponse.success("ok"))
                     }
                 }
                 pluginApi("helloworld") {
@@ -66,21 +63,19 @@ class OpenApiRoutesIntegrationTest {
                     }
                 }
                 pluginApi("dbdemo") {
-                    typedRoute("/notes") {
-                        typedGet<NoteListData> {
-                            call.respond(KeelResponse.success(NoteListData(emptyList(), 0)))
-                        }
-                        typedPost<CreateNoteRequest, Note> {
-                            call.respond(
-                                KeelResponse.success(
-                                    Note(
-                                        id = 1,
-                                        title = "Example",
-                                        content = "content"
-                                    )
+                    typedGet<NoteListData>("/notes") {
+                        call.respond(KeelResponse.success(NoteListData(emptyList(), 0)))
+                    }
+                    typedPost<CreateNoteRequest, Note>("/notes") {
+                        call.respond(
+                            KeelResponse.success(
+                                Note(
+                                    id = 1,
+                                    title = "Example",
+                                    content = "content"
                                 )
                             )
-                        }
+                        )
                     }
                 }
                 docRoutes()
