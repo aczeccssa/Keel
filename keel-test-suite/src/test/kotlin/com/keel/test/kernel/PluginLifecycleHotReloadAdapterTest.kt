@@ -8,11 +8,12 @@ import com.keel.kernel.plugin.KeelPlugin
 import com.keel.kernel.plugin.PluginDescriptor
 import com.keel.kernel.plugin.PluginDispatchDisposition
 import com.keel.kernel.plugin.PluginEndpointDefinition
+import com.keel.kernel.plugin.PluginEndpointBuilders
 import com.keel.kernel.plugin.PluginGeneration
 import com.keel.kernel.plugin.PluginResult
+import com.keel.kernel.plugin.PluginRouteDefinition
 import com.keel.kernel.plugin.PluginRuntimeContext
 import com.keel.kernel.plugin.UnifiedPluginManager
-import com.keel.kernel.plugin.pluginEndpoints
 import kotlinx.coroutines.test.runTest
 import org.koin.core.context.startKoin
 import org.koin.core.context.stopKoin
@@ -99,7 +100,7 @@ class PluginLifecycleHotReloadAdapterTest {
 
         override suspend fun onStop(context: PluginRuntimeContext) = Unit
 
-        override fun endpoints(): List<PluginRouteDefinition> = pluginEndpoints(descriptor.pluginId) {
+        override fun endpoints(): List<PluginRouteDefinition> = PluginEndpointBuilders.pluginEndpoints(descriptor.pluginId) {
             get<String> {
                 PluginResult(body = "ok")
             }

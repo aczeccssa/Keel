@@ -1,5 +1,15 @@
 package com.keel.kernel.config
 
+import com.keel.kernel.logging.KeelLoggerService
+import java.io.File
+import java.nio.file.ClosedWatchServiceException
+import java.nio.file.FileSystems
+import java.nio.file.Files
+import java.nio.file.Path
+import java.nio.file.StandardWatchEventKinds
+import java.nio.file.WatchKey
+import java.nio.file.WatchService
+import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -12,50 +22,25 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.datetime.Clock
-import com.keel.kernel.logging.KeelLoggerService
-import java.io.File
-import java.nio.file.ClosedWatchServiceException
-import java.nio.file.FileSystems
-import java.nio.file.Path
-import java.nio.file.WatchEvent
-import java.nio.file.WatchKey
-import java.nio.file.WatchService
-import java.util.concurrent.ConcurrentHashMap
 
 /**
- * Enhanced Configuration and Plugin Hot-Reloader.
+ * Development-time file watcher for config files, plugin artifacts, and module directories.
  *
- * Features:
- * - Monitors configuration files (YAML/JSON) for changes
- * - Monitors plugins directory for JAR file changes
- * - Supports multiple watch directories
- * - Configurable file type filtering
- * - Plugin reload callbacks
- *
- * Usage:
- * ```kotlin
- * val reloader = ConfigHotReloader.Builder()
- *     .watchConfigDir("config")
- *     .watchPluginDir("plugins")
- *     .onConfigChange { event -> ... }
- *     .onPluginChange { pluginId -> ... }
- *     .build()
- * reloader.startWatching()
- * ```
+ * Hot-update guarantees are intentionally scoped:
+ * - Config changes under `config/` and `config/plugins/` can reload plugin runtime config.
+ * - Plugin artifact changes under `plugins/` can replace/dispose legacy jar-based plugins.
+ * - Source/resource changes under watched module roots emit module change events so the kernel can
+ *   decide whether a safe hot update is possible or a full restart is required.
  */
 class ConfigHotReloader private constructor(
-    private val configDir: String?,
-    private val pluginDir: String?,
-    private val additionalWatchDirs: List<String>,
+    private val watchDirectories: List<WatchDirectoryRegistration>,
     private val fileFilters: List<(String) -> Boolean>,
     private val onConfigChange: (ConfigChangeEvent) -> Unit,
-    private val onPluginChange: (PluginChangeEvent) -> Unit
+    private val onPluginChange: (PluginChangeEvent) -> Unit,
+    private val onModuleChange: (ModuleChangeEvent) -> Unit
 ) {
     private val logger = KeelLoggerService.getLogger("ConfigHotReloader")
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-
-    private val configDirPath: Path? = configDir?.let { File(it).toPath().toAbsolutePath().normalize() }
-    private val pluginDirPath: Path? = pluginDir?.let { File(it).toPath().toAbsolutePath().normalize() }
 
     private val _isWatching = MutableStateFlow(false)
     val isWatching: StateFlow<Boolean> = _isWatching.asStateFlow()
@@ -69,44 +54,28 @@ class ConfigHotReloader private constructor(
     private val _pluginChanges = MutableSharedFlow<PluginChangeEvent>()
     val pluginChanges: SharedFlow<PluginChangeEvent> = _pluginChanges.asSharedFlow()
 
+    private val _moduleChanges = MutableSharedFlow<ModuleChangeEvent>()
+    val moduleChanges: SharedFlow<ModuleChangeEvent> = _moduleChanges.asSharedFlow()
+
     private val watchers = mutableListOf<WatchService>()
     private val watchJobs = mutableListOf<kotlinx.coroutines.Job>()
-    private val watchedPaths = mutableMapOf<WatchKey, Path>()
+    private val watchedPaths = mutableMapOf<WatchKey, WatchedDirectory>()
+
     private val configFiles = ConcurrentHashMap<String, Long>()
     private val pluginFiles = ConcurrentHashMap<String, Long>()
+    private val moduleFiles = ConcurrentHashMap<String, Long>()
 
-    /**
-     * Start watching all configured directories.
-     */
     fun startWatching() {
         if (_isWatching.value) return
 
         scope.launch {
             try {
-                // Watch config directory
-                configDir?.let { dir ->
-                    if (File(dir).exists()) {
-                        startWatchingDirectory(dir, WatchType.CONFIG)
+                watchDirectories.forEach { registration ->
+                    val path = registration.root
+                    if (ensureWatchRootExists(registration)) {
+                        startWatchingDirectory(registration)
                     } else {
-                        logger.warn("Config directory does not exist: $dir")
-                    }
-                }
-
-                // Watch plugin directory
-                pluginDir?.let { dir ->
-                    if (File(dir).exists()) {
-                        startWatchingDirectory(dir, WatchType.PLUGIN)
-                    } else {
-                        logger.warn("Plugin directory does not exist: $dir")
-                    }
-                }
-
-                // Watch additional directories
-                additionalWatchDirs.forEach { dir ->
-                    if (File(dir).exists()) {
-                        startWatchingDirectory(dir, WatchType.CUSTOM)
-                    } else {
-                        logger.warn("Additional watch directory does not exist: $dir")
+                        logger.warn("Watch directory does not exist: ${registration.root}")
                     }
                 }
 
@@ -118,24 +87,37 @@ class ConfigHotReloader private constructor(
                 _isWatching.value = true
                 logger.info("Started watching ${watchers.size} directories")
 
-                // Start one watch loop per WatchService so all directories are serviced.
                 watchers.forEach { watcher ->
-                    watchJobs.add(
-                        scope.launch {
-                            watchLoop(watcher)
-                        }
-                    )
+                    watchJobs += scope.launch {
+                        watchLoop(watcher)
+                    }
                 }
-            } catch (e: Exception) {
-                logger.error("Error starting hot reloader: ${e.message}", e)
+            } catch (error: Exception) {
+                logger.error("Error starting hot reloader: ${error.message}", error)
                 _isWatching.value = false
             }
         }
     }
 
-    /**
-     * Stop watching all directories.
-     */
+    private fun ensureWatchRootExists(registration: WatchDirectoryRegistration): Boolean {
+        val path = registration.root
+        if (Files.exists(path)) {
+            return true
+        }
+        return when (registration.kind) {
+            WatchDirectoryKind.CONFIG,
+            WatchDirectoryKind.PLUGIN_ARTIFACT -> {
+                runCatching {
+                    Files.createDirectories(path)
+                }.onFailure { error ->
+                    logger.warn("Failed to create watch directory ${registration.root}: ${error.message}")
+                }.isSuccess
+            }
+            WatchDirectoryKind.MODULE,
+            WatchDirectoryKind.MANUAL -> false
+        }
+    }
+
     fun stopWatching() {
         _isWatching.value = false
         watchJobs.forEach { it.cancel() }
@@ -143,8 +125,8 @@ class ConfigHotReloader private constructor(
         watchers.forEach { watcher ->
             try {
                 watcher.close()
-            } catch (e: Exception) {
-                logger.warn("Error closing watcher", e)
+            } catch (error: Exception) {
+                logger.warn("Error closing watcher", error)
             }
         }
         watchers.clear()
@@ -152,85 +134,116 @@ class ConfigHotReloader private constructor(
         logger.info("Stopped watching all directories")
     }
 
-    /**
-     * Manually trigger a configuration reload.
-     */
     fun reload() {
         scope.launch {
             try {
+                val event = ConfigChangeEvent(
+                    type = ConfigChangeType.RELOADED.name,
+                    fileName = "manual",
+                    filePath = "manual"
+                )
                 _lastReloadTime.value = Clock.System.now().toEpochMilliseconds()
-                onConfigChange(ConfigChangeEvent(ConfigChangeType.RELOADED.name, "manual"))
-                _configChanges.emit(ConfigChangeEvent(ConfigChangeType.RELOADED.name, "manual"))
+                onConfigChange(event)
+                _configChanges.emit(event)
                 logger.info("Configuration reloaded manually")
-            } catch (e: Exception) {
-                logger.error("Error reloading configuration: ${e.message}", e)
+            } catch (error: Exception) {
+                logger.error("Error reloading configuration: ${error.message}", error)
             }
         }
     }
 
-    /**
-     * Reload a specific plugin by ID.
-     */
     fun reloadPlugin(pluginId: String) {
         scope.launch {
-            _pluginChanges.emit(PluginChangeEvent(PluginChangeType.RELOADED, pluginId, ""))
-            onPluginChange(PluginChangeEvent(PluginChangeType.RELOADED, pluginId, ""))
+            val event = PluginChangeEvent(
+                type = PluginChangeType.RELOADED,
+                pluginId = pluginId,
+                filePath = ""
+            )
+            _pluginChanges.emit(event)
+            onPluginChange(event)
             logger.info("Plugin reload requested: $pluginId")
         }
     }
 
-    private fun startWatchingDirectory(dir: String, type: WatchType) {
-        val path = File(dir).toPath().toAbsolutePath().normalize()
+    private fun startWatchingDirectory(registration: WatchDirectoryRegistration) {
         val watchService = FileSystems.getDefault().newWatchService()
+        watchers += watchService
+        registerRecursively(registration.root, watchService, registration)
+        logger.info("Watching ${registration.kind.name.lowercase()} directory: ${registration.root}")
+    }
 
-        val events = mutableListOf<WatchEvent.Kind<*>>(
-            java.nio.file.StandardWatchEventKinds.ENTRY_MODIFY,
-            java.nio.file.StandardWatchEventKinds.ENTRY_CREATE,
-            java.nio.file.StandardWatchEventKinds.ENTRY_DELETE
-        )
-
-        val key = path.register(watchService, *events.toTypedArray())
-
-        watchers.add(watchService)
-        watchedPaths[key] = path
-
-        logger.info("Watching $type directory: $dir")
+    private fun registerRecursively(
+        root: Path,
+        watchService: WatchService,
+        registration: WatchDirectoryRegistration
+    ) {
+        if (!Files.isDirectory(root)) {
+            return
+        }
+        Files.walk(root).use { paths ->
+            paths.filter(Files::isDirectory).forEach { directory ->
+                val key = directory.register(
+                    watchService,
+                    StandardWatchEventKinds.ENTRY_MODIFY,
+                    StandardWatchEventKinds.ENTRY_CREATE,
+                    StandardWatchEventKinds.ENTRY_DELETE
+                )
+                watchedPaths[key] = WatchedDirectory(directory = directory, registration = registration)
+            }
+        }
     }
 
     private suspend fun watchLoop(watcher: WatchService) {
         while (_isWatching.value) {
             try {
                 val key = watcher.take()
-                val path = watchedPaths[key] ?: continue
+                val watchedDirectory = watchedPaths[key] ?: run {
+                    key.reset()
+                    continue
+                }
 
                 key.pollEvents().forEach { event ->
                     val fileName = event.context()?.toString() ?: return@forEach
+                    val fullPath = watchedDirectory.directory.resolve(fileName).normalize()
 
-                    // Determine the full path
-                    val fullPath = path.resolve(fileName).normalize()
+                    if (event.kind() == StandardWatchEventKinds.ENTRY_CREATE && Files.isDirectory(fullPath)) {
+                        registerRecursively(fullPath, watcher, watchedDirectory.registration)
+                        processExistingDirectoryContents(fullPath, watchedDirectory.registration)
+                    }
 
-                    // Check which type of directory we're watching
-                    val isConfigDir = configDirPath?.let { fullPath.startsWith(it) } ?: false
-                    val isPluginDir = pluginDirPath?.let { fullPath.startsWith(it) } ?: false
-
-                    when {
-                        isConfigDir && shouldWatchFile(fileName) -> {
-                            handleConfigChange(fileName, fullPath.toString())
+                    when (watchedDirectory.registration.kind) {
+                        WatchDirectoryKind.CONFIG -> {
+                            if (shouldWatchFile(fileName)) {
+                                handleConfigChange(
+                                    fullPath = fullPath,
+                                    registration = watchedDirectory.registration
+                                )
+                            }
                         }
-                        isPluginDir && isPluginFile(fileName) -> {
-                            handlePluginChange(fileName, fullPath.toString())
+                        WatchDirectoryKind.PLUGIN_ARTIFACT -> {
+                            if (isPluginFile(fileName)) {
+                                handlePluginChange(
+                                    fullPath = fullPath,
+                                    registration = watchedDirectory.registration
+                                )
+                            }
+                        }
+                        WatchDirectoryKind.MODULE,
+                        WatchDirectoryKind.MANUAL -> {
+                            handleModuleChange(
+                                fullPath = fullPath,
+                                registration = watchedDirectory.registration
+                            )
                         }
                     }
                 }
                 key.reset()
-            } catch (e: InterruptedException) {
-                // Normal when stopping
+            } catch (_: InterruptedException) {
                 break
-            } catch (e: ClosedWatchServiceException) {
-                // Watcher closed during shutdown
+            } catch (_: ClosedWatchServiceException) {
                 break
-            } catch (e: Exception) {
-                logger.error("Error in watch loop: ${e.message}", e)
+            } catch (error: Exception) {
+                logger.error("Error in watch loop: ${error.message}", error)
             }
         }
     }
@@ -239,78 +252,178 @@ class ConfigHotReloader private constructor(
         return fileFilters.isEmpty() || fileFilters.any { it(fileName) }
     }
 
-    private fun isPluginFile(fileName: String): Boolean {
-        return fileName.endsWith(".jar")
-    }
+    private fun isPluginFile(fileName: String): Boolean = fileName.endsWith(".jar")
 
-    private suspend fun handleConfigChange(fileName: String, fullPath: String) {
-        delay(200) // Debounce
+    private suspend fun handleConfigChange(
+        fullPath: Path,
+        registration: WatchDirectoryRegistration
+    ) {
+        delay(200)
 
-        val file = File(fullPath)
+        val absolutePath = fullPath.toString()
+        val file = fullPath.toFile()
+        val fileName = file.name
         if (!file.exists()) {
-            val event = ConfigChangeEvent(ConfigChangeType.DELETED.name, fileName)
+            val event = ConfigChangeEvent(
+                type = ConfigChangeType.DELETED.name,
+                fileName = fileName,
+                filePath = absolutePath,
+                watchRoot = registration.root.toString()
+            )
             _configChanges.emit(event)
             onConfigChange(event)
-            configFiles.remove(fileName)
-            logger.info("Config file deleted: $fileName")
+            configFiles.remove(absolutePath)
+            logger.info("Config file deleted: $absolutePath")
             return
         }
 
         val lastModified = file.lastModified()
-        val previousModified = configFiles[fileName]
-
+        val previousModified = configFiles[absolutePath]
         if (previousModified == null || lastModified > previousModified) {
-            configFiles[fileName] = lastModified
+            configFiles[absolutePath] = lastModified
             val changeType = if (previousModified == null) ConfigChangeType.CREATED else ConfigChangeType.MODIFIED
-            val event = ConfigChangeEvent(changeType.name, fileName)
+            val event = ConfigChangeEvent(
+                type = changeType.name,
+                fileName = fileName,
+                filePath = absolutePath,
+                watchRoot = registration.root.toString()
+            )
             _configChanges.emit(event)
             onConfigChange(event)
             _lastReloadTime.value = Clock.System.now().toEpochMilliseconds()
-            logger.info("Config file changed: $fileName (${changeType.name})")
+            logger.info("Config file changed: $absolutePath (${changeType.name})")
         }
     }
 
-    private suspend fun handlePluginChange(fileName: String, fullPath: String) {
-        val file = File(fullPath)
+    private suspend fun handlePluginChange(
+        fullPath: Path,
+        registration: WatchDirectoryRegistration
+    ) {
+        val absolutePath = fullPath.toString()
+        val file = fullPath.toFile()
+        val fileName = file.name
         val isDeleted = !file.exists()
         val lastModified = if (!isDeleted) file.lastModified() else 0L
-        val previousModified = pluginFiles[fileName]
+        val previousModified = pluginFiles[absolutePath]
 
-        // Determine change type
         val changeType = when {
             isDeleted -> {
                 if (previousModified != null) {
-                    pluginFiles.remove(fileName)
+                    pluginFiles.remove(absolutePath)
                     PluginChangeType.DELETED
                 } else {
                     null
                 }
             }
             previousModified == null -> {
-                pluginFiles[fileName] = lastModified
+                pluginFiles[absolutePath] = lastModified
                 PluginChangeType.CREATED
             }
             lastModified > previousModified -> {
-                pluginFiles[fileName] = lastModified
+                pluginFiles[absolutePath] = lastModified
                 PluginChangeType.MODIFIED
             }
             else -> null
         }
 
         if (changeType != null) {
-            // Extract plugin ID from filename (e.g., "myplugin.jar" -> "myplugin")
             val pluginId = fileName.removeSuffix(".jar")
-
-            val event = PluginChangeEvent(changeType, pluginId, fullPath)
+            val event = PluginChangeEvent(
+                type = changeType,
+                pluginId = pluginId,
+                filePath = absolutePath,
+                watchRoot = registration.root.toString()
+            )
             _pluginChanges.emit(event)
             onPluginChange(event)
-            logger.info("Plugin file changed: $fileName (${changeType.name})")
+            logger.info("Plugin artifact changed: $absolutePath (${changeType.name})")
         }
     }
 
-    /**
-     * Check if running in development mode.
-     */
+    private suspend fun handleModuleChange(
+        fullPath: Path,
+        registration: WatchDirectoryRegistration
+    ) {
+        delay(100)
+
+        val absolutePath = fullPath.toString()
+        val file = fullPath.toFile()
+        val fileName = file.name
+        val isDeleted = !file.exists()
+        val lastModified = if (!isDeleted) file.lastModified() else 0L
+        val previousModified = moduleFiles[absolutePath]
+
+        val changeType = when {
+            isDeleted -> {
+                if (previousModified != null) {
+                    moduleFiles.remove(absolutePath)
+                    ModuleChangeType.DELETED
+                } else {
+                    null
+                }
+            }
+            previousModified == null -> {
+                moduleFiles[absolutePath] = lastModified
+                ModuleChangeType.CREATED
+            }
+            lastModified > previousModified -> {
+                moduleFiles[absolutePath] = lastModified
+                ModuleChangeType.MODIFIED
+            }
+            else -> null
+        }
+
+        if (changeType != null) {
+            val relativePath = registration.root.relativize(fullPath).toString()
+                .replace(File.separatorChar, '/')
+            val event = ModuleChangeEvent(
+                type = changeType,
+                fileName = fileName,
+                fullPath = absolutePath,
+                moduleRoot = registration.root.toString(),
+                relativePath = relativePath
+            )
+            _moduleChanges.emit(event)
+            onModuleChange(event)
+            logger.info("Module file changed: $absolutePath (${changeType.name})")
+        }
+    }
+
+    private suspend fun processExistingDirectoryContents(
+        root: Path,
+        registration: WatchDirectoryRegistration
+    ) {
+        if (!Files.isDirectory(root)) {
+            return
+        }
+        Files.walk(root).use { paths ->
+            paths.filter(Files::isRegularFile).forEach { file ->
+                when (registration.kind) {
+                    WatchDirectoryKind.CONFIG -> {
+                        if (shouldWatchFile(file.fileName.toString())) {
+                            scope.launch {
+                                handleConfigChange(file, registration)
+                            }
+                        }
+                    }
+                    WatchDirectoryKind.PLUGIN_ARTIFACT -> {
+                        if (isPluginFile(file.fileName.toString())) {
+                            scope.launch {
+                                handlePluginChange(file, registration)
+                            }
+                        }
+                    }
+                    WatchDirectoryKind.MODULE,
+                    WatchDirectoryKind.MANUAL -> {
+                        scope.launch {
+                            handleModuleChange(file, registration)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     companion object {
         fun isDevelopmentMode(): Boolean {
             val sysProp = System.getProperty(KeelConstants.ENV_SYSTEM_PROPERTY)
@@ -325,73 +438,105 @@ class ConfigHotReloader private constructor(
         }
     }
 
-    /**
-     * Builder for creating ConfigHotReloader instances.
-     */
     class Builder {
-        private var configDir: String? = null
-        private var pluginDir: String? = null
-        private val additionalWatchDirs = mutableListOf<String>()
+        private val watchDirectories = linkedMapOf<String, WatchDirectoryRegistration>()
         private val fileFilters = mutableListOf<(String) -> Boolean>()
         private var onConfigChange: (ConfigChangeEvent) -> Unit = {}
         private var onPluginChange: (PluginChangeEvent) -> Unit = {}
+        private var onModuleChange: (ModuleChangeEvent) -> Unit = {}
 
-        fun watchConfigDir(dir: String) = apply { this.configDir = dir }
+        fun watchConfigDir(dir: String) = addWatchDirectory(dir, WatchDirectoryKind.CONFIG)
 
-        fun watchPluginDir(dir: String) = apply { this.pluginDir = dir }
+        fun watchPluginDir(dir: String) = addWatchDirectory(dir, WatchDirectoryKind.PLUGIN_ARTIFACT)
 
-        fun watchAdditionalDir(dir: String) = apply { this.additionalWatchDirs.add(dir) }
+        fun watchModuleDir(dir: String) = addWatchDirectory(dir, WatchDirectoryKind.MODULE)
 
-        fun addFileFilter(filter: (String) -> Boolean) = apply { this.fileFilters.add(filter) }
+        fun watchModuleDirectories(dirs: Iterable<String>) = apply {
+            dirs.forEach(::watchModuleDir)
+        }
 
-        fun onConfigChange(callback: (ConfigChangeEvent) -> Unit) = apply { this.onConfigChange = callback }
+        fun watchDirectory(dir: String) = addWatchDirectory(dir, WatchDirectoryKind.MANUAL)
 
-        fun onPluginChange(callback: (PluginChangeEvent) -> Unit) = apply { this.onPluginChange = callback }
+        fun watchDirectories(dirs: Iterable<String>) = apply {
+            dirs.forEach(::watchDirectory)
+        }
+
+        fun watchDirectories(vararg dirs: String) = watchDirectories(dirs.asIterable())
+
+        fun watchAdditionalDir(dir: String) = watchDirectory(dir)
+
+        fun addFileFilter(filter: (String) -> Boolean) = apply { fileFilters += filter }
+
+        fun onConfigChange(callback: (ConfigChangeEvent) -> Unit) = apply { onConfigChange = callback }
+
+        fun onPluginChange(callback: (PluginChangeEvent) -> Unit) = apply { onPluginChange = callback }
+
+        fun onModuleChange(callback: (ModuleChangeEvent) -> Unit) = apply { onModuleChange = callback }
 
         fun build(): ConfigHotReloader {
             return ConfigHotReloader(
-                configDir = configDir ?: KeelConstants.CONFIG_DIR,
-                pluginDir = pluginDir,
-                additionalWatchDirs = additionalWatchDirs.toList(),
+                watchDirectories = watchDirectories.values.toList(),
                 fileFilters = fileFilters.toList(),
                 onConfigChange = onConfigChange,
-                onPluginChange = onPluginChange
+                onPluginChange = onPluginChange,
+                onModuleChange = onModuleChange
             )
+        }
+
+        private fun addWatchDirectory(dir: String, kind: WatchDirectoryKind) = apply {
+            val normalized = dir.trim()
+            if (normalized.isEmpty()) {
+                return@apply
+            }
+            val root = File(normalized).toPath().toAbsolutePath().normalize()
+            val key = "${kind.name}:${root}"
+            watchDirectories[key] = WatchDirectoryRegistration(root = root, kind = kind)
         }
     }
 }
 
-/**
- * Type of directory being watched.
- */
-private enum class WatchType {
+internal data class WatchDirectoryRegistration(
+    val root: Path,
+    val kind: WatchDirectoryKind
+)
+
+internal data class WatchedDirectory(
+    val directory: Path,
+    val registration: WatchDirectoryRegistration
+)
+
+internal enum class WatchDirectoryKind {
     CONFIG,
-    PLUGIN,
-    CUSTOM
+    PLUGIN_ARTIFACT,
+    MODULE,
+    MANUAL
 }
 
-/**
- * Configuration change event.
- */
 data class ConfigChangeEvent(
     val type: String,
     val fileName: String,
+    val filePath: String = fileName,
+    val watchRoot: String? = null,
     val timestamp: Long = Clock.System.now().toEpochMilliseconds()
 )
 
-/**
- * Plugin change event.
- */
 data class PluginChangeEvent(
     val type: PluginChangeType,
     val pluginId: String,
     val filePath: String,
+    val watchRoot: String? = null,
     val timestamp: Long = Clock.System.now().toEpochMilliseconds()
 )
 
-/**
- * Type of plugin change.
- */
+data class ModuleChangeEvent(
+    val type: ModuleChangeType,
+    val fileName: String,
+    val fullPath: String,
+    val moduleRoot: String,
+    val relativePath: String,
+    val timestamp: Long = Clock.System.now().toEpochMilliseconds()
+)
+
 enum class PluginChangeType {
     CREATED,
     MODIFIED,
@@ -399,12 +544,15 @@ enum class PluginChangeType {
     RELOADED
 }
 
-/**
- * Type of configuration change.
- */
 enum class ConfigChangeType {
     CREATED,
     MODIFIED,
     DELETED,
     RELOADED
+}
+
+enum class ModuleChangeType {
+    CREATED,
+    MODIFIED,
+    DELETED
 }

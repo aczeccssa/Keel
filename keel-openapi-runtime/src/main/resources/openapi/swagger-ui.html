@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="color-scheme" content="light dark">
+    <title>Keel API Documentation</title>
+    <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css">
+    <style>
+        :root {
+            color-scheme: light dark;
+            --docs-bg: #f8f3ea;
+            --docs-surface: #fffaf2;
+            --docs-ink: #1f2937;
+            --docs-muted: #6b7280;
+            --docs-line: #d9cfbf;
+            --docs-accent: #0f766e;
+        }
+
+        body {
+            margin: 0;
+            padding: 0;
+            background: radial-gradient(circle at top left, rgba(15, 118, 110, 0.12), transparent 32%),
+            radial-gradient(circle at top right, rgba(180, 83, 9, 0.12), transparent 26%),
+            linear-gradient(180deg, var(--docs-bg) 0%, var(--docs-surface) 100%);
+            color: var(--docs-ink);
+            min-height: 100vh;
+        }
+
+        #swagger-ui {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding-bottom: 2rem;
+        }
+
+        #swagger-ui .topbar {
+            background: rgba(15, 23, 42, 0.92);
+            border-bottom: 1px solid var(--docs-line);
+        }
+
+        #swagger-ui .topbar .download-url-wrapper {
+            display: none;
+        }
+
+        /* 移除默认的阴影以配合扁平化/现代感设计 */
+        #swagger-ui .info,
+        #swagger-ui .scheme-container,
+        #swagger-ui .opblock-tag,
+        #swagger-ui .opblock,
+        #swagger-ui .responses-inner,
+        #swagger-ui .model-box,
+        #swagger-ui section.models,
+        #swagger-ui .dialog-ux .modal-ux,
+        #swagger-ui .auth-container {
+            box-shadow: none;
+        }
+
+        /* ----------------------------------------------------
+           优雅的深色模式适配
+           ---------------------------------------------------- */
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --docs-bg: #0f172a; /* Slate 900 - 最底层背景 */
+                --docs-surface: #1e293b; /* Slate 800 - 稍微凸起的面板 */
+                --docs-ink: #cbd5e1; /* Slate 300 - 正文颜色 */
+                --docs-heading: #f8fafc; /* Slate 50  - 标题高亮 */
+                --docs-muted: #94a3b8; /* Slate 400 - 次要信息 */
+                --docs-line: #334155; /* Slate 700 - 柔和的边框 */
+                --docs-accent: #2dd4bf; /* Teal 400  - 强调色调亮以适应暗色 */
+            }
+
+            body {
+                background: radial-gradient(circle at top left, rgba(45, 212, 191, 0.08), transparent 32%),
+                radial-gradient(circle at top right, rgba(217, 119, 6, 0.06), transparent 26%),
+                var(--docs-bg);
+            }
+
+            /* --- 1. 文本与标题层次 --- */
+            #swagger-ui,
+            #swagger-ui .info p,
+            #swagger-ui .info li,
+            #swagger-ui .opblock-summary-description,
+            #swagger-ui .response-col_description,
+            #swagger-ui .markdown p,
+            #swagger-ui .renderedMarkdown p,
+            #swagger-ui .property-row td,
+            #swagger-ui .parameters-col_description p {
+                color: var(--docs-ink) !important;
+            }
+
+            #swagger-ui h1,
+            #swagger-ui h2,
+            #swagger-ui h3,
+            #swagger-ui h4,
+            #swagger-ui h5,
+            #swagger-ui .info .title,
+            #swagger-ui .opblock-tag,
+            #swagger-ui .opblock-summary-path,
+            #swagger-ui .opblock-summary-path__deprecated,
+            #swagger-ui .tab li button.tablinks,
+            #swagger-ui section.models h4,
+            #swagger-ui .model-title,
+            #swagger-ui table thead tr th,
+            #swagger-ui .opblock .opblock-section-header h4 {
+                color: var(--docs-heading) !important;
+            }
+
+            #swagger-ui a,
+            #swagger-ui .prop-name,
+            #swagger-ui .info a {
+                color: var(--docs-accent) !important;
+            }
+
+            /* --- 2. API 动作块与展开区域修复 --- */
+            #swagger-ui .opblock {
+                background: rgba(30, 41, 59, 0.3);
+                border: 1px solid var(--docs-line);
+                border-radius: 8px;
+            }
+
+            #swagger-ui .opblock .opblock-summary {
+                border-color: var(--docs-line);
+            }
+
+            #swagger-ui .opblock-body {
+                background: var(--docs-bg);
+            }
+
+            /* 修复：展开后的 Parameters 和 Responses 标题行 */
+            #swagger-ui .opblock .opblock-section-header {
+                background: var(--docs-surface);
+                border-color: var(--docs-line);
+                box-shadow: none;
+            }
+
+            /* --- 3. DTOs / Models 底部模型区域修复 --- */
+            #swagger-ui .scheme-container,
+            #swagger-ui .auth-container,
+            #swagger-ui .dialog-ux .modal-ux {
+                background: var(--docs-surface) !important;
+                border: 1px solid var(--docs-line);
+                border-radius: 8px;
+            }
+
+            /* 修复：所有表格的边框线，包括 DTO 内部 */
+            #swagger-ui table tbody tr td,
+            #swagger-ui table thead tr th,
+            #swagger-ui table.model tbody tr td,
+            #swagger-ui .responses-table tbody tr td {
+                border-color: var(--docs-line) !important;
+            }
+
+            #swagger-ui section.models {
+                border: 1px solid var(--docs-line);
+                border-radius: 8px;
+                background: transparent;
+            }
+
+            #swagger-ui section.models.is-open h4 {
+                border-bottom-color: var(--docs-line) !important;
+            }
+
+            /* 修复：DTO 容器底色 */
+            #swagger-ui .model-box,
+            #swagger-ui section.models .model-container {
+                background: var(--docs-surface) !important;
+                border-radius: 6px;
+            }
+
+            /* --- 4. 表单与按钮 --- */
+            #swagger-ui .btn,
+            #swagger-ui select,
+            #swagger-ui input[type=text],
+            #swagger-ui input[type=password],
+            #swagger-ui input[type=search],
+            #swagger-ui input[type=email],
+            #swagger-ui textarea {
+                background: var(--docs-bg);
+                color: var(--docs-heading);
+                border: 1px solid var(--docs-line);
+                border-radius: 6px;
+                transition: border-color 0.2s;
+            }
+
+            #swagger-ui .btn:hover {
+                border-color: var(--docs-muted);
+                background: var(--docs-surface);
+            }
+
+            #swagger-ui .btn.execute {
+                background-color: #0284c7;
+                color: #ffffff;
+                border: none;
+            }
+
+            #swagger-ui .btn.execute:hover {
+                background-color: #0369a1;
+            }
+
+            #swagger-ui .btn-clear {
+                color: #ef4444;
+            }
+
+            /* --- 5. 代码高亮与 DTO 细节 --- */
+            #swagger-ui .highlight-code,
+            #swagger-ui pre,
+            #swagger-ui pre span,
+            #swagger-ui .microlight {
+                background: #020617 !important;
+                color: #e2e8f0 !important;
+                border: 1px solid var(--docs-line);
+                border-radius: 6px;
+            }
+
+            /* 优化：DTO 属性类型的高亮 */
+            #swagger-ui .prop-type {
+                color: #818cf8 !important; /* Indigo 400 */
+            }
+
+            /* --- 6. 杂项修复 --- */
+            #swagger-ui .parameter__extension,
+            #swagger-ui .parameter__deprecated,
+            #swagger-ui .model-toggle:after,
+            #swagger-ui .prop-format,
+            #swagger-ui span.model .brace-open,
+            #swagger-ui span.model .brace-close {
+                color: var(--docs-muted) !important;
+            }
+
+            #swagger-ui svg {
+                fill: var(--docs-muted);
+            }
+        }
+    </style>
+</head>
+<body>
+<div id="swagger-ui"></div>
+<script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
+<script>
+    SwaggerUIBundle({
+        url: '/api/_system/docs/openapi.json',
+        dom_id: '#swagger-ui',
+        presets: [
+            SwaggerUIBundle.presets.apis,
+            SwaggerUIBundle.SwaggerUIStandalonePreset
+        ],
+        layout: 'BaseLayout',
+        deepLinking: true,
+        defaultModelsExpandDepth: 1
+    });
+</script>
+</body>
+</html>

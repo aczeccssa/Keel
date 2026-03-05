@@ -17,6 +17,9 @@ object KeelConstants {
     /** Default configuration directory. */
     const val CONFIG_DIR = "config"
 
+    /** Default plugin config directory under the config root. */
+    const val CONFIG_PLUGINS_DIR = "$CONFIG_DIR/plugins"
+
     /** Manifest attribute: plugin ID. */
     const val MANIFEST_PLUGIN_ID = "Keel-Plugin-Id"
 

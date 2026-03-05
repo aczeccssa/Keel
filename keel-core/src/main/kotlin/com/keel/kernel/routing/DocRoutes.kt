@@ -1,6 +1,5 @@
 package com.keel.kernel.routing
 
-import com.keel.kernel.api.systemApi
 import com.keel.openapi.runtime.openApiRoutes
 import io.ktor.server.routing.Route
 
@@ -10,8 +9,16 @@ import io.ktor.server.routing.Route
  * - GET /api/_system/docs — Swagger UI
  * - GET /api/_system/docs/openapi.json — OpenAPI 3.1.0 spec
  */
-fun Route.docRoutes() {
-    systemApi {
-        openApiRoutes()
+object DocRouteInstaller {
+    fun install(route: Route) {
+        with(route) {
+            systemApi {
+                openApiRoutes()
+            }
+        }
     }
+}
+
+fun Route.docRoutes() {
+    DocRouteInstaller.install(this)
 }

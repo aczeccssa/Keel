@@ -12,8 +12,6 @@ dependencies {
 
     testImplementation(project(":keel-core"))
     testImplementation(project(":keel-samples"))
-    testImplementation(project(":plugins:sample-hello"))
-    testImplementation(project(":plugins:sample-dbdemo"))
     testImplementation(libs.ktor.server.content.negotiation)
     testImplementation(libs.ktor.serialization.kotlinx.json)
     testImplementation("io.ktor:ktor-server-test-host:3.4.0")
