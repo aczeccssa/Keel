@@ -25,6 +25,15 @@ subprojects {
         options.release.set(23)
     }
 
+    tasks.withType<org.gradle.jvm.tasks.Jar>().configureEach {
+        manifest {
+            attributes(
+                "Implementation-Title" to project.name,
+                "Implementation-Version" to project.version.toString()
+            )
+        }
+    }
+
     tasks.withType<Test>().configureEach {
         useJUnit()
     }

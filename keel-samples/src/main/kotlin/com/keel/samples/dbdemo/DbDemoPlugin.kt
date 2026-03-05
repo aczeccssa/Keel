@@ -8,6 +8,7 @@ import com.keel.kernel.plugin.KeelPlugin
 import com.keel.kernel.plugin.PluginApiException
 import com.keel.kernel.plugin.PluginDescriptor
 import com.keel.kernel.plugin.PluginEndpointBuilders
+import com.keel.kernel.plugin.PluginEndpointBuilders.pluginEndpoints
 import com.keel.kernel.plugin.PluginInitContext
 import com.keel.kernel.plugin.PluginResult
 import com.keel.kernel.plugin.PluginRuntimeContext
@@ -43,7 +44,7 @@ class DbDemoPlugin : KeelPlugin {
         seedData()
     }
 
-    override fun endpoints() = PluginEndpointBuilders.pluginEndpoints(descriptor.pluginId) {
+    override fun endpoints() = pluginEndpoints(descriptor.pluginId) {
         route("/notes") {
             @KeelApi("List all active notes", tags = ["notes"], responseEnvelope = true)
             get<NoteListData> {

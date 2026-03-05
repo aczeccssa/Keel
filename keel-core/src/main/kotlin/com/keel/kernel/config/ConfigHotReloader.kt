@@ -21,6 +21,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.datetime.Clock
 
 /**
@@ -279,7 +280,7 @@ class ConfigHotReloader private constructor(
 
         val lastModified = file.lastModified()
         val previousModified = configFiles[absolutePath]
-        if (previousModified == null || lastModified > previousModified) {
+        if (previousModified == null || lastModified != previousModified) {
             configFiles[absolutePath] = lastModified
             val changeType = if (previousModified == null) ConfigChangeType.CREATED else ConfigChangeType.MODIFIED
             val event = ConfigChangeEvent(
@@ -319,7 +320,7 @@ class ConfigHotReloader private constructor(
                 pluginFiles[absolutePath] = lastModified
                 PluginChangeType.CREATED
             }
-            lastModified > previousModified -> {
+            lastModified != previousModified -> {
                 pluginFiles[absolutePath] = lastModified
                 PluginChangeType.MODIFIED
             }
@@ -366,7 +367,7 @@ class ConfigHotReloader private constructor(
                 moduleFiles[absolutePath] = lastModified
                 ModuleChangeType.CREATED
             }
-            lastModified > previousModified -> {
+            lastModified != previousModified -> {
                 moduleFiles[absolutePath] = lastModified
                 ModuleChangeType.MODIFIED
             }
@@ -396,7 +397,9 @@ class ConfigHotReloader private constructor(
         if (!Files.isDirectory(root)) {
             return
         }
-        Files.walk(root).use { paths ->
+        withContext(Dispatchers.IO) {
+            Files.walk(root)
+        }.use { paths ->
             paths.filter(Files::isRegularFile).forEach { file ->
                 when (registration.kind) {
                     WatchDirectoryKind.CONFIG -> {

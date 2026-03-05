@@ -4,6 +4,17 @@ plugins {
     alias(libs.plugins.ksp)
 }
 
+tasks.processResources {
+    inputs.property("frameworkVersion", project.version.toString())
+    inputs.property("exposedVersion", libs.versions.exposed.get())
+    filesMatching("keel-framework.properties") {
+        expand(
+            "frameworkVersion" to project.version.toString(),
+            "exposedVersion" to libs.versions.exposed.get()
+        )
+    }
+}
+
 dependencies {
     // Ktor
     implementation(libs.ktor.server.core)

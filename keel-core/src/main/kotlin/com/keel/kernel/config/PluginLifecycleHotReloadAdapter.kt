@@ -1,10 +1,12 @@
 package com.keel.kernel.config
 
+import com.keel.kernel.hotreload.DevHotReloadEngine
 import com.keel.kernel.logging.KeelLoggerService
 import com.keel.kernel.plugin.UnifiedPluginManager
 
 class PluginLifecycleHotReloadAdapter(
-    private val pluginManager: UnifiedPluginManager
+    private val pluginManager: UnifiedPluginManager,
+    private val devHotReloadEngine: DevHotReloadEngine? = null
 ) {
     private val logger = KeelLoggerService.getLogger("PluginLifecycleHotReloadAdapter")
 
@@ -15,7 +17,11 @@ class PluginLifecycleHotReloadAdapter(
             return
         }
         logger.info("Config-triggered reload pluginId=$pluginId changeType=${event.type}")
-        pluginManager.reloadPlugin(pluginId)
+        if (devHotReloadEngine != null && pluginManager.hasPluginSource(pluginId)) {
+            devHotReloadEngine.reloadPlugin(pluginId, reason = "config-change:${event.fileName}")
+        } else {
+            pluginManager.reloadPlugin(pluginId)
+        }
     }
 
     suspend fun handlePluginChange(event: PluginChangeEvent) {

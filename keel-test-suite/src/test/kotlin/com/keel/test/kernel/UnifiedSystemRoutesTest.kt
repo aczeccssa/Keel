@@ -16,6 +16,7 @@ import io.ktor.serialization.kotlinx.json.json
 import io.ktor.server.application.install
 import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.server.routing.routing
+import io.ktor.server.sse.SSE
 import io.ktor.server.testing.testApplication
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
@@ -52,6 +53,7 @@ class UnifiedSystemRoutesTest {
             install(ContentNegotiation) {
                 json()
             }
+            install(SSE)
             routing {
                 unifiedSystemRoutes(manager, DefaultPluginLoader())
             }
@@ -82,6 +84,7 @@ class UnifiedSystemRoutesTest {
             install(ContentNegotiation) {
                 json()
             }
+            install(SSE)
             routing {
                 unifiedSystemRoutes(manager, DefaultPluginLoader())
             }
@@ -113,6 +116,7 @@ class UnifiedSystemRoutesTest {
             install(ContentNegotiation) {
                 json()
             }
+            install(SSE)
             routing {
                 unifiedSystemRoutes(manager, DefaultPluginLoader())
             }
@@ -120,6 +124,28 @@ class UnifiedSystemRoutesTest {
 
         assertEquals(HttpStatusCode.NotFound, client.post("/api/_system/plugins/plug-c/enable").status)
         assertEquals(HttpStatusCode.NotFound, client.post("/api/_system/plugins/plug-c/disable").status)
+    }
+
+    @Test
+    fun versionEndpointReturnsFrameworkVersion() = testApplication {
+        val koin = startKoin {}.also { koinStarted = true }.koin
+        val manager = UnifiedPluginManager(koin)
+
+        application {
+            install(ContentNegotiation) {
+                json()
+            }
+            install(SSE)
+            routing {
+                unifiedSystemRoutes(manager, DefaultPluginLoader())
+            }
+        }
+
+        val response = client.get("/api/_system/version")
+        assertEquals(HttpStatusCode.OK, response.status)
+        val data = Json.parseToJsonElement(response.bodyAsText()).jsonObject["data"]!!.jsonObject
+        val frameworkVersion = data["frameworkVersion"]!!.jsonPrimitive.content
+        kotlin.test.assertTrue(frameworkVersion.isNotBlank())
     }
 
     private suspend fun io.ktor.server.testing.ApplicationTestBuilder.healthLifecycle(pluginId: String): String {

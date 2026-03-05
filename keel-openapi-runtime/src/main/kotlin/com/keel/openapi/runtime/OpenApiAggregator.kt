@@ -148,10 +148,13 @@ object OpenApiAggregator {
             "/api/_system/plugins/{pluginId}/stop",
             "/api/_system/plugins/{pluginId}/dispose",
             "/api/_system/plugins/{pluginId}/reload",
-            "/api/_system/plugins/{pluginId}/replace"
+            "/api/_system/plugins/{pluginId}/replace",
+            "/api/_system/hotreload/status",
+            "/api/_system/hotreload/reload/{pluginId}",
+            "/api/_system/hotreload/events"
         )
         val forbidden = paths.filter { path ->
-            if (!path.startsWith("/api/_system/plugins")) return@filter false
+            if (!path.startsWith("/api/_system/plugins") && !path.startsWith("/api/_system/hotreload")) return@filter false
             path !in allowedPluginPaths
         }
         if (forbidden.isNotEmpty()) {

@@ -25,6 +25,8 @@ Use backlog filename style:
 ## Decisions Locked
 
 - hot reload scope: development mode only
+- implementation scope: rewrite the existing hot reload mechanism only
+- compatibility guardrail: do not break any upper-layer development conventions outside hot reload
 - default watch scope: caller module plus recursive `project(...)` dependency modules
 - user may append extra watch directories manually
 - plugin definition source: may live in `src/` of the current module or any project dependency module
@@ -73,6 +75,8 @@ After implementation:
 - no promise of JVMTI bytecode replacement or debugger-style live patching
 - no promise of preserving all in-memory plugin state across source reloads
 - no dependence on external IDE-specific hot swap features
+- no changes to unrelated upper-layer development APIs, conventions, or lifecycle contracts
+- no behavioral regression for existing non-hot-reload development workflows
 
 ## Reloadability Boundaries
 
@@ -372,6 +376,7 @@ This is a critical prerequisite for real hot replacement.
 - ownership mapping from changed module to affected plugin set
 - non-reloadable kernel module changes return `RESTART_REQUIRED`
 - generation switch keeps old generation when new one fails
+- existing non-hot-reload plugin registration and startup behavior remains unchanged
 
 ## Integration tests
 
@@ -379,6 +384,7 @@ This is a critical prerequisite for real hot replacement.
 - edit plugin-local DTO and verify new serialization shape after reload
 - break plugin build and verify old generation still serves traffic
 - edit kernel source and verify restart-required status is emitted instead of fake reload
+- run existing non-hot-reload dev flow and verify no regression in upper-layer conventions
 
 ## Manual scenarios
 
@@ -403,3 +409,5 @@ This is a critical prerequisite for real hot replacement.
 The deliverable is not "a watcher".
 
 The deliverable is a dev runtime where plugin source edits inside watched modules are rebuilt and swapped into live request handling without restarting the kernel process, while non-reloadable changes are explicitly reported as restart-required.
+
+Hard boundary: this work rewrites only the hot reload mechanism and must not break any development conventions outside that scope.
