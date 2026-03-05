@@ -60,6 +60,39 @@ class DefaultWatchDirectoriesResolverTest {
         }
     }
 
+    @Test
+    fun supportsCommonGradleProjectDependencyFormats() {
+        val repoRoot = Files.createTempDirectory("keel-watch-root-")
+        try {
+            val appModule = createModule(
+                repoRoot,
+                "app",
+                """
+                dependencies {
+                    implementation(project(":shared-a"))
+                    implementation(project(':shared-b'))
+                    implementation(project(path = ":shared-c"))
+                    implementation(project( ":nested:core" ))
+                }
+                """.trimIndent()
+            )
+            createModule(repoRoot, "shared-a", """dependencies { }""")
+            createModule(repoRoot, "shared-b", """dependencies { }""")
+            createModule(repoRoot, "shared-c", """dependencies { }""")
+            createModule(repoRoot, "nested/core", """dependencies { }""")
+
+            val resolved = resolve(repoRoot.toFile(), appModule.toFile())
+
+            assertNotNull(resolved)
+            assertEquals(
+                listOf(":app", ":shared-a", ":shared-b", ":shared-c", ":nested:core"),
+                moduleProjectPaths(resolved)
+            )
+        } finally {
+            repoRoot.toFile().deleteRecursively()
+        }
+    }
+
     private fun createModule(repoRoot: Path, relativePath: String, buildScript: String): Path {
         val moduleDir = repoRoot.resolve(relativePath).createDirectories()
         Files.writeString(moduleDir.resolve("build.gradle.kts"), buildScript)
@@ -69,7 +102,11 @@ class DefaultWatchDirectoriesResolverTest {
     private fun resolve(repoRoot: File, callerModuleDir: File): Any? {
         val resolverClass = Class.forName("com.keel.kernel.config.DefaultWatchDirectoriesResolver")
         val instance = resolverClass.getField("INSTANCE").get(null)
-        val method = resolverClass.getDeclaredMethod("resolve\$keel_core", File::class.java, File::class.java)
+        val method = resolverClass.declaredMethods.firstOrNull { method ->
+            method.name.substringBefore('$') == "resolve" &&
+                method.parameterTypes.contentEquals(arrayOf(File::class.java, File::class.java))
+        } ?: error("Unable to find resolver method")
+        method.isAccessible = true
         return method.invoke(instance, repoRoot, callerModuleDir)
     }
 

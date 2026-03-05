@@ -463,8 +463,6 @@ class ConfigHotReloader private constructor(
 
         fun watchDirectories(vararg dirs: String) = watchDirectories(dirs.asIterable())
 
-        fun watchAdditionalDir(dir: String) = watchDirectory(dir)
-
         fun addFileFilter(filter: (String) -> Boolean) = apply { fileFilters += filter }
 
         fun onConfigChange(callback: (ConfigChangeEvent) -> Unit) = apply { onConfigChange = callback }

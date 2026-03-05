@@ -19,24 +19,12 @@ internal val TypedRouteBasePathKey = AttributeKey<String>("keel.typed.basePath")
 
 @PublishedApi
 internal fun Route.typedBasePath(): String {
-    var current: Route? = this
-    while (current != null) {
-        if (current.attributes.contains(TypedRouteBasePathKey)) {
-            return current.attributes[TypedRouteBasePathKey]
-        }
-        current = current.parent
-    }
-    return ""
+    return resolveBasePathAttribute(TypedRouteBasePathKey)
 }
 
 @PublishedApi
 internal fun Route.fullTypedPath(path: String): String {
-    val basePath = typedBasePath().trimEnd('/')
-    val normalizedPath = path.takeIf { it.isNotBlank() }?.let {
-        if (it.startsWith("/")) it else "/$it"
-    } ?: ""
-    val combined = "$basePath$normalizedPath"
-    return if (combined.isBlank()) "/" else combined
+    return composeTypedPath(typedBasePath(), path)
 }
 
 @PublishedApi

@@ -109,6 +109,7 @@ After startup, these endpoints are useful:
 
 - `http://localhost:8080/`
 - `http://localhost:8080/api/plugins/helloworld`
+- `http://localhost:8080/api/plugins/helloworld/version`
 - `http://localhost:8080/api/plugins/dbdemo/notes`
 - `http://localhost:8080/api/plugins/observability/topology`
 - `http://localhost:8080/api/plugins/observability/ui`

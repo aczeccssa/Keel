@@ -443,12 +443,17 @@
 
             const pidText = node.pid ? ` (${node.pid})` : '';
             const runtimeText = (node.runtimeMode || "IN_PROCESS") + pidText;
-
-            el.innerHTML = `
-            <h3>${node.label || node.id}</h3>
-            <div class="meta">${runtimeText}</div>
-            <div class="pill ${pillClass(node.lifecycleState)}">${node.lifecycleState || "ACTIVE"}</div>
-          `;
+            const title = document.createElement("h3");
+            title.textContent = String(node.label || node.id || "");
+            const meta = document.createElement("div");
+            meta.className = "meta";
+            meta.textContent = runtimeText;
+            const status = document.createElement("div");
+            status.className = `pill ${pillClass(node.lifecycleState)}`;
+            status.textContent = String(node.lifecycleState || "ACTIVE");
+            el.appendChild(title);
+            el.appendChild(meta);
+            el.appendChild(status);
             nodeContainer.appendChild(el);
         };
 
@@ -543,14 +548,23 @@
         state.flows.slice(-20).reverse().forEach((flow) => {
             const row = document.createElement("div");
             row.className = "flow-row";
-            row.innerHTML = `
-            <div class="flow-route">
-              <span>${flow.edgeFrom}</span>
-              <span class="flow-arrow">⟶</span>
-              <span>${flow.edgeTo}</span>
-            </div>
-            <div class="flow-op">${flow.operation || "data_sync"}</div>
-          `;
+            const route = document.createElement("div");
+            route.className = "flow-route";
+            const from = document.createElement("span");
+            from.textContent = String(flow.edgeFrom || "");
+            const arrow = document.createElement("span");
+            arrow.className = "flow-arrow";
+            arrow.textContent = "⟶";
+            const to = document.createElement("span");
+            to.textContent = String(flow.edgeTo || "");
+            route.appendChild(from);
+            route.appendChild(arrow);
+            route.appendChild(to);
+            const op = document.createElement("div");
+            op.className = "flow-op";
+            op.textContent = String(flow.operation || "data_sync");
+            row.appendChild(route);
+            row.appendChild(op);
             root.appendChild(row);
         });
     }
@@ -561,14 +575,25 @@
         state.traces.slice(0, 30).forEach((trace) => {
             const row = document.createElement("article");
             row.className = "trace";
-            row.innerHTML = `
-            <strong>${trace.operation}</strong>
-            <small>Trace ID: ${trace.traceId}</small>
-            <div style="margin-top: 6px; font-size: 12px; display:flex; justify-content: space-between;">
-              <span>${trace.service}</span>
-              <span class="${trace.status === 'ERROR' ? 'pill bad' : 'pill ok'}">${trace.status} · ${trace.durationMs ?? "-"}ms</span>
-            </div>
-          `;
+            const op = document.createElement("strong");
+            op.textContent = String(trace.operation || "");
+            const traceId = document.createElement("small");
+            traceId.textContent = `Trace ID: ${String(trace.traceId || "")}`;
+            const detail = document.createElement("div");
+            detail.style.marginTop = "6px";
+            detail.style.fontSize = "12px";
+            detail.style.display = "flex";
+            detail.style.justifyContent = "space-between";
+            const service = document.createElement("span");
+            service.textContent = String(trace.service || "");
+            const status = document.createElement("span");
+            status.className = trace.status === "ERROR" ? "pill bad" : "pill ok";
+            status.textContent = `${String(trace.status || "OK")} · ${trace.durationMs ?? "-"}ms`;
+            detail.appendChild(service);
+            detail.appendChild(status);
+            row.appendChild(op);
+            row.appendChild(traceId);
+            row.appendChild(detail);
             root.appendChild(row);
         });
     }
@@ -582,12 +607,18 @@
             ["Captured Traces", state.traces.length]
         ];
         const root = document.getElementById("metrics");
-        root.innerHTML = metrics.map(([label, value]) => `
-          <div class="metric">
-            <span>${label}</span>
-            <strong>${value}</strong>
-          </div>
-        `).join("");
+        root.innerHTML = "";
+        metrics.forEach(([label, value]) => {
+            const card = document.createElement("div");
+            card.className = "metric";
+            const labelNode = document.createElement("span");
+            labelNode.textContent = String(label);
+            const valueNode = document.createElement("strong");
+            valueNode.textContent = String(value);
+            card.appendChild(labelNode);
+            card.appendChild(valueNode);
+            root.appendChild(card);
+        });
     }
 
     // ─── Data Management ───
