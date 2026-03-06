@@ -8,7 +8,7 @@ import org.koin.core.scope.Scope
 
 interface PluginInitContext {
     val pluginId: String
-    val config: PluginConfig
+    val descriptor: PluginDescriptor
     val kernelKoin: Koin
 
     fun getDatabase(): KeelDatabase? {

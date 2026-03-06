@@ -63,7 +63,7 @@ dependencies {
     // Internal modules
     implementation(project(":keel-contract"))
     implementation(project(":keel-exposed-starter"))
-    implementation(project(":keel-uds-runtime"))
+    implementation(project(":keel-jvm-runtime"))
     implementation(project(":keel-openapi-annotations"))
     implementation(project(":keel-openapi-runtime"))
     implementation(kotlin("reflect"))

@@ -1,4 +1,4 @@
-package com.keel.uds.runtime
+package com.keel.jvm.runtime
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -26,11 +26,11 @@ class PluginUdsProtocolTest {
             accepted = true
         )
 
-        val encoded = PluginUdsJson.instance.encodeToString(HandshakeResponse.serializer(), response)
-        val decoded = PluginUdsJson.instance.decodeFromString(HandshakeResponse.serializer(), encoded)
+        val encoded = PluginJvmJson.instance.encodeToString(HandshakeResponse.serializer(), response)
+        val decoded = PluginJvmJson.instance.decodeFromString(HandshakeResponse.serializer(), encoded)
 
         assertEquals("handshake-response", decoded.kind)
-        assertEquals(PLUGIN_UDS_PROTOCOL_VERSION, decoded.protocolVersion)
+        assertEquals(PLUGIN_JVM_PROTOCOL_VERSION, decoded.protocolVersion)
         assertEquals("demo", decoded.pluginId)
         assertEquals(7, decoded.generation)
         assertEquals("req-1", decoded.correlationId)

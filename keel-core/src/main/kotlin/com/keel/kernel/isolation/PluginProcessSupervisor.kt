@@ -15,29 +15,30 @@ import com.keel.kernel.plugin.PluginHealthState
 import com.keel.kernel.plugin.PluginProcessState
 import com.keel.kernel.plugin.PluginRuntimeDiagnostics
 import com.keel.kernel.plugin.PluginRuntimeMode
-import com.keel.uds.runtime.HandshakeRequest
-import com.keel.uds.runtime.HandshakeResponse
-import com.keel.uds.runtime.HealthRequest
-import com.keel.uds.runtime.HealthResponse
-import com.keel.uds.runtime.InvokeRequest
-import com.keel.uds.runtime.InvokeResponse
-import com.keel.uds.runtime.PLUGIN_UDS_PROTOCOL_VERSION
-import com.keel.uds.runtime.PluginBackpressureEvent
-import com.keel.uds.runtime.PluginDrainCompleteEvent
-import com.keel.uds.runtime.PluginEventQueueOverflowEvent
-import com.keel.uds.runtime.PluginFailureEvent
-import com.keel.uds.runtime.PluginLogEvent
-import com.keel.uds.runtime.PluginTraceEvent
-import com.keel.uds.runtime.PluginDisposedEvent
-import com.keel.uds.runtime.PluginReadyEvent
-import com.keel.uds.runtime.PluginRuntimeEvent
-import com.keel.uds.runtime.PluginStoppingEvent
-import com.keel.uds.runtime.PluginUdsFrameCodec
-import com.keel.uds.runtime.PluginUdsJson
-import com.keel.uds.runtime.ReloadPrepareRequest
-import com.keel.uds.runtime.ReloadPrepareResponse
-import com.keel.uds.runtime.ShutdownRequest
-import com.keel.uds.runtime.ShutdownResponse
+import com.keel.kernel.plugin.JvmCommunicationMode
+import com.keel.jvm.runtime.HandshakeRequest
+import com.keel.jvm.runtime.HandshakeResponse
+import com.keel.jvm.runtime.HealthRequest
+import com.keel.jvm.runtime.HealthResponse
+import com.keel.jvm.runtime.InvokeRequest
+import com.keel.jvm.runtime.InvokeResponse
+import com.keel.jvm.runtime.PLUGIN_JVM_PROTOCOL_VERSION
+import com.keel.jvm.runtime.PluginBackpressureEvent
+import com.keel.jvm.runtime.PluginDrainCompleteEvent
+import com.keel.jvm.runtime.PluginEventQueueOverflowEvent
+import com.keel.jvm.runtime.PluginFailureEvent
+import com.keel.jvm.runtime.PluginLogEvent
+import com.keel.jvm.runtime.PluginTraceEvent
+import com.keel.jvm.runtime.PluginDisposedEvent
+import com.keel.jvm.runtime.PluginReadyEvent
+import com.keel.jvm.runtime.PluginRuntimeEvent
+import com.keel.jvm.runtime.PluginStoppingEvent
+import com.keel.jvm.runtime.PluginJvmFrameCodec
+import com.keel.jvm.runtime.PluginJvmJson
+import com.keel.jvm.runtime.ReloadPrepareRequest
+import com.keel.jvm.runtime.ReloadPrepareResponse
+import com.keel.jvm.runtime.ShutdownRequest
+import com.keel.jvm.runtime.ShutdownResponse
 import io.ktor.server.application.ApplicationCall
 import io.ktor.server.request.path
 import io.opentelemetry.context.Context
@@ -70,11 +71,25 @@ import kotlinx.serialization.KSerializer
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
-data class PluginUdsSocketPaths(
+sealed interface PluginJvmConnectionInfo {
+    val mode: JvmCommunicationMode
+}
+
+data class PluginJvmUdsConnectionInfo(
     val invokePath: Path,
     val adminPath: Path,
     val eventPath: Path
-)
+) : PluginJvmConnectionInfo {
+    override val mode = JvmCommunicationMode.UDS
+}
+
+data class PluginJvmTcpConnectionInfo(
+    val invokePort: Int,
+    val adminPort: Int,
+    val eventPort: Int
+) : PluginJvmConnectionInfo {
+    override val mode = JvmCommunicationMode.TCP
+}
 
 @OptIn(ExperimentalUuidApi::class)
 class PluginProcessSupervisor(
@@ -83,7 +98,6 @@ class PluginProcessSupervisor(
     private val config: PluginConfig,
     private val expectedEndpoints: List<PluginEndpointDefinition<*, *>>,
     private val classpath: String,
-    private val socketPaths: PluginUdsSocketPaths,
     private val runtimeDir: Path,
     private val generation: PluginGeneration,
     private val onStateChange: (PluginProcessState) -> Unit,
@@ -95,6 +109,7 @@ class PluginProcessSupervisor(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val authToken: String = Uuid.random().toString()
 
+    private var currentConnectionInfo: PluginJvmConnectionInfo? = null
     private var process: Process? = null
     private var healthJob: Job? = null
     private var eventServerJob: Job? = null
@@ -112,8 +127,12 @@ class PluginProcessSupervisor(
 
     suspend fun start() {
         var lastError: Throwable? = null
-        repeat(3) { attempt ->
+        val strategy = descriptor.communicationStrategy
+        repeat(strategy.maxAttempts) { attempt ->
             try {
+                val mode = if (attempt == 0) strategy.preferredMode else strategy.fallbackMode
+                currentConnectionInfo = createConnectionInfo(mode)
+                
                 prepareEventServer()
                 launchProcess()
                 waitUntilReady()
@@ -132,6 +151,37 @@ class PluginProcessSupervisor(
             }
         }
         throw IllegalStateException("Failed to start isolated plugin ${descriptor.pluginId}", lastError)
+    }
+
+    private fun createConnectionInfo(mode: JvmCommunicationMode): PluginJvmConnectionInfo = when (mode) {
+        JvmCommunicationMode.UDS -> {
+            val stem = "${descriptor.pluginId}-${generation.value}"
+            PluginJvmUdsConnectionInfo(
+                invokePath = runtimeDir.resolve("$stem-invoke.sock"),
+                adminPath = runtimeDir.resolve("$stem-admin.sock"),
+                eventPath = runtimeDir.resolve("$stem-event.sock")
+            )
+        }
+        JvmCommunicationMode.TCP -> {
+            val ports = allocateDistinctPorts(3)
+            PluginJvmTcpConnectionInfo(
+                invokePort = ports[0],
+                adminPort = ports[1],
+                eventPort = ports[2]
+            )
+        }
+    }
+
+    private fun allocateFreePort(): Int {
+        java.net.ServerSocket(0).use { return it.localPort }
+    }
+
+    private fun allocateDistinctPorts(count: Int): List<Int> {
+        val ports = LinkedHashSet<Int>(count)
+        while (ports.size < count) {
+            ports.add(allocateFreePort())
+        }
+        return ports.toList()
     }
 
     suspend fun stop() {
@@ -235,20 +285,36 @@ class PluginProcessSupervisor(
         return response
     }
 
+    private enum class CommunicationLane {
+        INVOKE, ADMIN, EVENT
+    }
+
     private fun prepareEventServer() {
-        socketPaths.eventPath.parent?.toFile()?.mkdirs()
-        socketPaths.eventPath.deleteIfExists()
-        val server = ServerSocketChannel.open(StandardProtocolFamily.UNIX)
-        server.bind(UnixDomainSocketAddress.of(socketPaths.eventPath))
-        eventServer = server
+        val connection = currentConnectionInfo ?: return
+        when (connection) {
+            is PluginJvmUdsConnectionInfo -> {
+                connection.eventPath.parent?.toFile()?.mkdirs()
+                connection.eventPath.deleteIfExists()
+                val server = ServerSocketChannel.open(StandardProtocolFamily.UNIX)
+                server.bind(UnixDomainSocketAddress.of(connection.eventPath))
+                eventServer = server
+            }
+            is PluginJvmTcpConnectionInfo -> {
+                val server = ServerSocketChannel.open()
+                server.bind(java.net.InetSocketAddress("127.0.0.1", connection.eventPort))
+                eventServer = server
+            }
+        }
+        
+        val server = eventServer ?: return
         eventServerJob = scope.launch {
             while (isActive) {
                 try {
-                    server.accept().use { channel ->
+                    server.accept()?.use { channel ->
                         eventChannelConnected = true
                         recomputeHealth()
-                        while (isActive) {
-                            val payload = PluginUdsFrameCodec.read(channel)
+                        while (isActive && channel.isOpen) {
+                            val payload = PluginJvmFrameCodec.read(channel)
                             handleEventPayload(payload)
                         }
                     }
@@ -266,26 +332,41 @@ class PluginProcessSupervisor(
     }
 
     private fun launchProcess() {
+        val connection = currentConnectionInfo ?: return
         onStateChange(PluginProcessState.STARTING)
         runtimeDir.toFile().mkdirs()
-        socketPaths.invokePath.deleteIfExists()
-        socketPaths.adminPath.deleteIfExists()
+        
         val javaBinary = File(System.getProperty("java.home"), "bin/java").absolutePath
-        val processBuilder = ProcessBuilder(
+        val baseArgs = mutableListOf(
             javaBinary,
             "-cp",
             classpath,
             "com.keel.kernel.isolation.ExternalPluginHostMain",
             "--plugin-id=${descriptor.pluginId}",
             "--plugin-class=$pluginClassName",
-            "--invoke-socket-path=${socketPaths.invokePath.pathString}",
-            "--admin-socket-path=${socketPaths.adminPath.pathString}",
-            "--event-socket-path=${socketPaths.eventPath.pathString}",
             "--auth-token=$authToken",
             "--generation=${generation.value}",
             "--config-path=${File(KeelConstants.CONFIG_PLUGINS_DIR, "${descriptor.pluginId}.json").absolutePath}",
-            "--runtime-mode=${PluginRuntimeMode.EXTERNAL_JVM.name.lowercase()}"
+            "--runtime-mode=${PluginRuntimeMode.EXTERNAL_JVM.name.lowercase()}",
+            "--comm-mode=${connection.mode.name.lowercase()}"
         )
+
+        when (connection) {
+            is PluginJvmUdsConnectionInfo -> {
+                connection.invokePath.deleteIfExists()
+                connection.adminPath.deleteIfExists()
+                baseArgs.add("--invoke-socket-path=${connection.invokePath.pathString}")
+                baseArgs.add("--admin-socket-path=${connection.adminPath.pathString}")
+                baseArgs.add("--event-socket-path=${connection.eventPath.pathString}")
+            }
+            is PluginJvmTcpConnectionInfo -> {
+                baseArgs.add("--invoke-port=${connection.invokePort}")
+                baseArgs.add("--admin-port=${connection.adminPort}")
+                baseArgs.add("--event-port=${connection.eventPort}")
+            }
+        }
+
+        val processBuilder = ProcessBuilder(baseArgs)
         process = processBuilder.start()
         captureOutput(process!!.inputStream, false)
         captureOutput(process!!.errorStream, true)
@@ -295,9 +376,16 @@ class PluginProcessSupervisor(
         val deadline = System.currentTimeMillis() + config.startupTimeoutMs
         while (System.currentTimeMillis() < deadline) {
             if (process?.isAlive != true) {
-                throw IllegalStateException("Isolated plugin process exited before UDS lanes became ready")
+                throw IllegalStateException("Isolated plugin process exited before JVM lanes became ready")
             }
-            if (socketPaths.adminPath.exists() && readyEventReceived) {
+            
+            val connection = currentConnectionInfo ?: throw IllegalStateException("Connection info lost during startup")
+            val lanesReady = when (connection) {
+                is PluginJvmUdsConnectionInfo -> connection.adminPath.exists() && readyEventReceived
+                is PluginJvmTcpConnectionInfo -> readyEventReceived // TCP ports are bound by kernel first, then sub-jvm connects back for event lane
+            }
+
+            if (lanesReady) {
                 val handshake = runCatching {
                     sendAdminMessage(
                         HandshakeRequest(
@@ -393,9 +481,12 @@ class PluginProcessSupervisor(
                 }
             }
         }
-        socketPaths.invokePath.deleteIfExists()
-        socketPaths.adminPath.deleteIfExists()
-        socketPaths.eventPath.deleteIfExists()
+        val connection = currentConnectionInfo
+        if (connection is PluginJvmUdsConnectionInfo) {
+            connection.invokePath.deleteIfExists()
+            connection.adminPath.deleteIfExists()
+            connection.eventPath.deleteIfExists()
+        }
         process = null
         eventChannelConnected = false
         readyEventReceived = false
@@ -423,7 +514,7 @@ class PluginProcessSupervisor(
         timeoutMs: Long
     ): T {
         val startedAt = System.currentTimeMillis()
-        val response = sendMessage(socketPaths.adminPath, message, serializer, timeoutMs)
+        val response = sendMessage(CommunicationLane.ADMIN, message, serializer, timeoutMs)
         lastAdminLatencyMs = System.currentTimeMillis() - startedAt
         return response
     }
@@ -432,41 +523,66 @@ class PluginProcessSupervisor(
         message: Any,
         serializer: KSerializer<T>,
         timeoutMs: Long
-    ): T = sendMessage(socketPaths.invokePath, message, serializer, timeoutMs)
+    ): T = sendMessage(CommunicationLane.INVOKE, message, serializer, timeoutMs)
 
     private suspend fun <T> sendMessage(
-        socketPath: Path,
+        lane: CommunicationLane,
         message: Any,
         serializer: KSerializer<T>,
         timeoutMs: Long
     ): T = withContext(Dispatchers.IO) {
+        val connection = currentConnectionInfo ?: throw IllegalStateException("Connection info unavailable")
         withTimeout(timeoutMs.milliseconds) {
-            val socketAddress = UnixDomainSocketAddress.of(socketPath)
-            SocketChannel.open(StandardProtocolFamily.UNIX).use { channel ->
-                channel.connect(socketAddress)
-                val payload = encodeMessage(message)
-                PluginUdsFrameCodec.write(channel, payload)
-                val responsePayload = PluginUdsFrameCodec.read(channel)
-                PluginUdsJson.instance.decodeFromString(serializer, responsePayload)
+            when (connection) {
+                is PluginJvmUdsConnectionInfo -> {
+                    val path = when (lane) {
+                        CommunicationLane.INVOKE -> connection.invokePath
+                        CommunicationLane.ADMIN -> connection.adminPath
+                        CommunicationLane.EVENT -> connection.eventPath
+                    }
+                    val socketAddress = UnixDomainSocketAddress.of(path)
+                    SocketChannel.open(StandardProtocolFamily.UNIX).use { channel ->
+                        channel.connect(socketAddress)
+                        val payload = encodeMessage(message)
+                        PluginJvmFrameCodec.write(channel, payload)
+                        val responsePayload = PluginJvmFrameCodec.read(channel)
+                        PluginJvmJson.instance.decodeFromString(serializer, responsePayload)
+                    }
+                }
+                is PluginJvmTcpConnectionInfo -> {
+                    val port = when (lane) {
+                        CommunicationLane.INVOKE -> connection.invokePort
+                        CommunicationLane.ADMIN -> connection.adminPort
+                        CommunicationLane.EVENT -> connection.eventPort
+                    }
+                    val socketAddress = java.net.InetSocketAddress("127.0.0.1", port)
+                    SocketChannel.open().use { channel ->
+                        channel.connect(socketAddress)
+                        val payload = encodeMessage(message)
+                        PluginJvmFrameCodec.write(channel, payload)
+                        val responsePayload = PluginJvmFrameCodec.read(channel)
+                        PluginJvmJson.instance.decodeFromString(serializer, responsePayload)
+                    }
+                }
             }
         }
     }
 
     private fun encodeMessage(message: Any): String = when (message) {
-        is HandshakeRequest -> PluginUdsJson.instance.encodeToString(HandshakeRequest.serializer(), message)
-        is HealthRequest -> PluginUdsJson.instance.encodeToString(HealthRequest.serializer(), message)
-        is ShutdownRequest -> PluginUdsJson.instance.encodeToString(ShutdownRequest.serializer(), message)
-        is ReloadPrepareRequest -> PluginUdsJson.instance.encodeToString(ReloadPrepareRequest.serializer(), message)
-        is InvokeRequest -> PluginUdsJson.instance.encodeToString(InvokeRequest.serializer(), message)
+        is HandshakeRequest -> PluginJvmJson.instance.encodeToString(HandshakeRequest.serializer(), message)
+        is HealthRequest -> PluginJvmJson.instance.encodeToString(HealthRequest.serializer(), message)
+        is ShutdownRequest -> PluginJvmJson.instance.encodeToString(ShutdownRequest.serializer(), message)
+        is ReloadPrepareRequest -> PluginJvmJson.instance.encodeToString(ReloadPrepareRequest.serializer(), message)
+        is InvokeRequest -> PluginJvmJson.instance.encodeToString(InvokeRequest.serializer(), message)
         else -> error("Unsupported UDS message type: ${message::class.qualifiedName}")
     }
 
     private fun handleEventPayload(payload: String) {
-        val json = PluginUdsJson.instance.parseToJsonElement(payload).jsonObject
+        val json = PluginJvmJson.instance.parseToJsonElement(payload).jsonObject
         val kind = json["kind"]?.jsonPrimitive?.content.orEmpty()
         when (kind) {
             "plugin-ready-event" -> {
-                val event = PluginUdsJson.instance.decodeFromString(PluginReadyEvent.serializer(), payload)
+                val event = PluginJvmJson.instance.decodeFromString(PluginReadyEvent.serializer(), payload)
                 if (validateEvent(event)) {
                     readyEventReceived = true
                     lastEventAtEpochMs = event.timestamp
@@ -474,25 +590,25 @@ class PluginProcessSupervisor(
                 }
             }
             "plugin-stopping-event" -> {
-                val event = PluginUdsJson.instance.decodeFromString(PluginStoppingEvent.serializer(), payload)
+                val event = PluginJvmJson.instance.decodeFromString(PluginStoppingEvent.serializer(), payload)
                 if (validateEvent(event)) {
                     lastEventAtEpochMs = event.timestamp
                 }
             }
             "plugin-drain-complete-event" -> {
-                val event = PluginUdsJson.instance.decodeFromString(PluginDrainCompleteEvent.serializer(), payload)
+                val event = PluginJvmJson.instance.decodeFromString(PluginDrainCompleteEvent.serializer(), payload)
                 if (validateEvent(event)) {
                     lastEventAtEpochMs = event.timestamp
                 }
             }
             "plugin-disposed-event" -> {
-                val event = PluginUdsJson.instance.decodeFromString(PluginDisposedEvent.serializer(), payload)
+                val event = PluginJvmJson.instance.decodeFromString(PluginDisposedEvent.serializer(), payload)
                 if (validateEvent(event)) {
                     lastEventAtEpochMs = event.timestamp
                 }
             }
             "plugin-failure-event" -> {
-                val event = PluginUdsJson.instance.decodeFromString(PluginFailureEvent.serializer(), payload)
+                val event = PluginJvmJson.instance.decodeFromString(PluginFailureEvent.serializer(), payload)
                 if (validateEvent(event)) {
                     lastEventAtEpochMs = event.timestamp
                     recordFailure(event.errorType, event.errorMessage)
@@ -502,14 +618,14 @@ class PluginProcessSupervisor(
                 }
             }
             "plugin-log-event" -> {
-                val event = PluginUdsJson.instance.decodeFromString(PluginLogEvent.serializer(), payload)
+                val event = PluginJvmJson.instance.decodeFromString(PluginLogEvent.serializer(), payload)
                 if (validateEvent(event)) {
                     lastEventAtEpochMs = event.timestamp
                     droppedLogCount = event.droppedCount
                 }
             }
             "plugin-trace-event" -> {
-                val event = PluginUdsJson.instance.decodeFromString(PluginTraceEvent.serializer(), payload)
+                val event = PluginJvmJson.instance.decodeFromString(PluginTraceEvent.serializer(), payload)
                 if (validateEvent(event)) {
                     val durationMs = event.endEpochMs?.let { it - event.startEpochMs }
                     observabilityHub?.recordSpan(
@@ -531,7 +647,7 @@ class PluginProcessSupervisor(
                 }
             }
             "plugin-backpressure-event" -> {
-                val event = PluginUdsJson.instance.decodeFromString(PluginBackpressureEvent.serializer(), payload)
+                val event = PluginJvmJson.instance.decodeFromString(PluginBackpressureEvent.serializer(), payload)
                 if (validateEvent(event)) {
                     lastEventAtEpochMs = event.timestamp
                     eventQueueDepth = event.eventQueueDepth
@@ -539,7 +655,7 @@ class PluginProcessSupervisor(
                 }
             }
             "plugin-event-queue-overflow-event" -> {
-                val event = PluginUdsJson.instance.decodeFromString(PluginEventQueueOverflowEvent.serializer(), payload)
+                val event = PluginJvmJson.instance.decodeFromString(PluginEventQueueOverflowEvent.serializer(), payload)
                 if (validateEvent(event)) {
                     eventOverflowed = true
                     recordFailure("event-queue-overflow", "Plugin event queue overflowed (${event.queueType})")
@@ -555,7 +671,7 @@ class PluginProcessSupervisor(
     }
 
     private fun validateEvent(event: PluginRuntimeEvent): Boolean {
-        if (event.protocolVersion != PLUGIN_UDS_PROTOCOL_VERSION) {
+        if (event.protocolVersion != PLUGIN_JVM_PROTOCOL_VERSION) {
             logger.warn("Discarding event with protocolVersion=${event.protocolVersion} pluginId=${descriptor.pluginId}")
             return false
         }
@@ -568,7 +684,7 @@ class PluginProcessSupervisor(
 
     private fun validateHandshakeResponse(response: HandshakeResponse): Boolean {
         if (!response.accepted) return false
-        if (response.protocolVersion != PLUGIN_UDS_PROTOCOL_VERSION) return false
+        if (response.protocolVersion != PLUGIN_JVM_PROTOCOL_VERSION) return false
         if (response.pluginId != descriptor.pluginId) return false
         if (response.generation != generation.value) return false
         if (response.runtimeMode != PluginRuntimeMode.EXTERNAL_JVM.name) return false

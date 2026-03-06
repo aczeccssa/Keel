@@ -48,6 +48,9 @@ fun main() = runKernel {
     plugin(DbDemoPlugin())
     plugin(ObservabilityPlugin())
 
+    // Disable hot reload
+    enablePluginHotReload(false)
+
     // Global: Register global static resources
     routing {
         staticResources("/", "static")

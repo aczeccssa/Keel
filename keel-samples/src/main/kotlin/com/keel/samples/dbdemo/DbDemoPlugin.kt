@@ -36,7 +36,7 @@ class DbDemoPlugin : KeelPlugin {
     private lateinit var dbFactory: DatabaseFactory
 
     override suspend fun onInit(context: PluginInitContext) {
-        logger.info("Initializing dbdemo plugin in ${context.config.runtimeMode}")
+        logger.info("Initializing dbdemo plugin in ${context.descriptor.defaultRuntimeMode}")
         dbFactory = DatabaseFactory.h2Memory(name = "dbdemo", poolSize = 5)
         database = dbFactory.init()
         database.createTables(NotesTable)

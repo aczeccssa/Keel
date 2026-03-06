@@ -23,6 +23,23 @@ enum class PluginRuntimeMode {
     EXTERNAL_JVM
 }
 
+enum class JvmCommunicationMode {
+    UDS,
+    TCP
+}
+
+data class JvmCommunicationStrategy(
+    val preferredMode: JvmCommunicationMode = JvmCommunicationMode.UDS,
+    val fallbackMode: JvmCommunicationMode = JvmCommunicationMode.TCP,
+    val maxAttempts: Int = 3
+) {
+    companion object {
+        val DEFAULT = JvmCommunicationStrategy()
+        val PREFER_TCP = JvmCommunicationStrategy(preferredMode = JvmCommunicationMode.TCP)
+        val REQUIRE_UDS = JvmCommunicationStrategy(fallbackMode = JvmCommunicationMode.UDS)
+    }
+}
+
 enum class PluginLifecycleState {
     REGISTERED,
     INITIALIZING,
@@ -60,10 +77,19 @@ data class PluginDescriptor(
     val version: String,
     val displayName: String,
     val defaultRuntimeMode: PluginRuntimeMode = PluginRuntimeMode.IN_PROCESS,
+    val communicationStrategy: JvmCommunicationStrategy = JvmCommunicationStrategy.DEFAULT,
     val supportedRuntimeModes: Set<PluginRuntimeMode> = setOf(
         PluginRuntimeMode.IN_PROCESS,
         PluginRuntimeMode.EXTERNAL_JVM
-    )
+    ),
+    // Technical knobs moved from PluginConfig to be code-driven
+    val startupTimeoutMs: Long = 5000,
+    val callTimeoutMs: Long = 3000,
+    val stopTimeoutMs: Long = 3000,
+    val healthCheckIntervalMs: Long = 10000,
+    val maxConcurrentCalls: Int = 128,
+    val eventLogRingBufferSize: Int = 4096,
+    val criticalEventQueueSize: Int = 256
 ) {
     init {
         require(pluginId.isNotBlank()) { "pluginId must not be blank" }

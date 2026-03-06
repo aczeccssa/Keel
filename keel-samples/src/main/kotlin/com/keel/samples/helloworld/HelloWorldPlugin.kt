@@ -18,7 +18,7 @@ class HelloWorldPlugin : KeelPlugin {
     override val descriptor: PluginDescriptor = PluginDescriptor("helloworld", "1.0.0", "Hello World Plugin")
 
     override suspend fun onInit(context: PluginInitContext) {
-        logger.info("Initialized hello world plugin in ${context.config.runtimeMode}")
+        logger.info("Initialized hello world plugin in ${context.descriptor.defaultRuntimeMode}")
     }
 
     override fun endpoints() = pluginEndpoints(descriptor.pluginId) {

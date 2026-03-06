@@ -1,16 +1,16 @@
-package com.keel.uds.runtime
+package com.keel.jvm.runtime
 
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
-const val PLUGIN_UDS_PROTOCOL_VERSION: Int = 1
+const val PLUGIN_JVM_PROTOCOL_VERSION: Int = 1
 
-object PluginUdsLimits {
+object PluginJvmLimits {
     const val NORMAL_FRAME_BYTES: Int = 256 * 1024
     const val MAX_FRAME_BYTES: Int = 2 * 1024 * 1024
 }
 
-sealed interface PluginUdsMessage {
+sealed interface PluginJvmMessage {
     val protocolVersion: Int
     val pluginId: String
     val generation: Long
@@ -18,11 +18,11 @@ sealed interface PluginUdsMessage {
     val messageId: String
 }
 
-sealed interface PluginUdsControlResponse : PluginUdsMessage {
+sealed interface PluginJvmControlResponse : PluginJvmMessage {
     val correlationId: String
 }
 
-sealed interface PluginRuntimeEvent : PluginUdsMessage
+sealed interface PluginRuntimeEvent : PluginJvmMessage
 
 @Serializable
 data class PluginEndpointInventoryItem(
@@ -34,19 +34,19 @@ data class PluginEndpointInventoryItem(
 @Serializable
 data class HandshakeRequest(
     val kind: String = "handshake-request",
-    override val protocolVersion: Int = PLUGIN_UDS_PROTOCOL_VERSION,
+    override val protocolVersion: Int = PLUGIN_JVM_PROTOCOL_VERSION,
     override val pluginId: String,
     override val generation: Long,
     override val timestamp: Long,
     override val messageId: String,
     val authToken: String,
     val runtimeMode: String
-) : PluginUdsMessage
+) : PluginJvmMessage
 
 @Serializable
 data class HandshakeResponse(
     val kind: String = "handshake-response",
-    override val protocolVersion: Int = PLUGIN_UDS_PROTOCOL_VERSION,
+    override val protocolVersion: Int = PLUGIN_JVM_PROTOCOL_VERSION,
     override val pluginId: String,
     override val generation: Long,
     override val timestamp: Long,
@@ -57,12 +57,12 @@ data class HandshakeResponse(
     val endpointInventory: List<PluginEndpointInventoryItem>,
     val accepted: Boolean,
     val reason: String? = null
-) : PluginUdsControlResponse
+) : PluginJvmControlResponse
 
 @Serializable
 data class InvokeRequest(
     val kind: String = "invoke-request",
-    override val protocolVersion: Int = PLUGIN_UDS_PROTOCOL_VERSION,
+    override val protocolVersion: Int = PLUGIN_JVM_PROTOCOL_VERSION,
     override val pluginId: String,
     override val generation: Long,
     override val timestamp: Long,
@@ -80,12 +80,12 @@ data class InvokeRequest(
     val bodyJson: String?,
     val maxPayloadBytes: Long?,
     val allowChunkedTransfer: Boolean
-) : PluginUdsMessage
+) : PluginJvmMessage
 
 @Serializable
 data class InvokeResponse(
     val kind: String = "invoke-response",
-    override val protocolVersion: Int = PLUGIN_UDS_PROTOCOL_VERSION,
+    override val protocolVersion: Int = PLUGIN_JVM_PROTOCOL_VERSION,
     override val pluginId: String,
     override val generation: Long,
     override val timestamp: Long,
@@ -96,23 +96,23 @@ data class InvokeResponse(
     val headers: Map<String, List<String>> = emptyMap(),
     val bodyJson: String? = null,
     val errorMessage: String? = null
-) : PluginUdsControlResponse
+) : PluginJvmControlResponse
 
 @Serializable
 data class HealthRequest(
     val kind: String = "health-request",
-    override val protocolVersion: Int = PLUGIN_UDS_PROTOCOL_VERSION,
+    override val protocolVersion: Int = PLUGIN_JVM_PROTOCOL_VERSION,
     override val pluginId: String,
     override val generation: Long,
     override val timestamp: Long,
     override val messageId: String,
     val authToken: String
-) : PluginUdsMessage
+) : PluginJvmMessage
 
 @Serializable
 data class HealthResponse(
     val kind: String = "health-response",
-    override val protocolVersion: Int = PLUGIN_UDS_PROTOCOL_VERSION,
+    override val protocolVersion: Int = PLUGIN_JVM_PROTOCOL_VERSION,
     override val pluginId: String,
     override val generation: Long,
     override val timestamp: Long,
@@ -123,24 +123,24 @@ data class HealthResponse(
     val startedAtEpochMs: Long,
     val eventQueueDepth: Int,
     val droppedLogCount: Long
-) : PluginUdsControlResponse
+) : PluginJvmControlResponse
 
 @Serializable
 data class ShutdownRequest(
     val kind: String = "shutdown-request",
-    override val protocolVersion: Int = PLUGIN_UDS_PROTOCOL_VERSION,
+    override val protocolVersion: Int = PLUGIN_JVM_PROTOCOL_VERSION,
     override val pluginId: String,
     override val generation: Long,
     override val timestamp: Long,
     override val messageId: String,
     val authToken: String,
     val reason: String = "kernel-stop"
-) : PluginUdsMessage
+) : PluginJvmMessage
 
 @Serializable
 data class ShutdownResponse(
     val kind: String = "shutdown-response",
-    override val protocolVersion: Int = PLUGIN_UDS_PROTOCOL_VERSION,
+    override val protocolVersion: Int = PLUGIN_JVM_PROTOCOL_VERSION,
     override val pluginId: String,
     override val generation: Long,
     override val timestamp: Long,
@@ -148,35 +148,35 @@ data class ShutdownResponse(
     override val correlationId: String,
     val accepted: Boolean,
     val inflightInvokes: Int
-) : PluginUdsControlResponse
+) : PluginJvmControlResponse
 
 @Serializable
 data class ReloadPrepareRequest(
     val kind: String = "reload-prepare-request",
-    override val protocolVersion: Int = PLUGIN_UDS_PROTOCOL_VERSION,
+    override val protocolVersion: Int = PLUGIN_JVM_PROTOCOL_VERSION,
     override val pluginId: String,
     override val generation: Long,
     override val timestamp: Long,
     override val messageId: String,
     val authToken: String
-) : PluginUdsMessage
+) : PluginJvmMessage
 
 @Serializable
 data class ReloadPrepareResponse(
     val kind: String = "reload-prepare-response",
-    override val protocolVersion: Int = PLUGIN_UDS_PROTOCOL_VERSION,
+    override val protocolVersion: Int = PLUGIN_JVM_PROTOCOL_VERSION,
     override val pluginId: String,
     override val generation: Long,
     override val timestamp: Long,
     override val messageId: String,
     override val correlationId: String,
     val accepted: Boolean
-) : PluginUdsControlResponse
+) : PluginJvmControlResponse
 
 @Serializable
 data class PluginReadyEvent(
     val kind: String = "plugin-ready-event",
-    override val protocolVersion: Int = PLUGIN_UDS_PROTOCOL_VERSION,
+    override val protocolVersion: Int = PLUGIN_JVM_PROTOCOL_VERSION,
     override val pluginId: String,
     override val generation: Long,
     override val timestamp: Long,
@@ -187,7 +187,7 @@ data class PluginReadyEvent(
 @Serializable
 data class PluginStoppingEvent(
     val kind: String = "plugin-stopping-event",
-    override val protocolVersion: Int = PLUGIN_UDS_PROTOCOL_VERSION,
+    override val protocolVersion: Int = PLUGIN_JVM_PROTOCOL_VERSION,
     override val pluginId: String,
     override val generation: Long,
     override val timestamp: Long,
@@ -198,7 +198,7 @@ data class PluginStoppingEvent(
 @Serializable
 data class PluginDisposedEvent(
     val kind: String = "plugin-disposed-event",
-    override val protocolVersion: Int = PLUGIN_UDS_PROTOCOL_VERSION,
+    override val protocolVersion: Int = PLUGIN_JVM_PROTOCOL_VERSION,
     override val pluginId: String,
     override val generation: Long,
     override val timestamp: Long,
@@ -208,7 +208,7 @@ data class PluginDisposedEvent(
 @Serializable
 data class PluginFailureEvent(
     val kind: String = "plugin-failure-event",
-    override val protocolVersion: Int = PLUGIN_UDS_PROTOCOL_VERSION,
+    override val protocolVersion: Int = PLUGIN_JVM_PROTOCOL_VERSION,
     override val pluginId: String,
     override val generation: Long,
     override val timestamp: Long,
@@ -220,7 +220,7 @@ data class PluginFailureEvent(
 @Serializable
 data class PluginLogEvent(
     val kind: String = "plugin-log-event",
-    override val protocolVersion: Int = PLUGIN_UDS_PROTOCOL_VERSION,
+    override val protocolVersion: Int = PLUGIN_JVM_PROTOCOL_VERSION,
     override val pluginId: String,
     override val generation: Long,
     override val timestamp: Long,
@@ -233,7 +233,7 @@ data class PluginLogEvent(
 @Serializable
 data class PluginTraceEvent(
     val kind: String = "plugin-trace-event",
-    override val protocolVersion: Int = PLUGIN_UDS_PROTOCOL_VERSION,
+    override val protocolVersion: Int = PLUGIN_JVM_PROTOCOL_VERSION,
     override val pluginId: String,
     override val generation: Long,
     override val timestamp: Long,
@@ -254,7 +254,7 @@ data class PluginTraceEvent(
 @Serializable
 data class PluginBackpressureEvent(
     val kind: String = "plugin-backpressure-event",
-    override val protocolVersion: Int = PLUGIN_UDS_PROTOCOL_VERSION,
+    override val protocolVersion: Int = PLUGIN_JVM_PROTOCOL_VERSION,
     override val pluginId: String,
     override val generation: Long,
     override val timestamp: Long,
@@ -265,7 +265,7 @@ data class PluginBackpressureEvent(
 @Serializable
 data class PluginDrainCompleteEvent(
     val kind: String = "plugin-drain-complete-event",
-    override val protocolVersion: Int = PLUGIN_UDS_PROTOCOL_VERSION,
+    override val protocolVersion: Int = PLUGIN_JVM_PROTOCOL_VERSION,
     override val pluginId: String,
     override val generation: Long,
     override val timestamp: Long,
@@ -276,7 +276,7 @@ data class PluginDrainCompleteEvent(
 @Serializable
 data class PluginProcessExitedEvent(
     val kind: String = "plugin-process-exited-event",
-    override val protocolVersion: Int = PLUGIN_UDS_PROTOCOL_VERSION,
+    override val protocolVersion: Int = PLUGIN_JVM_PROTOCOL_VERSION,
     override val pluginId: String,
     override val generation: Long,
     override val timestamp: Long,
@@ -287,7 +287,7 @@ data class PluginProcessExitedEvent(
 @Serializable
 data class PluginEventQueueOverflowEvent(
     val kind: String = "plugin-event-queue-overflow-event",
-    override val protocolVersion: Int = PLUGIN_UDS_PROTOCOL_VERSION,
+    override val protocolVersion: Int = PLUGIN_JVM_PROTOCOL_VERSION,
     override val pluginId: String,
     override val generation: Long,
     override val timestamp: Long,
@@ -296,7 +296,7 @@ data class PluginEventQueueOverflowEvent(
     val capacity: Int
 ) : PluginRuntimeEvent
 
-object PluginUdsJson {
+object PluginJvmJson {
     val instance: Json = Json {
         ignoreUnknownKeys = true
         prettyPrint = false
