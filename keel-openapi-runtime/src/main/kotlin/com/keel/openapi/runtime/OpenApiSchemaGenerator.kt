@@ -265,7 +265,7 @@ class OpenApiSchemaGenerator {
         return JsonObject(mapOf("nullable" to JsonPrimitive(true)))
     }
 
-    private fun ref(name: String): JsonObject = JsonObject(mapOf($$"$ref" to JsonPrimitive("#/components/schemas/$name")))
+    private fun ref(name: String): JsonObject = JsonObject(mapOf("\$ref" to JsonPrimitive("#/components/schemas/$name")))
 
     private fun schemaNameFor(type: KType, descriptor: SerialDescriptor): String {
         val schemaAnnotation = descriptor.annotations.filterIsInstance<KeelApiSchema>().firstOrNull()

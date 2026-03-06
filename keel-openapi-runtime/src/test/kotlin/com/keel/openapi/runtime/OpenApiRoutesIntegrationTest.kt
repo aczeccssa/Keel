@@ -125,11 +125,14 @@ class OpenApiRoutesIntegrationTest {
         val response = client.get("/api/_system/docs/openapi.json")
         assertEquals(HttpStatusCode.OK, response.status)
         val spec = json.parseToJsonElement(response.bodyAsText()).jsonObject
-        val operation = spec["paths"]!!
-            .jsonObject["/api/plugins/compat/legacy"]!!
+        val paths = spec["paths"]!!.jsonObject
+        assertTrue("/api/plugins/compat/legacy" in paths)
+
+        val helloOperation = paths["/api/plugins/helloworld"]!!
             .jsonObject["get"]!!
             .jsonObject
-        assertTrue(operation.isNotEmpty())
+        assertEquals("Hello World greeting", helloOperation["summary"]?.jsonPrimitive?.content)
+        assertEquals(listOf("helloworld"), helloOperation["tags"]?.jsonArray?.map { it.jsonPrimitive.content })
     }
 
     @Test
