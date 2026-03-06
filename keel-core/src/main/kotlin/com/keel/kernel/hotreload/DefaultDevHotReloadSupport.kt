@@ -6,6 +6,13 @@ import java.io.File
 import java.time.Duration
 import java.time.Instant
 import java.util.concurrent.ConcurrentHashMap
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withContext
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -144,15 +151,36 @@ class GradleDevBuildExecutor(
         }
         val tasks = moduleProjectPaths.map { if (it == ":") ":classes" else "$it:classes" }
         val command = gradleCommand + tasks + "--console=plain"
-        val process = ProcessBuilder(command)
-            .directory(repoRoot)
-            .redirectErrorStream(true)
-            .start()
-        val output = process.inputStream.bufferedReader().readText()
-        val exit = process.waitFor()
+        val process = withContext(Dispatchers.IO) {
+            ProcessBuilder(command)
+                .directory(repoRoot)
+                .redirectErrorStream(true)
+                .start()
+        }
+        val (output, exit) = coroutineScope {
+            val outputDeferred = async(Dispatchers.IO) {
+                process.inputStream.bufferedReader().use { it.readText() }
+            }
+            val exit = awaitProcessExit(process)
+            outputDeferred.await() to exit
+        }
         val summary = output.lineSequence().firstOrNull { line -> line.contains("error", ignoreCase = true) }
             ?: if (exit == 0) "Build succeeded" else "Build failed"
         return DevBuildResult(success = exit == 0, summary = summary, output = output)
+    }
+}
+
+private suspend fun awaitProcessExit(process: Process): Int = suspendCancellableCoroutine { cont ->
+    val future = process.onExit()
+    future.whenComplete { completed, error ->
+        if (error != null) {
+            cont.resumeWithException(error)
+        } else {
+            cont.resume(completed.exitValue())
+        }
+    }
+    cont.invokeOnCancellation {
+        future.cancel(true)
     }
 }
 

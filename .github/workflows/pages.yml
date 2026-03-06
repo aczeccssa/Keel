@@ -19,11 +19,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  deploy:
+  build:
     runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -41,16 +38,22 @@ jobs:
       - name: Build Dokka
         run: ./gradlew :dokkaGenerate
 
-      - name: Configure Pages
-        uses: actions/configure-pages@v5
-
       - name: Upload Pages Artifact
-        if: github.event_name != 'pull_request'
         uses: actions/upload-pages-artifact@v3
         with:
           path: build/dokka/html
 
+  deploy:
+    if: github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
       - name: Deploy to GitHub Pages
         id: deployment
-        if: github.event_name != 'pull_request'
         uses: actions/deploy-pages@v4

@@ -11,6 +11,7 @@ import com.google.devtools.ksp.symbol.KSFile
 import com.google.devtools.ksp.validate
 import java.nio.file.Files
 import java.nio.file.Path
+import java.security.MessageDigest
 
 /**
  * KSP processor that:
@@ -107,6 +108,7 @@ class KeelOpenApiProcessor(
                     appendLine("import com.keel.openapi.runtime.OpenApiOperationFragment")
                     appendLine("import io.ktor.http.HttpMethod")
                     appendLine()
+                    appendLine("@Suppress(\"unused\")")
                     appendLine("class $typeName : OpenApiOperationFragment {")
                     appendLine("    override fun operations(): List<OpenApiDeclaredOperation> = listOf(")
                     operations.forEachIndexed { index, operation ->
@@ -154,12 +156,11 @@ class KeelOpenApiProcessor(
     }
 
     private fun buildAnnotatedTypeName(file: KSFile): String {
-        val suffix = file.filePath
-            .replace('/', '_')
-            .replace('.', '_')
-            .replace('-', '_')
-            .replace(':', '_')
-        return "AnnotatedOps_$suffix"
+        val hash = MessageDigest.getInstance("SHA-256")
+            .digest(file.filePath.toByteArray())
+            .take(6)
+            .joinToString("") { "%02x".format(it) }
+        return "AnnotatedOps$hash"
     }
 
     private fun parseAnnotatedOperations(file: KSFile): List<ParsedOperation> {

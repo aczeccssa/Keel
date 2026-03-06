@@ -58,6 +58,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -510,8 +511,10 @@ object ExternalPluginHostMain {
                             reason = request.reason
                         )
                     )
-                    invokeServer.close()
-                    adminServer.close()
+                    withContext(Dispatchers.IO) {
+                        invokeServer.close()
+                        adminServer.close()
+                    }
                 }
                 PluginUdsJson.instance.encodeToString(
                     ShutdownResponse.serializer(),

@@ -1,7 +1,7 @@
 package com.keel.openapi.runtime
 
 import com.keel.contract.dto.KeelResponse
-import com.keel.kernel.api.documentedGet
+import com.keel.kernel.api.KeelApi
 import com.keel.kernel.api.pluginApi
 import com.keel.kernel.api.systemApi
 import com.keel.kernel.api.typedGet
@@ -109,16 +109,12 @@ class OpenApiRoutesIntegrationTest {
     }
 
     @Test
-    fun `deprecated documented routes still generate docs`() = testApplication {
+    fun `typed routes generate docs`() = testApplication {
         application {
             routing {
                 pluginApi("compat") {
-                    documentedGet<GreetingData>(
-                        path = "/legacy",
-                        summary = "Legacy route",
-                        tags = listOf("compat"),
-                        responseEnvelope = false
-                    ) {
+                    @KeelApi(summary = "Legacy route", tags = ["compat"], responseEnvelope = false)
+                    typedGet<GreetingData>(path = "/legacy") {
                         call.respond(GreetingData("legacy"))
                     }
                 }
@@ -129,12 +125,14 @@ class OpenApiRoutesIntegrationTest {
         val response = client.get("/api/_system/docs/openapi.json")
         assertEquals(HttpStatusCode.OK, response.status)
         val spec = json.parseToJsonElement(response.bodyAsText()).jsonObject
-        val operation = spec["paths"]!!
-            .jsonObject["/api/plugins/compat/legacy"]!!
+        val paths = spec["paths"]!!.jsonObject
+        assertTrue("/api/plugins/compat/legacy" in paths)
+
+        val helloOperation = paths["/api/plugins/helloworld"]!!
             .jsonObject["get"]!!
             .jsonObject
-        assertEquals("Legacy route", operation["summary"]?.jsonPrimitive?.content)
-        assertEquals(listOf("compat"), operation["tags"]?.jsonArray?.map { it.jsonPrimitive.content })
+        assertEquals("Hello World greeting", helloOperation["summary"]?.jsonPrimitive?.content)
+        assertEquals(listOf("helloworld"), helloOperation["tags"]?.jsonArray?.map { it.jsonPrimitive.content })
     }
 
     @Test

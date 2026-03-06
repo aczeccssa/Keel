@@ -55,3 +55,4 @@ bin/
 /CLAUDE.md
 **/build
 **/bin
+/.qodana/
