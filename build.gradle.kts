@@ -16,6 +16,13 @@ val excludedFromPublishing = setOf("keel-samples", "keel-test-suite")
 
 val docsProjects = subprojects.filter { it.name !in excludedFromDocs }
 
+repositories {
+    google()
+    mavenCentral()
+    gradlePluginPortal()
+    maven("https://jitpack.io")
+}
+
 dependencies {
     docsProjects.forEach { dokka(it) }
 }
