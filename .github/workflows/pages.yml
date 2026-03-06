@@ -3,6 +3,8 @@ name: Docs
 on:
   push:
     branches: ["main"]
+  pull_request:
+    branches: ["main"]
   release:
     types: [published]
   workflow_dispatch:
@@ -37,16 +39,18 @@ jobs:
           cache: gradle
 
       - name: Build Dokka
-        run: ./gradlew dokkaGenerateHtml
+        run: ./gradlew :dokkaGenerate
 
       - name: Configure Pages
         uses: actions/configure-pages@v5
 
       - name: Upload Pages Artifact
+        if: github.event_name != 'pull_request'
         uses: actions/upload-pages-artifact@v3
         with:
           path: build/dokka/html
 
       - name: Deploy to GitHub Pages
         id: deployment
+        if: github.event_name != 'pull_request'
         uses: actions/deploy-pages@v4

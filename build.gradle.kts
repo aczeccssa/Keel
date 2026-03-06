@@ -14,6 +14,12 @@ val repoUrl = "https://github.com/aczeccssa/Keel"
 val excludedFromDocs = setOf("keel-samples")
 val excludedFromPublishing = setOf("keel-samples", "keel-test-suite")
 
+val docsProjects = subprojects.filter { it.name !in excludedFromDocs }
+
+dependencies {
+    docsProjects.forEach { dokka(it) }
+}
+
 subprojects {
     group = "com.keel"
 
