@@ -38,6 +38,8 @@ import io.ktor.server.routing.put
 import io.ktor.server.routing.route
 import io.ktor.server.sse.sse
 import io.ktor.sse.ServerSentEvent
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.util.concurrent.atomic.AtomicInteger
 import java.net.URLClassLoader
 import kotlinx.coroutines.sync.Mutex
@@ -184,7 +186,6 @@ class UnifiedPluginManager(
             require(KeelPlugin::class.java.isAssignableFrom(clazz)) {
                 "Class ${source.implementationClassName} does not implement KeelPlugin"
             }
-            @Suppress("UNCHECKED_CAST")
             clazz.getDeclaredConstructor().newInstance() as KeelPlugin
         }.getOrElse { error ->
             runCatching { classLoader.close() }
@@ -253,7 +254,9 @@ class UnifiedPluginManager(
         normalizeProcessState(entry)
         entry.lastFailure = null
         startPluginLocked(entry)
-        snapshot.sourceClassLoader?.close()
+        withContext(Dispatchers.IO) {
+            snapshot.sourceClassLoader?.close()
+        }
         return ReloadAttemptResult(
             pluginId = source.pluginId,
             outcome = DevReloadOutcome.RELOADED,
@@ -542,7 +545,9 @@ class UnifiedPluginManager(
         entry.supervisor = null
         entry.processId = null
         entry.processHandle = null
-        runCatching { entry.sourceClassLoader?.close() }
+        withContext(Dispatchers.IO) {
+            runCatching { entry.sourceClassLoader?.close() }
+        }
         entry.sourceClassLoader = null
         entry.initialized = false
         entry.healthState = PluginHealthState.UNKNOWN

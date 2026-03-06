@@ -237,21 +237,6 @@ class DefaultPluginLoader : PluginLoader {
         return loadPlugin(refreshedDiscovered)
     }
 
-    /**
-     * Get all loaded plugins.
-     */
-    fun getLoadedPlugins(): Map<String, KeelPlugin> = loadedPlugins.toMap()
-
-    /**
-     * Get a specific loaded plugin.
-     */
-    fun getPlugin(pluginId: String): KeelPlugin? = loadedPlugins[pluginId]
-
-    /**
-     * Get all discovered plugins.
-     */
-    fun getDiscoveredPlugins(): Map<String, DiscoveredPlugin> = discoveredPlugins.toMap()
-
     fun hasArtifactChanged(pluginId: String): Boolean {
         val discovered = discoveredPlugins[pluginId] ?: return false
         val jarFile = File(discovered.jarPath)

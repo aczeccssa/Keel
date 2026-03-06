@@ -11,6 +11,7 @@ import io.opentelemetry.context.propagation.ContextPropagators
 import io.opentelemetry.context.propagation.TextMapGetter
 import io.opentelemetry.context.propagation.TextMapSetter
 import io.opentelemetry.api.trace.propagation.W3CTraceContextPropagator
+import io.opentelemetry.sdk.common.CompletableResultCode
 import io.opentelemetry.sdk.OpenTelemetrySdk
 import io.opentelemetry.sdk.trace.SdkTracerProvider
 import io.opentelemetry.sdk.trace.export.SimpleSpanProcessor
@@ -104,25 +105,25 @@ object ObservabilityTracing {
     private class KernelSpanExporter(
         private val hub: ObservabilityHub
     ) : SpanExporter {
-        override fun export(spans: MutableCollection<SpanData>) = runCatching {
+        override fun export(spans: MutableCollection<SpanData>): CompletableResultCode = runCatching {
             spans.forEach { hub.recordSpan(it.toEvent(service = "kernel")) }
-            io.opentelemetry.sdk.common.CompletableResultCode.ofSuccess()
-        }.getOrElse { io.opentelemetry.sdk.common.CompletableResultCode.ofFailure() }
+            CompletableResultCode.ofSuccess()
+        }.getOrElse { CompletableResultCode.ofFailure() }
 
-        override fun flush() = io.opentelemetry.sdk.common.CompletableResultCode.ofSuccess()
-        override fun shutdown() = io.opentelemetry.sdk.common.CompletableResultCode.ofSuccess()
+        override fun flush(): CompletableResultCode = CompletableResultCode.ofSuccess()
+        override fun shutdown(): CompletableResultCode = CompletableResultCode.ofSuccess()
     }
 
     private class ExternalSpanExporter(
         private val sink: PluginTraceSink
     ) : SpanExporter {
-        override fun export(spans: MutableCollection<SpanData>) = runCatching {
+        override fun export(spans: MutableCollection<SpanData>): CompletableResultCode = runCatching {
             spans.forEach { sink.emitTrace(it.toEvent(service = "plugin")) }
-            io.opentelemetry.sdk.common.CompletableResultCode.ofSuccess()
-        }.getOrElse { io.opentelemetry.sdk.common.CompletableResultCode.ofFailure() }
+            CompletableResultCode.ofSuccess()
+        }.getOrElse { CompletableResultCode.ofFailure() }
 
-        override fun flush() = io.opentelemetry.sdk.common.CompletableResultCode.ofSuccess()
-        override fun shutdown() = io.opentelemetry.sdk.common.CompletableResultCode.ofSuccess()
+        override fun flush(): CompletableResultCode = CompletableResultCode.ofSuccess()
+        override fun shutdown(): CompletableResultCode = CompletableResultCode.ofSuccess()
     }
 
     internal fun SpanData.toEvent(service: String): TraceSpanEvent {

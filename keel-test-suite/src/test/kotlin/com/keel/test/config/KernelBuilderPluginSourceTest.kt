@@ -16,15 +16,13 @@ class KernelBuilderPluginSourceTest {
     }
 
     @Test
-    fun pluginSourceCanBootstrapPluginWithoutPluginCall() {
+    fun pluginRegistrationInfersSourceMetadata() {
         val kernel = buildKernel {
-            pluginSource(
-                pluginId = "source-only-plugin",
-                owningModulePath = ":keel-test-suite",
-                implementationClassName = SourceOnlyPlugin::class.java.name
-            )
-            enablePluginHotReload(false)
+            plugin(SourceOnlyPlugin(), hotReloadEnabled = true)
+            enablePluginHotReload(true)
         }
+
+        assertNotNull(kernel.pluginDevelopmentSourceIds().singleOrNull { it == "source-only-plugin" })
 
         val pluginManagerField = kernel.javaClass.getDeclaredField("pluginManager")
         pluginManagerField.isAccessible = true

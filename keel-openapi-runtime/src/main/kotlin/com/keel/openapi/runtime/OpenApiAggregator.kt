@@ -40,7 +40,7 @@ object OpenApiAggregator {
         declaredOperationsCache?.let { return it }
         return discoverImplementations(
             interfaceClass = OpenApiOperationFragment::class.java,
-            generatedClassNameFilter = { it.contains(".AnnotatedOps_") }
+            generatedClassNameFilter = { it.contains(".AnnotatedOps") }
         )
             .flatMap { it.operations() }
             .also { declaredOperationsCache = it }

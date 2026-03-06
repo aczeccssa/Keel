@@ -21,8 +21,11 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.datetime.Clock
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
 
 /**
  * Development-time file watcher for config files, plugin artifacts, and module directories.
@@ -72,7 +75,6 @@ class ConfigHotReloader private constructor(
         scope.launch {
             try {
                 watchDirectories.forEach { registration ->
-                    val path = registration.root
                     if (ensureWatchRootExists(registration)) {
                         startWatchingDirectory(registration)
                     } else {
@@ -197,7 +199,7 @@ class ConfigHotReloader private constructor(
     private suspend fun watchLoop(watcher: WatchService) {
         while (_isWatching.value) {
             try {
-                val key = watcher.take()
+                val key = takeWatchKey(watcher)
                 val watchedDirectory = watchedPaths[key] ?: run {
                     key.reset()
                     continue
@@ -246,6 +248,25 @@ class ConfigHotReloader private constructor(
             } catch (error: Exception) {
                 logger.error("Error in watch loop: ${error.message}", error)
             }
+        }
+    }
+
+    private suspend fun takeWatchKey(watcher: WatchService): WatchKey = suspendCancellableCoroutine { cont ->
+        val job = scope.launch(Dispatchers.IO) {
+            try {
+                val key = watcher.take()
+                if (cont.isActive) {
+                    cont.resume(key)
+                }
+            } catch (error: Exception) {
+                if (cont.isActive) {
+                    cont.resumeWithException(error)
+                }
+            }
+        }
+        cont.invokeOnCancellation {
+            watcher.close()
+            job.cancel()
         }
     }
 

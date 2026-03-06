@@ -28,7 +28,7 @@ abstract class BaseRepository<T : Table>(
      * @return The result of the transaction
      */
     protected fun <R> transaction(block: Transaction.() -> R): R {
-        return database.transaction(block)
+        return transactionWithResult(block).getOrThrow()
     }
 
     /**
@@ -38,7 +38,10 @@ abstract class BaseRepository<T : Table>(
      * @return Result containing the transaction result or an error
      */
     protected fun <R> transactionWithResult(block: Transaction.() -> R): Result<R> {
-        return database.transactionWithResult(block)
+        return runCatching { database.transaction(block) }
+            .onFailure { error ->
+                logError("Transaction failed: ${error.message}", error)
+            }
     }
 
     /**
@@ -64,12 +67,11 @@ abstract class BaseRepository<T : Table>(
     /**
      * Log an error and return a failure result.
      */
-    protected fun <R> logError(message: String, e: Exception? = null): Result<R> {
+    protected fun logError(message: String, e: Throwable? = null) {
         if (e != null) {
             logger.error(message, e)
         } else {
             logger.error(message)
         }
-        return Result.failure(e ?: IllegalStateException(message))
     }
 }
