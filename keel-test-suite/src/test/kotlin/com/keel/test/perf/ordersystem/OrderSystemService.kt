@@ -27,19 +27,23 @@ class OrderSystemService(
      * @return the created order ID, or throws if any item is out of stock
      */
     suspend fun placeOrder(request: CreateOrderRequest): Int {
-        // Step 1: Deduct stock for each item (optimistic concurrency)
+        // Step 1: Fetch all products and their prices upfront to avoid race conditions.
+        val itemsWithProducts = request.items.map { item ->
+            val product = repo.getProduct(item.productId)
+                ?: throw IllegalArgumentException("Product ${item.productId} not found")
+            item to product
+        }
+
+        // Step 2: Deduct stock for each item.
         val deductions = mutableListOf<Pair<Int, Int>>() // productId -> quantity (for rollback)
         var totalAmount = 0L
 
-        for (item in request.items) {
-            val product = repo.getProduct(item.productId)
-                ?: throw IllegalArgumentException("Product ${item.productId} not found")
-
+        for ((item, product) in itemsWithProducts) {
             val remainingStock = repo.deductStock(item.productId, item.quantity)
             if (remainingStock < 0) {
-                // Rollback previous deductions (best-effort)
+                // Rollback previous deductions (best-effort).
                 for ((productId, qty) in deductions) {
-                    repo.deductStock(productId, -qty)  // negative deduction = add back
+                    repo.deductStock(productId, -qty)  // Add stock back.
                 }
                 throw InsufficientStockException(item.productId, item.quantity)
             }
@@ -47,7 +51,7 @@ class OrderSystemService(
             deductions.add(item.productId to item.quantity)
             totalAmount += product.price * item.quantity
 
-            // Publish inventory event
+            // Publish inventory event.
             eventBus.publish(InventoryDeductedEvent(
                 productId = item.productId,
                 quantityDeducted = item.quantity,
@@ -55,16 +59,15 @@ class OrderSystemService(
             ))
         }
 
-        // Step 2: Create order
+        // Step 3: Create the order.
         val orderId = repo.createOrder(request.customerId, totalAmount)
 
-        // Step 3: Create order items
-        for (item in request.items) {
-            val product = repo.getProduct(item.productId)!!
+        // Step 4: Create order items using the prices fetched initially.
+        for ((item, product) in itemsWithProducts) {
             repo.addOrderItem(orderId, item.productId, item.quantity, product.price)
         }
 
-        // Step 4: Publish event
+        // Step 5: Publish the order creation event.
         eventBus.publish(OrderCreatedEvent(
             orderId = orderId,
             customerId = request.customerId,

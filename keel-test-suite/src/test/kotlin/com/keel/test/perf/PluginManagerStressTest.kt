@@ -60,7 +60,7 @@ class PluginManagerStressTest {
     // ─────────────────────────────────────────────────────────
 
     @Test
-    fun registerManyPluginsConcurrently() = runTest {
+    fun registerManyPluginsSequentially() = runTest {
         val koin = startKoin {}.also { koinStarted = true }.koin
         val manager = UnifiedPluginManager(koin)
         val pluginCount = 200

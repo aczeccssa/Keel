@@ -263,12 +263,8 @@ class OrderSystemStressTest {
             }
         }
 
-        // Wait for events to propagate
-        withTimeoutOrNull(5000) {
-            while (orderEventCount.get() < orderCount) {
-                kotlinx.coroutines.delay(10)
-            }
-        }
+        // Give some time for events to propagate.
+        kotlinx.coroutines.delay(2000)
         orderCollector.cancel()
         inventoryCollector.cancel()
 

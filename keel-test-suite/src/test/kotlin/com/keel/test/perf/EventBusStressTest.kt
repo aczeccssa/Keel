@@ -62,11 +62,9 @@ class EventBusStressTest {
             }
         }
 
-        withTimeoutOrNull(5000) {
-            while (received.get() < eventCount) {
-                kotlinx.coroutines.delay(10)
-            }
-        }
+        // Give some time for events to be processed instead of waiting for all of them,
+        // which may not happen if there are drops.
+        kotlinx.coroutines.delay(1000)
         collector.cancel()
 
         println("[PERF] Single producer: published $eventCount events in ${elapsedMs}ms (${eventCount * 1000 / elapsedMs} events/sec)")
@@ -108,11 +106,9 @@ class EventBusStressTest {
             }
         }
 
-        withTimeoutOrNull(5000) {
-            while (received.get() < totalExpected) {
-                kotlinx.coroutines.delay(10)
-            }
-        }
+        // Give some time for events to be processed instead of waiting for all of them,
+        // which may not happen if there are drops.
+        kotlinx.coroutines.delay(1000)
         collector.cancel()
 
         println("[PERF] Multi-producer ($producerCount x $eventsPerProducer): published $totalExpected events in ${elapsedMs}ms (${totalExpected * 1000 / elapsedMs} events/sec)")
@@ -151,11 +147,9 @@ class EventBusStressTest {
             }
         }
 
-        withTimeoutOrNull(5000) {
-            while (receivedA.get() < eventsPerType || receivedB.get() < eventsPerType) {
-                kotlinx.coroutines.delay(10)
-            }
-        }
+        // Give some time for events to be processed instead of waiting for all of them,
+        // which may not happen if there are drops.
+        kotlinx.coroutines.delay(1000)
         collectorA.cancel()
         collectorB.cancel()
 
@@ -195,11 +189,9 @@ class EventBusStressTest {
             }
         }
         
-        withTimeoutOrNull(5000) {
-            while (received.get() < eventCount) {
-                kotlinx.coroutines.delay(10)
-            }
-        }
+        // Give some time for events to be processed instead of waiting for all of them,
+        // which may not happen if there are drops.
+        kotlinx.coroutines.delay(1000)
         collector.cancel()
 
         val deliveryRate = received.get().toDouble() / eventCount
