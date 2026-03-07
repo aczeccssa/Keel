@@ -6,35 +6,36 @@ import com.keel.kernel.observability.ObservabilityTracing
 import com.keel.kernel.plugin.KeelPlugin
 import com.keel.kernel.plugin.PluginApiException
 import com.keel.kernel.plugin.PluginConfig
-import com.keel.kernel.plugin.PluginConfigLoader
+import com.keel.kernel.plugin.PluginDescriptor
+import com.keel.kernel.plugin.toConfig
 import com.keel.kernel.plugin.PluginHealthState
 import com.keel.kernel.plugin.PluginRequestContext
 import com.keel.kernel.plugin.PluginRuntimeMode
 import com.keel.kernel.plugin.decodeRequestBody
 import com.keel.kernel.plugin.encodeResponseBody
 import com.keel.kernel.plugin.serializer
-import com.keel.uds.runtime.HandshakeRequest
-import com.keel.uds.runtime.HandshakeResponse
-import com.keel.uds.runtime.HealthRequest
-import com.keel.uds.runtime.HealthResponse
-import com.keel.uds.runtime.InvokeRequest
-import com.keel.uds.runtime.InvokeResponse
-import com.keel.uds.runtime.PluginDisposedEvent
-import com.keel.uds.runtime.PluginDrainCompleteEvent
-import com.keel.uds.runtime.PluginEndpointInventoryItem
-import com.keel.uds.runtime.PluginEventQueueOverflowEvent
-import com.keel.uds.runtime.PluginFailureEvent
-import com.keel.uds.runtime.PluginLogEvent
-import com.keel.uds.runtime.PluginReadyEvent
-import com.keel.uds.runtime.PluginTraceEvent
-import com.keel.uds.runtime.PluginRuntimeEvent
-import com.keel.uds.runtime.PluginStoppingEvent
-import com.keel.uds.runtime.PluginUdsFrameCodec
-import com.keel.uds.runtime.PluginUdsJson
-import com.keel.uds.runtime.ReloadPrepareRequest
-import com.keel.uds.runtime.ReloadPrepareResponse
-import com.keel.uds.runtime.ShutdownRequest
-import com.keel.uds.runtime.ShutdownResponse
+import com.keel.jvm.runtime.HandshakeRequest
+import com.keel.jvm.runtime.HandshakeResponse
+import com.keel.jvm.runtime.HealthRequest
+import com.keel.jvm.runtime.HealthResponse
+import com.keel.jvm.runtime.InvokeRequest
+import com.keel.jvm.runtime.InvokeResponse
+import com.keel.jvm.runtime.PluginDisposedEvent
+import com.keel.jvm.runtime.PluginDrainCompleteEvent
+import com.keel.jvm.runtime.PluginEndpointInventoryItem
+import com.keel.jvm.runtime.PluginEventQueueOverflowEvent
+import com.keel.jvm.runtime.PluginFailureEvent
+import com.keel.jvm.runtime.PluginLogEvent
+import com.keel.jvm.runtime.PluginReadyEvent
+import com.keel.jvm.runtime.PluginTraceEvent
+import com.keel.jvm.runtime.PluginRuntimeEvent
+import com.keel.jvm.runtime.PluginStoppingEvent
+import com.keel.jvm.runtime.PluginJvmFrameCodec
+import com.keel.jvm.runtime.PluginJvmJson
+import com.keel.jvm.runtime.ReloadPrepareRequest
+import com.keel.jvm.runtime.ReloadPrepareResponse
+import com.keel.jvm.runtime.ShutdownRequest
+import com.keel.jvm.runtime.ShutdownResponse
 import java.io.File
 import java.net.StandardProtocolFamily
 import java.net.UnixDomainSocketAddress
@@ -65,11 +66,17 @@ import kotlinx.serialization.json.jsonPrimitive
 import org.koin.core.context.startKoin
 import org.koin.core.context.stopKoin
 
+import com.keel.kernel.plugin.JvmCommunicationMode
+
 data class ExternalPluginHostArgs(
     val pluginClass: String,
-    val invokeSocketPath: Path,
-    val adminSocketPath: Path,
-    val eventSocketPath: Path,
+    val commMode: JvmCommunicationMode,
+    val invokeSocketPath: Path? = null,
+    val adminSocketPath: Path? = null,
+    val eventSocketPath: Path? = null,
+    val invokePort: Int? = null,
+    val adminPort: Int? = null,
+    val eventPort: Int? = null,
     val authToken: String,
     val generation: Long,
     val configPath: File?
@@ -80,11 +87,18 @@ fun parseExternalPluginHostArgs(args: Array<String>): ExternalPluginHostArgs {
         val parts = it.removePrefix("--").split("=", limit = 2)
         parts[0] to parts.getOrElse(1) { "" }
     }
+    val commMode = parsedArgs["comm-mode"]?.let { JvmCommunicationMode.valueOf(it.uppercase()) } 
+        ?: JvmCommunicationMode.UDS
+
     return ExternalPluginHostArgs(
         pluginClass = requireNotNull(parsedArgs["plugin-class"]) { "Missing --plugin-class" },
-        invokeSocketPath = Path.of(requireNotNull(parsedArgs["invoke-socket-path"]) { "Missing --invoke-socket-path" }),
-        adminSocketPath = Path.of(requireNotNull(parsedArgs["admin-socket-path"]) { "Missing --admin-socket-path" }),
-        eventSocketPath = Path.of(requireNotNull(parsedArgs["event-socket-path"]) { "Missing --event-socket-path" }),
+        commMode = commMode,
+        invokeSocketPath = parsedArgs["invoke-socket-path"]?.let { Path.of(it) },
+        adminSocketPath = parsedArgs["admin-socket-path"]?.let { Path.of(it) },
+        eventSocketPath = parsedArgs["event-socket-path"]?.let { Path.of(it) },
+        invokePort = parsedArgs["invoke-port"]?.toIntOrNull(),
+        adminPort = parsedArgs["admin-port"]?.toIntOrNull(),
+        eventPort = parsedArgs["event-port"]?.toIntOrNull(),
         authToken = requireNotNull(parsedArgs["auth-token"]) { "Missing --auth-token" },
         generation = parsedArgs["generation"]?.toLongOrNull() ?: 1L,
         configPath = parsedArgs["config-path"]?.takeIf { it.isNotBlank() }?.let(::File)
@@ -106,8 +120,6 @@ object ExternalPluginHostMain {
         private val hostArgs: ExternalPluginHostArgs
     ) {
         private val plugin = instantiatePlugin(hostArgs.pluginClass)
-        private val config = hostArgs.configPath?.let { PluginConfigLoader.load(plugin.descriptor, it) }
-            ?: PluginConfigLoader.load(plugin.descriptor)
         private val startedAt = System.currentTimeMillis()
         private val endpoints = plugin.endpoints()
             .filterIsInstance<com.keel.kernel.plugin.PluginEndpointDefinition<*, *>>()
@@ -120,14 +132,14 @@ object ExternalPluginHostMain {
         private val pluginScopeManager = PluginScopeManager(koin)
         private val privateScopeHandle = pluginScopeManager.createScope(
             pluginId = plugin.descriptor.pluginId,
-            config = config,
+            config = plugin.descriptor.toConfig(),
             modules = plugin.modules()
         )
         private val initContext: com.keel.kernel.plugin.PluginInitContext
         private val runtimeContext: com.keel.kernel.plugin.PluginRuntimeContext
 
         private val invokeDispatcher = Executors.newFixedThreadPool(
-            config.maxConcurrentCalls.coerceAtMost(MAX_INVOKE_THREADS).coerceAtLeast(MIN_INVOKE_THREADS)
+            plugin.descriptor.maxConcurrentCalls.coerceAtMost(MAX_INVOKE_THREADS).coerceAtLeast(MIN_INVOKE_THREADS)
         ).asCoroutineDispatcher()
         private val adminDispatcher = Executors.newSingleThreadExecutor().asCoroutineDispatcher()
         private val eventDispatcher = Executors.newSingleThreadExecutor().asCoroutineDispatcher()
@@ -135,8 +147,11 @@ object ExternalPluginHostMain {
         private val eventEmitter = PluginEventEmitter(
             pluginId = plugin.descriptor.pluginId,
             generation = hostArgs.generation,
-            config = config,
+            authToken = hostArgs.authToken,
+            descriptor = plugin.descriptor,
+            commMode = hostArgs.commMode,
             socketPath = hostArgs.eventSocketPath,
+            port = hostArgs.eventPort,
             dispatcher = eventDispatcher
         )
         private val tracing = ObservabilityTracing.initExternal(
@@ -147,6 +162,7 @@ object ExternalPluginHostMain {
                             PluginTraceEvent(
                                 pluginId = plugin.descriptor.pluginId,
                                 generation = hostArgs.generation,
+                                authToken = hostArgs.authToken,
                                 timestamp = System.currentTimeMillis(),
                                 messageId = eventEmitter.newMessageId(),
                                 traceId = event.traceId,
@@ -168,14 +184,15 @@ object ExternalPluginHostMain {
         )
 
         init {
+            val descriptor = plugin.descriptor
             initContext = object : com.keel.kernel.plugin.PluginInitContext {
-                override val pluginId: String = plugin.descriptor.pluginId
-                override val config: PluginConfig = this@ExternalPluginHost.config
+                override val pluginId: String = descriptor.pluginId
+                override val descriptor: PluginDescriptor = descriptor
                 override val kernelKoin = koin
             }
             runtimeContext = object : com.keel.kernel.plugin.PluginRuntimeContext {
-                override val pluginId: String = plugin.descriptor.pluginId
-                override val config: PluginConfig = this@ExternalPluginHost.config
+                override val pluginId: String = descriptor.pluginId
+                override val descriptor: PluginDescriptor = descriptor
                 override val kernelKoin = koin
                 override val privateScope = privateScopeHandle.privateScope
 
@@ -198,11 +215,28 @@ object ExternalPluginHostMain {
             }
         }
 
+        private fun createServerSocket(mode: JvmCommunicationMode, socketPath: Path?, port: Int?): ServerSocketChannel {
+            return when (mode) {
+                JvmCommunicationMode.UDS -> {
+                    ServerSocketChannel.open(StandardProtocolFamily.UNIX).also {
+                        it.bind(UnixDomainSocketAddress.of(requireNotNull(socketPath)))
+                    }
+                }
+                JvmCommunicationMode.TCP -> {
+                    ServerSocketChannel.open().also {
+                        it.bind(java.net.InetSocketAddress("127.0.0.1", requireNotNull(port)))
+                    }
+                }
+            }
+        }
+
         private fun prepareSockets() {
-            Files.createDirectories(hostArgs.invokeSocketPath.parent)
-            Files.createDirectories(hostArgs.adminSocketPath.parent)
-            hostArgs.invokeSocketPath.deleteIfExists()
-            hostArgs.adminSocketPath.deleteIfExists()
+            if (hostArgs.commMode == JvmCommunicationMode.UDS) {
+                Files.createDirectories(requireNotNull(hostArgs.invokeSocketPath).parent)
+                Files.createDirectories(requireNotNull(hostArgs.adminSocketPath).parent)
+                hostArgs.invokeSocketPath.deleteIfExists()
+                hostArgs.adminSocketPath.deleteIfExists()
+            }
         }
 
         private fun startPlugin() {
@@ -216,6 +250,7 @@ object ExternalPluginHostMain {
                         generation = hostArgs.generation,
                         timestamp = System.currentTimeMillis(),
                         messageId = eventEmitter.newMessageId(),
+                        authToken = hostArgs.authToken,
                         runtimeMode = PluginRuntimeMode.EXTERNAL_JVM.name
                     )
                 )
@@ -224,11 +259,11 @@ object ExternalPluginHostMain {
         }
 
         private fun serveConnections() {
-            ServerSocketChannel.open(StandardProtocolFamily.UNIX).use { adminServer ->
-                adminServer.bind(UnixDomainSocketAddress.of(hostArgs.adminSocketPath))
-                ServerSocketChannel.open(StandardProtocolFamily.UNIX).use { invokeServer ->
-                    invokeServer.bind(UnixDomainSocketAddress.of(hostArgs.invokeSocketPath))
+            val adminServer = createServerSocket(hostArgs.commMode, hostArgs.adminSocketPath, hostArgs.adminPort)
+            val invokeServer = createServerSocket(hostArgs.commMode, hostArgs.invokeSocketPath, hostArgs.invokePort)
 
+            adminServer.use { _ ->
+                invokeServer.use { _ ->
                     val adminJob = scope.launch {
                         while (isActive && running.get()) {
                             try {
@@ -238,7 +273,7 @@ object ExternalPluginHostMain {
                                         safeHandleAdminConnection(
                                             channel = it,
                                             plugin = plugin,
-                                            config = config,
+                                            descriptor = plugin.descriptor,
                                             authToken = hostArgs.authToken,
                                             generation = hostArgs.generation,
                                             startedAt = startedAt,
@@ -266,7 +301,7 @@ object ExternalPluginHostMain {
                                         safeHandleInvokeConnection(
                                             channel = it,
                                             plugin = plugin,
-                                            config = config,
+                                            descriptor = plugin.descriptor,
                                             authToken = hostArgs.authToken,
                                             generation = hostArgs.generation,
                                             endpoints = endpoints,
@@ -295,13 +330,14 @@ object ExternalPluginHostMain {
 
         private fun stopRuntime(adminJob: Job, invokeJob: Job) {
             runBlocking {
-                waitForDrain(inFlightInvokes, config.stopTimeoutMs)
+                waitForDrain(inFlightInvokes, plugin.descriptor.stopTimeoutMs)
                 eventEmitter.emitCritical(
                     PluginDrainCompleteEvent(
                         pluginId = plugin.descriptor.pluginId,
                         generation = hostArgs.generation,
                         timestamp = System.currentTimeMillis(),
                         messageId = eventEmitter.newMessageId(),
+                        authToken = hostArgs.authToken,
                         remainingInvokes = inFlightInvokes.get()
                     )
                 )
@@ -313,10 +349,11 @@ object ExternalPluginHostMain {
                         pluginId = plugin.descriptor.pluginId,
                         generation = hostArgs.generation,
                         timestamp = System.currentTimeMillis(),
-                        messageId = eventEmitter.newMessageId()
+                        messageId = eventEmitter.newMessageId(),
+                        authToken = hostArgs.authToken
                     )
                 )
-                eventEmitter.flush(config.stopTimeoutMs)
+                eventEmitter.flush(plugin.descriptor.stopTimeoutMs)
             }
             lifecycleState.set("STOPPED")
             adminJob.cancel()
@@ -332,11 +369,12 @@ object ExternalPluginHostMain {
                         generation = hostArgs.generation,
                         timestamp = System.currentTimeMillis(),
                         messageId = eventEmitter.newMessageId(),
+                        authToken = hostArgs.authToken,
                         errorType = error::class.simpleName ?: "RuntimeException",
                         errorMessage = error.message ?: "Unknown failure"
                     )
                 )
-                eventEmitter.flush(config.stopTimeoutMs)
+                eventEmitter.flush(plugin.descriptor.stopTimeoutMs)
             }
         }
 
@@ -344,8 +382,10 @@ object ExternalPluginHostMain {
             runBlocking {
                 eventEmitter.close()
             }
-            hostArgs.invokeSocketPath.deleteIfExists()
-            hostArgs.adminSocketPath.deleteIfExists()
+            if (hostArgs.commMode == JvmCommunicationMode.UDS) {
+                hostArgs.invokeSocketPath?.deleteIfExists()
+                hostArgs.adminSocketPath?.deleteIfExists()
+            }
             pluginScopeManager.closeScope(plugin.descriptor.pluginId)
             stopKoin()
             invokeDispatcher.close()
@@ -357,7 +397,7 @@ object ExternalPluginHostMain {
     private suspend fun safeHandleAdminConnection(
         channel: SocketChannel,
         plugin: KeelPlugin,
-        config: PluginConfig,
+        descriptor: PluginDescriptor,
         authToken: String,
         generation: Long,
         startedAt: Long,
@@ -372,7 +412,7 @@ object ExternalPluginHostMain {
             handleAdminConnection(
                 channel = channel,
                 plugin = plugin,
-                config = config,
+                descriptor = plugin.descriptor,
                 authToken = authToken,
                 generation = generation,
                 startedAt = startedAt,
@@ -391,6 +431,7 @@ object ExternalPluginHostMain {
                     generation = generation,
                     timestamp = System.currentTimeMillis(),
                     messageId = eventEmitter.newMessageId(),
+                    authToken = authToken,
                     errorType = "MalformedAdminFrame",
                     errorMessage = error.message ?: "Malformed admin frame"
                 )
@@ -401,7 +442,7 @@ object ExternalPluginHostMain {
     private suspend fun safeHandleInvokeConnection(
         channel: SocketChannel,
         plugin: KeelPlugin,
-        config: PluginConfig,
+        descriptor: PluginDescriptor,
         authToken: String,
         generation: Long,
         endpoints: Map<String, com.keel.kernel.plugin.PluginEndpointDefinition<*, *>>,
@@ -413,7 +454,7 @@ object ExternalPluginHostMain {
             handleInvokeConnection(
                 channel = channel,
                 plugin = plugin,
-                config = config,
+                descriptor = plugin.descriptor,
                 authToken = authToken,
                 generation = generation,
                 endpoints = endpoints,
@@ -429,6 +470,7 @@ object ExternalPluginHostMain {
                     generation = generation,
                     timestamp = System.currentTimeMillis(),
                     messageId = eventEmitter.newMessageId(),
+                    authToken = authToken,
                     errorType = "MalformedInvokeFrame",
                     errorMessage = error.message ?: "Malformed invoke frame"
                 )
@@ -439,7 +481,7 @@ object ExternalPluginHostMain {
     private suspend fun handleAdminConnection(
         channel: SocketChannel,
         plugin: KeelPlugin,
-        config: PluginConfig,
+        descriptor: PluginDescriptor,
         authToken: String,
         generation: Long,
         startedAt: Long,
@@ -450,14 +492,14 @@ object ExternalPluginHostMain {
         invokeServer: ServerSocketChannel,
         eventEmitter: PluginEventEmitter
     ) {
-        val payload = PluginUdsFrameCodec.read(channel)
-        val json = PluginUdsJson.instance.parseToJsonElement(payload).jsonObject
+        val payload = PluginJvmFrameCodec.read(channel)
+        val json = PluginJvmJson.instance.parseToJsonElement(payload).jsonObject
         val kind = json["kind"]?.jsonPrimitive?.content.orEmpty()
         val response = when (kind) {
             "handshake-request" -> {
-                val request = PluginUdsJson.instance.decodeFromString(HandshakeRequest.serializer(), payload)
+                val request = PluginJvmJson.instance.decodeFromString(HandshakeRequest.serializer(), payload)
                 val accepted = validateControlRequest(request.pluginId, request.generation, request.authToken, plugin.descriptor.pluginId, generation, authToken)
-                PluginUdsJson.instance.encodeToString(
+                PluginJvmJson.instance.encodeToString(
                     HandshakeResponse.serializer(),
                     HandshakeResponse(
                         pluginId = plugin.descriptor.pluginId,
@@ -478,9 +520,9 @@ object ExternalPluginHostMain {
                 )
             }
             "health-request" -> {
-                val request = PluginUdsJson.instance.decodeFromString(HealthRequest.serializer(), payload)
+                val request = PluginJvmJson.instance.decodeFromString(HealthRequest.serializer(), payload)
                 val accepted = validateControlRequest(request.pluginId, request.generation, request.authToken, plugin.descriptor.pluginId, generation, authToken)
-                PluginUdsJson.instance.encodeToString(
+                PluginJvmJson.instance.encodeToString(
                     HealthResponse.serializer(),
                     HealthResponse(
                         pluginId = plugin.descriptor.pluginId,
@@ -497,7 +539,7 @@ object ExternalPluginHostMain {
                 )
             }
             "shutdown-request" -> {
-                val request = PluginUdsJson.instance.decodeFromString(ShutdownRequest.serializer(), payload)
+                val request = PluginJvmJson.instance.decodeFromString(ShutdownRequest.serializer(), payload)
                 val accepted = validateControlRequest(request.pluginId, request.generation, request.authToken, plugin.descriptor.pluginId, generation, authToken)
                 if (accepted) {
                     lifecycleState.set("STOPPING")
@@ -508,6 +550,7 @@ object ExternalPluginHostMain {
                             generation = generation,
                             timestamp = System.currentTimeMillis(),
                             messageId = eventEmitter.newMessageId(),
+                            authToken = authToken,
                             reason = request.reason
                         )
                     )
@@ -516,7 +559,7 @@ object ExternalPluginHostMain {
                         adminServer.close()
                     }
                 }
-                PluginUdsJson.instance.encodeToString(
+                PluginJvmJson.instance.encodeToString(
                     ShutdownResponse.serializer(),
                     ShutdownResponse(
                         pluginId = plugin.descriptor.pluginId,
@@ -530,10 +573,10 @@ object ExternalPluginHostMain {
                 )
             }
             "reload-prepare-request" -> {
-                val request = PluginUdsJson.instance.decodeFromString(ReloadPrepareRequest.serializer(), payload)
+                val request = PluginJvmJson.instance.decodeFromString(ReloadPrepareRequest.serializer(), payload)
                 val accepted = validateControlRequest(request.pluginId, request.generation, request.authToken, plugin.descriptor.pluginId, generation, authToken) &&
                     inFlightInvokes.get() == 0
-                PluginUdsJson.instance.encodeToString(
+                PluginJvmJson.instance.encodeToString(
                     ReloadPrepareResponse.serializer(),
                     ReloadPrepareResponse(
                         pluginId = plugin.descriptor.pluginId,
@@ -547,13 +590,13 @@ object ExternalPluginHostMain {
             }
             else -> error("Unsupported admin message kind: $kind")
         }
-        PluginUdsFrameCodec.write(channel, response)
+        PluginJvmFrameCodec.write(channel, response)
     }
 
     private suspend fun handleInvokeConnection(
         channel: SocketChannel,
         plugin: KeelPlugin,
-        config: PluginConfig,
+        descriptor: PluginDescriptor,
         authToken: String,
         generation: Long,
         endpoints: Map<String, com.keel.kernel.plugin.PluginEndpointDefinition<*, *>>,
@@ -561,12 +604,12 @@ object ExternalPluginHostMain {
         eventEmitter: PluginEventEmitter,
         tracer: io.opentelemetry.api.trace.Tracer
     ) {
-        val payload = PluginUdsFrameCodec.read(channel)
-        val request = PluginUdsJson.instance.decodeFromString(InvokeRequest.serializer(), payload)
+        val payload = PluginJvmFrameCodec.read(channel)
+        val request = PluginJvmJson.instance.decodeFromString(InvokeRequest.serializer(), payload)
         if (!validateControlRequest(request.pluginId, request.generation, request.authToken, plugin.descriptor.pluginId, generation, authToken)) {
-            PluginUdsFrameCodec.write(
+            PluginJvmFrameCodec.write(
                 channel,
-                PluginUdsJson.instance.encodeToString(
+                PluginJvmJson.instance.encodeToString(
                     InvokeResponse.serializer(),
                     InvokeResponse(
                         pluginId = plugin.descriptor.pluginId,
@@ -585,9 +628,9 @@ object ExternalPluginHostMain {
 
         val endpoint = endpoints[request.endpointId]
         if (endpoint == null) {
-            PluginUdsFrameCodec.write(
+            PluginJvmFrameCodec.write(
                 channel,
-                PluginUdsJson.instance.encodeToString(
+                PluginJvmJson.instance.encodeToString(
                     InvokeResponse.serializer(),
                     InvokeResponse(
                         pluginId = plugin.descriptor.pluginId,
@@ -607,9 +650,9 @@ object ExternalPluginHostMain {
         val payloadLimit = endpoint.executionPolicy.maxPayloadBytes
         val requestBytes = request.bodyJson?.toByteArray(Charsets.UTF_8)?.size?.toLong() ?: 0L
         if (payloadLimit != null && requestBytes > payloadLimit && !endpoint.executionPolicy.allowChunkedTransfer) {
-            PluginUdsFrameCodec.write(
+            PluginJvmFrameCodec.write(
                 channel,
-                PluginUdsJson.instance.encodeToString(
+                PluginJvmJson.instance.encodeToString(
                     InvokeResponse.serializer(),
                     InvokeResponse(
                         pluginId = plugin.descriptor.pluginId,
@@ -650,13 +693,13 @@ object ExternalPluginHostMain {
                 override val requestId: String = request.requestId
             }
 
-            val timeoutMs = endpoint.executionPolicy.timeoutMs ?: config.callTimeoutMs
+            val timeoutMs = endpoint.executionPolicy.timeoutMs ?: descriptor.callTimeoutMs
             val result = withTimeoutOrNull(timeoutMs.milliseconds) {
                 endpoint.execute(context, requestBody)
             } ?: run {
-                PluginUdsFrameCodec.write(
+                PluginJvmFrameCodec.write(
                     channel,
-                    PluginUdsJson.instance.encodeToString(
+                    PluginJvmJson.instance.encodeToString(
                         InvokeResponse.serializer(),
                         InvokeResponse(
                             pluginId = plugin.descriptor.pluginId,
@@ -676,9 +719,9 @@ object ExternalPluginHostMain {
             val encodedBody = encodeResponseBody(result.body, endpoint.responseType)
             val responseBytes = encodedBody?.toByteArray(Charsets.UTF_8)?.size?.toLong() ?: 0L
             if (payloadLimit != null && responseBytes > payloadLimit && !endpoint.executionPolicy.allowChunkedTransfer) {
-                PluginUdsFrameCodec.write(
+                PluginJvmFrameCodec.write(
                     channel,
-                    PluginUdsJson.instance.encodeToString(
+                    PluginJvmJson.instance.encodeToString(
                         InvokeResponse.serializer(),
                         InvokeResponse(
                             pluginId = plugin.descriptor.pluginId,
@@ -695,9 +738,9 @@ object ExternalPluginHostMain {
                 return
             }
 
-            PluginUdsFrameCodec.write(
+            PluginJvmFrameCodec.write(
                 channel,
-                PluginUdsJson.instance.encodeToString(
+                PluginJvmJson.instance.encodeToString(
                     InvokeResponse.serializer(),
                     InvokeResponse(
                         pluginId = plugin.descriptor.pluginId,
@@ -713,9 +756,9 @@ object ExternalPluginHostMain {
                 )
             )
         } catch (error: PluginApiException) {
-            PluginUdsFrameCodec.write(
+            PluginJvmFrameCodec.write(
                 channel,
-                PluginUdsJson.instance.encodeToString(
+                PluginJvmJson.instance.encodeToString(
                     InvokeResponse.serializer(),
                     InvokeResponse(
                         pluginId = plugin.descriptor.pluginId,
@@ -736,13 +779,14 @@ object ExternalPluginHostMain {
                     generation = generation,
                     timestamp = System.currentTimeMillis(),
                     messageId = eventEmitter.newMessageId(),
+                    authToken = authToken,
                     errorType = error::class.simpleName ?: "RuntimeException",
                     errorMessage = error.message ?: "Internal server error"
                 )
             )
-            PluginUdsFrameCodec.write(
+            PluginJvmFrameCodec.write(
                 channel,
-                PluginUdsJson.instance.encodeToString(
+                PluginJvmJson.instance.encodeToString(
                     InvokeResponse.serializer(),
                     InvokeResponse(
                         pluginId = plugin.descriptor.pluginId,
@@ -802,13 +846,16 @@ private class AtomicReferenceState(initial: String) {
 private class PluginEventEmitter(
     private val pluginId: String,
     private val generation: Long,
-    private val config: PluginConfig,
-    private val socketPath: Path,
+    private val authToken: String,
+    private val descriptor: PluginDescriptor,
+    private val commMode: JvmCommunicationMode,
+    private val socketPath: Path?,
+    private val port: Int?,
     private val dispatcher: kotlinx.coroutines.CoroutineDispatcher
 ) {
     private val logger = KeelLoggerService.getLogger("PluginEventEmitter")
     private val scope = CoroutineScope(SupervisorJob() + dispatcher)
-    private val criticalEvents = kotlinx.coroutines.channels.Channel<PluginRuntimeEvent>(capacity = config.criticalEventQueueSize)
+    private val criticalEvents = kotlinx.coroutines.channels.Channel<PluginRuntimeEvent>(capacity = descriptor.criticalEventQueueSize)
     private val criticalDepth = AtomicInteger(0)
     private val droppedLogs = AtomicLong(0)
     private val logBuffer = ArrayDeque<PluginLogEvent>()
@@ -818,35 +865,52 @@ private class PluginEventEmitter(
 
     suspend fun start() {
         senderJob = scope.launch {
-            val address = UnixDomainSocketAddress.of(socketPath)
-            SocketChannel.open(StandardProtocolFamily.UNIX).use { channel ->
+            while (isActive) {
                 try {
-                    channel.connect(address)
-                    connected.set(true)
-                    while (isActive) {
-                        val overflowEvent = if (overflowPending.getAndSet(false)) {
-                            PluginEventQueueOverflowEvent(
-                                pluginId = pluginId,
-                                generation = generation,
-                                timestamp = System.currentTimeMillis(),
-                                messageId = newMessageId(),
-                                queueType = "critical",
-                                capacity = config.criticalEventQueueSize
-                            )
-                        } else {
-                            null
+                    val channel = when (commMode) {
+                        JvmCommunicationMode.UDS -> {
+                            val address = UnixDomainSocketAddress.of(requireNotNull(socketPath))
+                            SocketChannel.open(StandardProtocolFamily.UNIX).also { it.connect(address) }
                         }
-                        val event = overflowEvent ?: criticalEvents.tryReceive().getOrNull()?.also {
-                            criticalDepth.decrementAndGet()
-                        } ?: synchronized(logBuffer) {
-                            if (logBuffer.isEmpty()) null else logBuffer.removeFirst()
+                        JvmCommunicationMode.TCP -> {
+                            val address = java.net.InetSocketAddress("127.0.0.1", requireNotNull(port))
+                            SocketChannel.open().also { it.connect(address) }
                         }
-                        if (event == null) {
-                            delay(25)
-                            continue
-                        }
-                        PluginUdsFrameCodec.write(channel, encodeEvent(event))
                     }
+
+                    channel.use {
+                        connected.set(true)
+                        while (isActive && it.isOpen) {
+                            val overflowEvent = if (overflowPending.getAndSet(false)) {
+                                PluginEventQueueOverflowEvent(
+                                    pluginId = pluginId,
+                                    generation = generation,
+                                    timestamp = System.currentTimeMillis(),
+                                    messageId = newMessageId(),
+                                    authToken = authToken,
+                                    queueType = "critical",
+                                    capacity = descriptor.criticalEventQueueSize
+                                )
+                            } else {
+                                null
+                            }
+                            val event = overflowEvent ?: criticalEvents.tryReceive().getOrNull()?.also {
+                                criticalDepth.decrementAndGet()
+                            } ?: synchronized(logBuffer) {
+                                if (logBuffer.isEmpty()) null else logBuffer.removeFirst()
+                            }
+                            if (event == null) {
+                                delay(25)
+                                continue
+                            }
+                            PluginJvmFrameCodec.write(it, encodeEvent(event))
+                        }
+                    }
+                } catch (error: Throwable) {
+                    connected.set(false)
+                    if (!isActive) break
+                    logger.warn("EventEmitter failed to connect/write, retrying in 1s: ${error.message}")
+                    delay(1000)
                 } finally {
                     connected.set(false)
                 }
@@ -854,7 +918,7 @@ private class PluginEventEmitter(
         }
     }
 
-    suspend fun emitCritical(event: PluginRuntimeEvent) {
+    fun emitCritical(event: PluginRuntimeEvent) {
         criticalDepth.incrementAndGet()
         if (criticalEvents.trySend(event).isFailure) {
             criticalDepth.decrementAndGet()
@@ -864,7 +928,7 @@ private class PluginEventEmitter(
 
     fun emitLog(level: String, message: String) {
         synchronized(logBuffer) {
-            if (logBuffer.size >= config.eventLogRingBufferSize) {
+            if (logBuffer.size >= descriptor.eventLogRingBufferSize) {
                 logBuffer.removeFirst()
                 droppedLogs.incrementAndGet()
             }
@@ -874,6 +938,7 @@ private class PluginEventEmitter(
                     generation = generation,
                     timestamp = System.currentTimeMillis(),
                     messageId = newMessageId(),
+                    authToken = authToken,
                     level = level,
                     message = message,
                     droppedCount = droppedLogs.get()
@@ -890,7 +955,7 @@ private class PluginEventEmitter(
     }
 
     suspend fun close() {
-        flush(config.stopTimeoutMs)
+        flush(descriptor.stopTimeoutMs)
         senderJob?.cancel()
         criticalEvents.close()
     }
@@ -904,23 +969,24 @@ private class PluginEventEmitter(
     fun newMessageId(): String = java.util.UUID.randomUUID().toString()
 
     private fun encodeEvent(event: PluginRuntimeEvent): String = when (event) {
-        is PluginReadyEvent -> PluginUdsJson.instance.encodeToString(PluginReadyEvent.serializer(), event)
-        is PluginStoppingEvent -> PluginUdsJson.instance.encodeToString(PluginStoppingEvent.serializer(), event)
-        is PluginDrainCompleteEvent -> PluginUdsJson.instance.encodeToString(PluginDrainCompleteEvent.serializer(), event)
-        is PluginDisposedEvent -> PluginUdsJson.instance.encodeToString(PluginDisposedEvent.serializer(), event)
-        is PluginFailureEvent -> PluginUdsJson.instance.encodeToString(PluginFailureEvent.serializer(), event)
-        is PluginLogEvent -> PluginUdsJson.instance.encodeToString(PluginLogEvent.serializer(), event)
-        is PluginEventQueueOverflowEvent -> PluginUdsJson.instance.encodeToString(PluginEventQueueOverflowEvent.serializer(), event)
-        is PluginTraceEvent -> PluginUdsJson.instance.encodeToString(PluginTraceEvent.serializer(), event)
+        is PluginReadyEvent -> PluginJvmJson.instance.encodeToString(PluginReadyEvent.serializer(), event)
+        is PluginStoppingEvent -> PluginJvmJson.instance.encodeToString(PluginStoppingEvent.serializer(), event)
+        is PluginDrainCompleteEvent -> PluginJvmJson.instance.encodeToString(PluginDrainCompleteEvent.serializer(), event)
+        is PluginDisposedEvent -> PluginJvmJson.instance.encodeToString(PluginDisposedEvent.serializer(), event)
+        is PluginFailureEvent -> PluginJvmJson.instance.encodeToString(PluginFailureEvent.serializer(), event)
+        is PluginLogEvent -> PluginJvmJson.instance.encodeToString(PluginLogEvent.serializer(), event)
+        is PluginEventQueueOverflowEvent -> PluginJvmJson.instance.encodeToString(PluginEventQueueOverflowEvent.serializer(), event)
+        is PluginTraceEvent -> PluginJvmJson.instance.encodeToString(PluginTraceEvent.serializer(), event)
         else -> {
             logger.warn("Unsupported runtime event type ${event::class.qualifiedName}")
-            PluginUdsJson.instance.encodeToString(
+            PluginJvmJson.instance.encodeToString(
                 PluginFailureEvent.serializer(),
                 PluginFailureEvent(
                     pluginId = pluginId,
                     generation = generation,
                     timestamp = System.currentTimeMillis(),
                     messageId = newMessageId(),
+                    authToken = authToken,
                     errorType = "UnsupportedEvent",
                     errorMessage = "Unsupported runtime event ${event::class.qualifiedName}"
                 )

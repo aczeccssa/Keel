@@ -19,7 +19,9 @@ import com.keel.kernel.plugin.serializer
 import com.keel.kernel.di.PluginPrivateScopeHandle
 import com.keel.kernel.di.PluginScopeManager
 import com.keel.kernel.isolation.PluginProcessSupervisor
-import com.keel.kernel.isolation.PluginUdsSocketPaths
+import com.keel.kernel.isolation.PluginJvmConnectionInfo
+import com.keel.kernel.isolation.PluginJvmUdsConnectionInfo
+import com.keel.kernel.isolation.PluginJvmTcpConnectionInfo
 import com.keel.kernel.logging.KeelLoggerService
 import com.keel.kernel.observability.ObservabilityHub
 import com.keel.kernel.observability.ObservabilityTracing
@@ -75,9 +77,7 @@ class UnifiedPluginManager(
 
     fun registerPlugin(plugin: KeelPlugin, enabledOverride: Boolean? = null) {
         val descriptor = plugin.descriptor
-        val config = PluginConfigLoader.load(descriptor).let { loaded ->
-            enabledOverride?.let { loaded.copy(enabled = it) } ?: loaded
-        }
+        val config = descriptor.toConfig(enabled = enabledOverride ?: true)
         val routeDefinitions = plugin.endpoints()
         val endpointDefinitions = routeDefinitions.filterIsInstance<PluginEndpointDefinition<*, *>>()
         val endpointById = endpointDefinitions.associateBy { it.endpointId }.toMutableMap()
@@ -249,7 +249,7 @@ class UnifiedPluginManager(
         entry.endpointTopology = newGeneration.topology
         entry.sseByPath = newGeneration.sseByPath.toMutableMap()
         entry.sourceClassLoader = newGeneration.classLoader
-        entry.config = PluginConfigLoader.load(newGeneration.plugin.descriptor).copy(runtimeMode = source.runtimeMode)
+        entry.config = newGeneration.plugin.descriptor.toConfig().copy(runtimeMode = source.runtimeMode)
         entry.generation = snapshot.generation.next()
         normalizeProcessState(entry)
         entry.lastFailure = null
@@ -315,7 +315,7 @@ class UnifiedPluginManager(
     suspend fun reloadPlugin(pluginId: String) {
         withPluginLock(pluginId) { entry ->
             restartPluginGenerationLocked(entry, "reload") {
-                PluginConfigLoader.load(entry.plugin.descriptor)
+                entry.plugin.descriptor.toConfig()
             }
         }
     }
@@ -323,7 +323,7 @@ class UnifiedPluginManager(
     suspend fun replacePlugin(pluginId: String) {
         withPluginLock(pluginId) { entry ->
             restartPluginGenerationLocked(entry, "replace") {
-                PluginConfigLoader.load(entry.plugin.descriptor)
+                entry.plugin.descriptor.toConfig()
             }
         }
     }
@@ -398,7 +398,7 @@ class UnifiedPluginManager(
     private suspend fun startInProcess(entry: ManagedPlugin) {
         if (!entry.initialized) {
             entry.lifecycleState = PluginLifecycleState.INITIALIZING
-            entry.plugin.onInit(BasicPluginInitContext(entry.plugin.descriptor.pluginId, entry.config, kernelKoin))
+            entry.plugin.onInit(BasicPluginInitContext(entry.plugin.descriptor.pluginId, entry.plugin.descriptor, kernelKoin))
             entry.initialized = true
             entry.lifecycleState = PluginLifecycleState.STOPPED
         }
@@ -411,7 +411,7 @@ class UnifiedPluginManager(
         val scopeHandle = recreateScope(entry)
         val runtimeContext = BasicPluginRuntimeContext(
             pluginId = entry.plugin.descriptor.pluginId,
-            config = entry.config,
+            descriptor = entry.plugin.descriptor,
             kernelKoin = kernelKoin,
             privateScope = scopeHandle.privateScope,
             teardownRegistry = scopeHandle.teardownRegistry
@@ -428,21 +428,16 @@ class UnifiedPluginManager(
 
     private suspend fun startIsolated(entry: ManagedPlugin) {
         entry.lifecycleState = PluginLifecycleState.STARTING
-        val socketStem = socketFileStem(entry.plugin.descriptor.pluginId)
-        val socketPaths = PluginUdsSocketPaths(
-            invokePath = kernelRuntimeDir.toPath().resolve("$socketStem-invoke.sock"),
-            adminPath = kernelRuntimeDir.toPath().resolve("$socketStem-admin.sock"),
-            eventPath = kernelRuntimeDir.toPath().resolve("$socketStem-event.sock")
-        )
+
         val supervisor = PluginProcessSupervisor(
             descriptor = entry.plugin.descriptor,
             pluginClassName = entry.pluginClassName,
             config = entry.config,
             expectedEndpoints = entry.plugin.endpoints().filterIsInstance<PluginEndpointDefinition<*, *>>(),
             classpath = currentClasspath,
-            socketPaths = socketPaths,
             runtimeDir = kernelRuntimeDir.toPath(),
             generation = entry.generation,
+
             onStateChange = { state ->
                 entry.processState = state
                 if (state == PluginProcessState.FAILED) {
@@ -1103,13 +1098,13 @@ class UnifiedPluginManager(
 
     private data class BasicPluginInitContext(
         override val pluginId: String,
-        override val config: PluginConfig,
+        override val descriptor: PluginDescriptor,
         override val kernelKoin: Koin
     ) : PluginInitContext
 
     private data class BasicPluginRuntimeContext(
         override val pluginId: String,
-        override val config: PluginConfig,
+        override val descriptor: PluginDescriptor,
         override val kernelKoin: Koin,
         override val privateScope: Scope,
         private val teardownRegistry: PluginTeardownRegistry
