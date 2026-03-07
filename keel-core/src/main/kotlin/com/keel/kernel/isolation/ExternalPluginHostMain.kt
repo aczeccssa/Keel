@@ -779,6 +779,7 @@ object ExternalPluginHostMain {
                     generation = generation,
                     timestamp = System.currentTimeMillis(),
                     messageId = eventEmitter.newMessageId(),
+                    authToken = authToken,
                     errorType = error::class.simpleName ?: "RuntimeException",
                     errorMessage = error.message ?: "Internal server error"
                 )
@@ -985,6 +986,7 @@ private class PluginEventEmitter(
                     generation = generation,
                     timestamp = System.currentTimeMillis(),
                     messageId = newMessageId(),
+                    authToken = authToken,
                     errorType = "UnsupportedEvent",
                     errorMessage = "Unsupported runtime event ${event::class.qualifiedName}"
                 )
