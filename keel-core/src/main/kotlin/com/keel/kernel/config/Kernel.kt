@@ -81,34 +81,10 @@ class Kernel(
     private val gatewayInterceptor = GatewayInterceptor(pluginManager)
     private var serverPort: Int = ConfigHotReloader.getServerPort()
 
+    private var hotReloaderInitialized = false
     private val configHotReloader: ConfigHotReloader by lazy {
         ConfigHotReloader.Builder()
-            .watchConfigDir(KeelConstants.CONFIG_DIR)
-            .watchConfigDir(KeelConstants.CONFIG_PLUGINS_DIR)
-            .apply {
-                if (enablePluginHotReload) {
-                    watchPluginDir(KeelConstants.PLUGINS_DIR)
-                }
-            }
             .watchModuleDirectories(moduleWatchDirectories)
-            .onConfigChange { event ->
-                kernelScope.launch {
-                    runCatching {
-                        pluginLifecycleHotReloadAdapter.handleConfigChange(event)
-                    }.onFailure { error ->
-                        logger.warn("Config-triggered lifecycle update failed for ${event.fileName}: ${error.message}")
-                    }
-                }
-            }
-            .onPluginChange { event ->
-                kernelScope.launch {
-                    runCatching {
-                        pluginLifecycleHotReloadAdapter.handlePluginChange(event)
-                    }.onFailure { error ->
-                        logger.warn("Plugin-triggered lifecycle update failed for ${event.pluginId}: ${error.message}")
-                    }
-                }
-            }
             .onModuleChange { event ->
                 kernelScope.launch {
                     if (enablePluginHotReload && pluginDevelopmentSources.isNotEmpty()) {
@@ -211,6 +187,7 @@ class Kernel(
             observabilityHub.start(kernelScope)
 
             if (ConfigHotReloader.isDevelopmentMode()) {
+                hotReloaderInitialized = true
                 configHotReloader.startWatching()
                 logger.info("Hot-reloader started (development mode: ${ConfigHotReloader.isDevelopmentMode()})")
                 if (moduleWatchDirectories.isNotEmpty()) {
@@ -221,7 +198,9 @@ class Kernel(
 
         app.monitor.subscribe(ApplicationStopping) {
             logger.info("Kernel stopping")
-            configHotReloader.stopWatching()
+            if (hotReloaderInitialized) {
+                configHotReloader.stopWatching()
+            }
             kotlinx.coroutines.runBlocking {
                 pluginManager.stopAll()
             }

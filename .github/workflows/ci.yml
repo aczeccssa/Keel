@@ -27,6 +27,9 @@ jobs:
       - name: Build and Test
         run: ./gradlew build dokkaGenerate
 
+      - name: Performance Benchmarks (CI Gate)
+        run: ./gradlew :keel-test-suite:test --tests "com.keel.test.perf.*" --info
+
       - name: Upload Test Reports
         if: always()
         uses: actions/upload-artifact@v4
