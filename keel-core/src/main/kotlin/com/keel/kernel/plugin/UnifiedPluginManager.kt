@@ -1113,8 +1113,4 @@ class UnifiedPluginManager(
             teardownRegistry.register(action)
         }
     }
-
-    private fun allocateFreePort(): Int {
-        java.net.ServerSocket(0).use { return it.localPort }
-    }
 }

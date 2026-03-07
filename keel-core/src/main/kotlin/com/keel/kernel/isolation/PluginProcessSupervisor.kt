@@ -163,25 +163,13 @@ class PluginProcessSupervisor(
             )
         }
         JvmCommunicationMode.TCP -> {
-            val ports = allocateDistinctPorts(3)
+            val ports = NetworkUtils.allocateDistinctPorts(3)
             PluginJvmTcpConnectionInfo(
                 invokePort = ports[0],
                 adminPort = ports[1],
                 eventPort = ports[2]
             )
         }
-    }
-
-    private fun allocateFreePort(): Int {
-        java.net.ServerSocket(0).use { return it.localPort }
-    }
-
-    private fun allocateDistinctPorts(count: Int): List<Int> {
-        val ports = LinkedHashSet<Int>(count)
-        while (ports.size < count) {
-            ports.add(allocateFreePort())
-        }
-        return ports.toList()
     }
 
     suspend fun stop() {
@@ -533,7 +521,7 @@ class PluginProcessSupervisor(
     ): T = withContext(Dispatchers.IO) {
         val connection = currentConnectionInfo ?: throw IllegalStateException("Connection info unavailable")
         withTimeout(timeoutMs.milliseconds) {
-            when (connection) {
+            val channel = when (connection) {
                 is PluginJvmUdsConnectionInfo -> {
                     val path = when (lane) {
                         CommunicationLane.INVOKE -> connection.invokePath
@@ -541,13 +529,7 @@ class PluginProcessSupervisor(
                         CommunicationLane.EVENT -> connection.eventPath
                     }
                     val socketAddress = UnixDomainSocketAddress.of(path)
-                    SocketChannel.open(StandardProtocolFamily.UNIX).use { channel ->
-                        channel.connect(socketAddress)
-                        val payload = encodeMessage(message)
-                        PluginJvmFrameCodec.write(channel, payload)
-                        val responsePayload = PluginJvmFrameCodec.read(channel)
-                        PluginJvmJson.instance.decodeFromString(serializer, responsePayload)
-                    }
+                    SocketChannel.open(StandardProtocolFamily.UNIX).also { it.connect(socketAddress) }
                 }
                 is PluginJvmTcpConnectionInfo -> {
                     val port = when (lane) {
@@ -556,14 +538,15 @@ class PluginProcessSupervisor(
                         CommunicationLane.EVENT -> connection.eventPort
                     }
                     val socketAddress = java.net.InetSocketAddress("127.0.0.1", port)
-                    SocketChannel.open().use { channel ->
-                        channel.connect(socketAddress)
-                        val payload = encodeMessage(message)
-                        PluginJvmFrameCodec.write(channel, payload)
-                        val responsePayload = PluginJvmFrameCodec.read(channel)
-                        PluginJvmJson.instance.decodeFromString(serializer, responsePayload)
-                    }
+                    SocketChannel.open().also { it.connect(socketAddress) }
                 }
+            }
+
+            channel.use {
+                val payload = encodeMessage(message)
+                PluginJvmFrameCodec.write(it, payload)
+                val responsePayload = PluginJvmFrameCodec.read(it)
+                PluginJvmJson.instance.decodeFromString(serializer, responsePayload)
             }
         }
     }
@@ -574,7 +557,7 @@ class PluginProcessSupervisor(
         is ShutdownRequest -> PluginJvmJson.instance.encodeToString(ShutdownRequest.serializer(), message)
         is ReloadPrepareRequest -> PluginJvmJson.instance.encodeToString(ReloadPrepareRequest.serializer(), message)
         is InvokeRequest -> PluginJvmJson.instance.encodeToString(InvokeRequest.serializer(), message)
-        else -> error("Unsupported UDS message type: ${message::class.qualifiedName}")
+        else -> error("Unsupported JVM protocol message type: ${message::class.qualifiedName}")
     }
 
     private fun handleEventPayload(payload: String) {
@@ -677,6 +660,10 @@ class PluginProcessSupervisor(
         }
         if (event.pluginId != descriptor.pluginId || event.generation != generation.value) {
             logger.warn("Discarding mismatched event pluginId=${event.pluginId} generation=${event.generation}")
+            return false
+        }
+        if (event.authToken != authToken) {
+            logger.warn("Discarding unauthenticated event pluginId=${event.pluginId} generation=${event.generation}")
             return false
         }
         return true

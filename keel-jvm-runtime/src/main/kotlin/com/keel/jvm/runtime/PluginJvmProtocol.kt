@@ -22,7 +22,9 @@ sealed interface PluginJvmControlResponse : PluginJvmMessage {
     val correlationId: String
 }
 
-sealed interface PluginRuntimeEvent : PluginJvmMessage
+sealed interface PluginRuntimeEvent : PluginJvmMessage {
+    val authToken: String
+}
 
 @Serializable
 data class PluginEndpointInventoryItem(
@@ -181,6 +183,7 @@ data class PluginReadyEvent(
     override val generation: Long,
     override val timestamp: Long,
     override val messageId: String,
+    override val authToken: String,
     val runtimeMode: String
 ) : PluginRuntimeEvent
 
@@ -192,6 +195,7 @@ data class PluginStoppingEvent(
     override val generation: Long,
     override val timestamp: Long,
     override val messageId: String,
+    override val authToken: String,
     val reason: String
 ) : PluginRuntimeEvent
 
@@ -202,7 +206,8 @@ data class PluginDisposedEvent(
     override val pluginId: String,
     override val generation: Long,
     override val timestamp: Long,
-    override val messageId: String
+    override val messageId: String,
+    override val authToken: String
 ) : PluginRuntimeEvent
 
 @Serializable
@@ -213,6 +218,7 @@ data class PluginFailureEvent(
     override val generation: Long,
     override val timestamp: Long,
     override val messageId: String,
+    override val authToken: String,
     val errorType: String,
     val errorMessage: String
 ) : PluginRuntimeEvent
@@ -225,6 +231,7 @@ data class PluginLogEvent(
     override val generation: Long,
     override val timestamp: Long,
     override val messageId: String,
+    override val authToken: String,
     val level: String,
     val message: String,
     val droppedCount: Long = 0
@@ -238,6 +245,7 @@ data class PluginTraceEvent(
     override val generation: Long,
     override val timestamp: Long,
     override val messageId: String,
+    override val authToken: String,
     val traceId: String,
     val spanId: String,
     val parentSpanId: String? = null,
@@ -259,6 +267,7 @@ data class PluginBackpressureEvent(
     override val generation: Long,
     override val timestamp: Long,
     override val messageId: String,
+    override val authToken: String,
     val eventQueueDepth: Int
 ) : PluginRuntimeEvent
 
@@ -270,6 +279,7 @@ data class PluginDrainCompleteEvent(
     override val generation: Long,
     override val timestamp: Long,
     override val messageId: String,
+    override val authToken: String,
     val remainingInvokes: Int
 ) : PluginRuntimeEvent
 
@@ -282,7 +292,7 @@ data class PluginProcessExitedEvent(
     override val timestamp: Long,
     override val messageId: String,
     val exitCode: Int
-) : PluginRuntimeEvent
+) : PluginJvmMessage
 
 @Serializable
 data class PluginEventQueueOverflowEvent(
@@ -292,6 +302,7 @@ data class PluginEventQueueOverflowEvent(
     override val generation: Long,
     override val timestamp: Long,
     override val messageId: String,
+    override val authToken: String,
     val queueType: String,
     val capacity: Int
 ) : PluginRuntimeEvent

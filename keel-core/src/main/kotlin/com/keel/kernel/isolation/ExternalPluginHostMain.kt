@@ -147,6 +147,7 @@ object ExternalPluginHostMain {
         private val eventEmitter = PluginEventEmitter(
             pluginId = plugin.descriptor.pluginId,
             generation = hostArgs.generation,
+            authToken = hostArgs.authToken,
             descriptor = plugin.descriptor,
             commMode = hostArgs.commMode,
             socketPath = hostArgs.eventSocketPath,
@@ -161,6 +162,7 @@ object ExternalPluginHostMain {
                             PluginTraceEvent(
                                 pluginId = plugin.descriptor.pluginId,
                                 generation = hostArgs.generation,
+                                authToken = hostArgs.authToken,
                                 timestamp = System.currentTimeMillis(),
                                 messageId = eventEmitter.newMessageId(),
                                 traceId = event.traceId,
@@ -213,6 +215,21 @@ object ExternalPluginHostMain {
             }
         }
 
+        private fun createServerSocket(mode: JvmCommunicationMode, socketPath: Path?, port: Int?): ServerSocketChannel {
+            return when (mode) {
+                JvmCommunicationMode.UDS -> {
+                    ServerSocketChannel.open(StandardProtocolFamily.UNIX).also {
+                        it.bind(UnixDomainSocketAddress.of(requireNotNull(socketPath)))
+                    }
+                }
+                JvmCommunicationMode.TCP -> {
+                    ServerSocketChannel.open().also {
+                        it.bind(java.net.InetSocketAddress("127.0.0.1", requireNotNull(port)))
+                    }
+                }
+            }
+        }
+
         private fun prepareSockets() {
             if (hostArgs.commMode == JvmCommunicationMode.UDS) {
                 Files.createDirectories(requireNotNull(hostArgs.invokeSocketPath).parent)
@@ -233,6 +250,7 @@ object ExternalPluginHostMain {
                         generation = hostArgs.generation,
                         timestamp = System.currentTimeMillis(),
                         messageId = eventEmitter.newMessageId(),
+                        authToken = hostArgs.authToken,
                         runtimeMode = PluginRuntimeMode.EXTERNAL_JVM.name
                     )
                 )
@@ -241,31 +259,8 @@ object ExternalPluginHostMain {
         }
 
         private fun serveConnections() {
-            val adminServer = when (hostArgs.commMode) {
-                JvmCommunicationMode.UDS -> {
-                    ServerSocketChannel.open(StandardProtocolFamily.UNIX).also {
-                        it.bind(UnixDomainSocketAddress.of(requireNotNull(hostArgs.adminSocketPath)))
-                    }
-                }
-                JvmCommunicationMode.TCP -> {
-                    ServerSocketChannel.open().also {
-                        it.bind(java.net.InetSocketAddress("127.0.0.1", requireNotNull(hostArgs.adminPort)))
-                    }
-                }
-            }
-
-            val invokeServer = when (hostArgs.commMode) {
-                JvmCommunicationMode.UDS -> {
-                    ServerSocketChannel.open(StandardProtocolFamily.UNIX).also {
-                        it.bind(UnixDomainSocketAddress.of(requireNotNull(hostArgs.invokeSocketPath)))
-                    }
-                }
-                JvmCommunicationMode.TCP -> {
-                    ServerSocketChannel.open().also {
-                        it.bind(java.net.InetSocketAddress("127.0.0.1", requireNotNull(hostArgs.invokePort)))
-                    }
-                }
-            }
+            val adminServer = createServerSocket(hostArgs.commMode, hostArgs.adminSocketPath, hostArgs.adminPort)
+            val invokeServer = createServerSocket(hostArgs.commMode, hostArgs.invokeSocketPath, hostArgs.invokePort)
 
             adminServer.use { _ ->
                 invokeServer.use { _ ->
@@ -342,6 +337,7 @@ object ExternalPluginHostMain {
                         generation = hostArgs.generation,
                         timestamp = System.currentTimeMillis(),
                         messageId = eventEmitter.newMessageId(),
+                        authToken = hostArgs.authToken,
                         remainingInvokes = inFlightInvokes.get()
                     )
                 )
@@ -353,7 +349,8 @@ object ExternalPluginHostMain {
                         pluginId = plugin.descriptor.pluginId,
                         generation = hostArgs.generation,
                         timestamp = System.currentTimeMillis(),
-                        messageId = eventEmitter.newMessageId()
+                        messageId = eventEmitter.newMessageId(),
+                        authToken = hostArgs.authToken
                     )
                 )
                 eventEmitter.flush(plugin.descriptor.stopTimeoutMs)
@@ -372,6 +369,7 @@ object ExternalPluginHostMain {
                         generation = hostArgs.generation,
                         timestamp = System.currentTimeMillis(),
                         messageId = eventEmitter.newMessageId(),
+                        authToken = hostArgs.authToken,
                         errorType = error::class.simpleName ?: "RuntimeException",
                         errorMessage = error.message ?: "Unknown failure"
                     )
@@ -433,6 +431,7 @@ object ExternalPluginHostMain {
                     generation = generation,
                     timestamp = System.currentTimeMillis(),
                     messageId = eventEmitter.newMessageId(),
+                    authToken = authToken,
                     errorType = "MalformedAdminFrame",
                     errorMessage = error.message ?: "Malformed admin frame"
                 )
@@ -471,6 +470,7 @@ object ExternalPluginHostMain {
                     generation = generation,
                     timestamp = System.currentTimeMillis(),
                     messageId = eventEmitter.newMessageId(),
+                    authToken = authToken,
                     errorType = "MalformedInvokeFrame",
                     errorMessage = error.message ?: "Malformed invoke frame"
                 )
@@ -550,6 +550,7 @@ object ExternalPluginHostMain {
                             generation = generation,
                             timestamp = System.currentTimeMillis(),
                             messageId = eventEmitter.newMessageId(),
+                            authToken = authToken,
                             reason = request.reason
                         )
                     )
@@ -844,6 +845,7 @@ private class AtomicReferenceState(initial: String) {
 private class PluginEventEmitter(
     private val pluginId: String,
     private val generation: Long,
+    private val authToken: String,
     private val descriptor: PluginDescriptor,
     private val commMode: JvmCommunicationMode,
     private val socketPath: Path?,
@@ -884,6 +886,7 @@ private class PluginEventEmitter(
                                     generation = generation,
                                     timestamp = System.currentTimeMillis(),
                                     messageId = newMessageId(),
+                                    authToken = authToken,
                                     queueType = "critical",
                                     capacity = descriptor.criticalEventQueueSize
                                 )
@@ -934,6 +937,7 @@ private class PluginEventEmitter(
                     generation = generation,
                     timestamp = System.currentTimeMillis(),
                     messageId = newMessageId(),
+                    authToken = authToken,
                     level = level,
                     message = message,
                     droppedCount = droppedLogs.get()
