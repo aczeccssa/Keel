@@ -1,8 +1,5 @@
 package com.keel.test.kernel
 
-import com.keel.kernel.config.ConfigChangeEvent
-import com.keel.kernel.config.PluginChangeEvent
-import com.keel.kernel.config.PluginChangeType
 import com.keel.kernel.config.PluginLifecycleHotReloadAdapter
 import com.keel.kernel.hotreload.DevHotReloadEngine
 import com.keel.kernel.hotreload.DevHotReloadStatus
@@ -12,10 +9,7 @@ import com.keel.kernel.hotreload.PluginDevelopmentSource
 import com.keel.kernel.hotreload.ReloadAttemptResult
 import com.keel.kernel.plugin.KeelPlugin
 import com.keel.kernel.plugin.PluginDescriptor
-import com.keel.kernel.plugin.PluginDispatchDisposition
-import com.keel.kernel.plugin.PluginEndpointDefinition
 import com.keel.kernel.plugin.PluginEndpointBuilders
-import com.keel.kernel.plugin.PluginGeneration
 import com.keel.kernel.plugin.PluginResult
 import com.keel.kernel.plugin.PluginRouteDefinition
 import com.keel.kernel.plugin.PluginRuntimeContext
@@ -54,43 +48,10 @@ class PluginLifecycleHotReloadAdapterTest {
         manager.startPlugin("plugin-a")
         val firstGeneration = manager.getGeneration("plugin-a")
 
-        adapter.handleConfigChange(ConfigChangeEvent(type = "MODIFIED", fileName = "plugin-a.json"))
+        adapter.handleConfigChange("plugin-a")
 
         assertEquals(firstGeneration.next(), manager.getGeneration("plugin-a"))
         assertEquals(2, plugin.startCount)
-    }
-
-    @Test
-    fun pluginArtifactEventsUseReplaceAndDisposeLifecyclePaths() = runTest {
-        val koin = startKoin {}.also { koinStarted = true }.koin
-        val manager = UnifiedPluginManager(koin)
-        val adapter = PluginLifecycleHotReloadAdapter(manager)
-        val plugin = LifecycleProbePlugin("plugin-a")
-
-        manager.registerPlugin(plugin)
-        manager.startPlugin("plugin-a")
-        val firstGeneration = manager.getGeneration("plugin-a")
-
-        adapter.handlePluginChange(
-            PluginChangeEvent(
-                type = PluginChangeType.MODIFIED,
-                pluginId = "plugin-a",
-                filePath = "/tmp/plugin-a.jar"
-            )
-        )
-
-        assertEquals(firstGeneration.next(), manager.getGeneration("plugin-a"))
-        assertEquals(2, plugin.startCount)
-
-        adapter.handlePluginChange(
-            PluginChangeEvent(
-                type = PluginChangeType.DELETED,
-                pluginId = "plugin-a",
-                filePath = "/tmp/plugin-a.jar"
-            )
-        )
-
-        assertEquals(PluginDispatchDisposition.NOT_FOUND, manager.resolveDispatchDisposition("plugin-a"))
     }
 
     @Test
@@ -105,7 +66,7 @@ class PluginLifecycleHotReloadAdapterTest {
         manager.startPlugin("plugin-a")
         val firstGeneration = manager.getGeneration("plugin-a")
 
-        adapter.handleConfigChange(ConfigChangeEvent(type = "MODIFIED", fileName = "plugin-a.json"))
+        adapter.handleConfigChange("plugin-a")
 
         assertEquals(firstGeneration.next(), manager.getGeneration("plugin-a"))
         assertFalse(fakeEngine.called)
@@ -130,7 +91,7 @@ class PluginLifecycleHotReloadAdapterTest {
         manager.startPlugin("plugin-a")
         val firstGeneration = manager.getGeneration("plugin-a")
 
-        adapter.handleConfigChange(ConfigChangeEvent(type = "MODIFIED", fileName = "plugin-a.json"))
+        adapter.handleConfigChange("plugin-a")
 
         assertEquals(firstGeneration, manager.getGeneration("plugin-a"))
         assertTrue(fakeEngine.called)

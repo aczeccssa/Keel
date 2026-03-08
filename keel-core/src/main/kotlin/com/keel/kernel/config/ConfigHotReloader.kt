@@ -28,19 +28,18 @@ import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
 /**
- * Development-time file watcher for config files, plugin artifacts, and module directories.
+ * Development-time file watcher for module directories.
  *
- * Hot-update guarantees are intentionally scoped:
- * - Config changes under `config/` and `config/plugins/` can reload plugin runtime config.
- * - Plugin artifact changes under `plugins/` can replace/dispose legacy jar-based plugins.
- * - Source/resource changes under watched module roots emit module change events so the kernel can
- *   decide whether a safe hot update is possible or a full restart is required.
+ * Watches module source directories so the kernel can decide whether a safe
+ * hot update is possible or a full restart is required.
+ *
+ * Legacy CONFIG and PLUGIN_ARTIFACT watching has been removed — the modern
+ * hot-reload architecture uses [PluginDevelopmentSource] and Gradle-based
+ * incremental builds instead of file-system polling for config/ and plugins/.
  */
 class ConfigHotReloader private constructor(
     private val watchDirectories: List<WatchDirectoryRegistration>,
     private val fileFilters: List<(String) -> Boolean>,
-    private val onConfigChange: (ConfigChangeEvent) -> Unit,
-    private val onPluginChange: (PluginChangeEvent) -> Unit,
     private val onModuleChange: (ModuleChangeEvent) -> Unit
 ) {
     private val logger = KeelLoggerService.getLogger("ConfigHotReloader")
@@ -52,12 +51,6 @@ class ConfigHotReloader private constructor(
     private val _lastReloadTime = MutableStateFlow(0L)
     val lastReloadTime: StateFlow<Long> = _lastReloadTime.asStateFlow()
 
-    private val _configChanges = MutableSharedFlow<ConfigChangeEvent>()
-    val configChanges: SharedFlow<ConfigChangeEvent> = _configChanges.asSharedFlow()
-
-    private val _pluginChanges = MutableSharedFlow<PluginChangeEvent>()
-    val pluginChanges: SharedFlow<PluginChangeEvent> = _pluginChanges.asSharedFlow()
-
     private val _moduleChanges = MutableSharedFlow<ModuleChangeEvent>()
     val moduleChanges: SharedFlow<ModuleChangeEvent> = _moduleChanges.asSharedFlow()
 
@@ -65,8 +58,6 @@ class ConfigHotReloader private constructor(
     private val watchJobs = mutableListOf<kotlinx.coroutines.Job>()
     private val watchedPaths = mutableMapOf<WatchKey, WatchedDirectory>()
 
-    private val configFiles = ConcurrentHashMap<String, Long>()
-    private val pluginFiles = ConcurrentHashMap<String, Long>()
     private val moduleFiles = ConcurrentHashMap<String, Long>()
 
     fun startWatching() {
@@ -107,18 +98,9 @@ class ConfigHotReloader private constructor(
         if (Files.exists(path)) {
             return true
         }
-        return when (registration.kind) {
-            WatchDirectoryKind.CONFIG,
-            WatchDirectoryKind.PLUGIN_ARTIFACT -> {
-                runCatching {
-                    Files.createDirectories(path)
-                }.onFailure { error ->
-                    logger.warn("Failed to create watch directory ${registration.root}: ${error.message}")
-                }.isSuccess
-            }
-            WatchDirectoryKind.MODULE,
-            WatchDirectoryKind.MANUAL -> false
-        }
+        // Do NOT auto-create directories — just skip if missing.
+        logger.debug("Watch directory does not exist, skipping: $path")
+        return false
     }
 
     fun stopWatching() {
@@ -135,37 +117,6 @@ class ConfigHotReloader private constructor(
         watchers.clear()
         watchedPaths.clear()
         logger.info("Stopped watching all directories")
-    }
-
-    fun reload() {
-        scope.launch {
-            try {
-                val event = ConfigChangeEvent(
-                    type = ConfigChangeType.RELOADED.name,
-                    fileName = "manual",
-                    filePath = "manual"
-                )
-                _lastReloadTime.value = Clock.System.now().toEpochMilliseconds()
-                onConfigChange(event)
-                _configChanges.emit(event)
-                logger.info("Configuration reloaded manually")
-            } catch (error: Exception) {
-                logger.error("Error reloading configuration: ${error.message}", error)
-            }
-        }
-    }
-
-    fun reloadPlugin(pluginId: String) {
-        scope.launch {
-            val event = PluginChangeEvent(
-                type = PluginChangeType.RELOADED,
-                pluginId = pluginId,
-                filePath = ""
-            )
-            _pluginChanges.emit(event)
-            onPluginChange(event)
-            logger.info("Plugin reload requested: $pluginId")
-        }
     }
 
     private fun startWatchingDirectory(registration: WatchDirectoryRegistration) {
@@ -214,31 +165,15 @@ class ConfigHotReloader private constructor(
                         processExistingDirectoryContents(fullPath, watchedDirectory.registration)
                     }
 
-                    when (watchedDirectory.registration.kind) {
-                        WatchDirectoryKind.CONFIG -> {
-                            if (shouldWatchFile(fileName)) {
-                                handleConfigChange(
-                                    fullPath = fullPath,
-                                    registration = watchedDirectory.registration
-                                )
-                            }
-                        }
-                        WatchDirectoryKind.PLUGIN_ARTIFACT -> {
-                            if (isPluginFile(fileName)) {
-                                handlePluginChange(
-                                    fullPath = fullPath,
-                                    registration = watchedDirectory.registration
-                                )
-                            }
-                        }
-                        WatchDirectoryKind.MODULE,
-                        WatchDirectoryKind.MANUAL -> {
-                            handleModuleChange(
-                                fullPath = fullPath,
-                                registration = watchedDirectory.registration
-                            )
-                        }
+                    if (!Files.isDirectory(fullPath) && !shouldWatchFile(fileName)) {
+                        return@forEach
                     }
+
+                    // Only MODULE and MANUAL kinds remain
+                    handleModuleChange(
+                        fullPath = fullPath,
+                        registration = watchedDirectory.registration
+                    )
                 }
                 key.reset()
             } catch (_: InterruptedException) {
@@ -267,98 +202,6 @@ class ConfigHotReloader private constructor(
         cont.invokeOnCancellation {
             watcher.close()
             job.cancel()
-        }
-    }
-
-    private fun shouldWatchFile(fileName: String): Boolean {
-        return fileFilters.isEmpty() || fileFilters.any { it(fileName) }
-    }
-
-    private fun isPluginFile(fileName: String): Boolean = fileName.endsWith(".jar")
-
-    private suspend fun handleConfigChange(
-        fullPath: Path,
-        registration: WatchDirectoryRegistration
-    ) {
-        delay(200)
-
-        val absolutePath = fullPath.toString()
-        val file = fullPath.toFile()
-        val fileName = file.name
-        if (!file.exists()) {
-            val event = ConfigChangeEvent(
-                type = ConfigChangeType.DELETED.name,
-                fileName = fileName,
-                filePath = absolutePath,
-                watchRoot = registration.root.toString()
-            )
-            _configChanges.emit(event)
-            onConfigChange(event)
-            configFiles.remove(absolutePath)
-            logger.info("Config file deleted: $absolutePath")
-            return
-        }
-
-        val lastModified = file.lastModified()
-        val previousModified = configFiles[absolutePath]
-        if (previousModified == null || lastModified != previousModified) {
-            configFiles[absolutePath] = lastModified
-            val changeType = if (previousModified == null) ConfigChangeType.CREATED else ConfigChangeType.MODIFIED
-            val event = ConfigChangeEvent(
-                type = changeType.name,
-                fileName = fileName,
-                filePath = absolutePath,
-                watchRoot = registration.root.toString()
-            )
-            _configChanges.emit(event)
-            onConfigChange(event)
-            _lastReloadTime.value = Clock.System.now().toEpochMilliseconds()
-            logger.info("Config file changed: $absolutePath (${changeType.name})")
-        }
-    }
-
-    private suspend fun handlePluginChange(
-        fullPath: Path,
-        registration: WatchDirectoryRegistration
-    ) {
-        val absolutePath = fullPath.toString()
-        val file = fullPath.toFile()
-        val fileName = file.name
-        val isDeleted = !file.exists()
-        val lastModified = if (!isDeleted) file.lastModified() else 0L
-        val previousModified = pluginFiles[absolutePath]
-
-        val changeType = when {
-            isDeleted -> {
-                if (previousModified != null) {
-                    pluginFiles.remove(absolutePath)
-                    PluginChangeType.DELETED
-                } else {
-                    null
-                }
-            }
-            previousModified == null -> {
-                pluginFiles[absolutePath] = lastModified
-                PluginChangeType.CREATED
-            }
-            lastModified != previousModified -> {
-                pluginFiles[absolutePath] = lastModified
-                PluginChangeType.MODIFIED
-            }
-            else -> null
-        }
-
-        if (changeType != null) {
-            val pluginId = fileName.removeSuffix(".jar")
-            val event = PluginChangeEvent(
-                type = changeType,
-                pluginId = pluginId,
-                filePath = absolutePath,
-                watchRoot = registration.root.toString()
-            )
-            _pluginChanges.emit(event)
-            onPluginChange(event)
-            logger.info("Plugin artifact changed: $absolutePath (${changeType.name})")
         }
     }
 
@@ -422,30 +265,18 @@ class ConfigHotReloader private constructor(
             Files.walk(root)
         }.use { paths ->
             paths.filter(Files::isRegularFile).forEach { file ->
-                when (registration.kind) {
-                    WatchDirectoryKind.CONFIG -> {
-                        if (shouldWatchFile(file.fileName.toString())) {
-                            scope.launch {
-                                handleConfigChange(file, registration)
-                            }
-                        }
-                    }
-                    WatchDirectoryKind.PLUGIN_ARTIFACT -> {
-                        if (isPluginFile(file.fileName.toString())) {
-                            scope.launch {
-                                handlePluginChange(file, registration)
-                            }
-                        }
-                    }
-                    WatchDirectoryKind.MODULE,
-                    WatchDirectoryKind.MANUAL -> {
-                        scope.launch {
-                            handleModuleChange(file, registration)
-                        }
-                    }
+                if (!shouldWatchFile(file.fileName.toString())) {
+                    return@forEach
+                }
+                scope.launch {
+                    handleModuleChange(file, registration)
                 }
             }
         }
+    }
+
+    private fun shouldWatchFile(fileName: String): Boolean {
+        return fileFilters.isEmpty() || fileFilters.any { it(fileName) }
     }
 
     companion object {
@@ -465,13 +296,7 @@ class ConfigHotReloader private constructor(
     class Builder {
         private val watchDirectories = linkedMapOf<String, WatchDirectoryRegistration>()
         private val fileFilters = mutableListOf<(String) -> Boolean>()
-        private var onConfigChange: (ConfigChangeEvent) -> Unit = {}
-        private var onPluginChange: (PluginChangeEvent) -> Unit = {}
         private var onModuleChange: (ModuleChangeEvent) -> Unit = {}
-
-        fun watchConfigDir(dir: String) = addWatchDirectory(dir, WatchDirectoryKind.CONFIG)
-
-        fun watchPluginDir(dir: String) = addWatchDirectory(dir, WatchDirectoryKind.PLUGIN_ARTIFACT)
 
         fun watchModuleDir(dir: String) = addWatchDirectory(dir, WatchDirectoryKind.MODULE)
 
@@ -489,18 +314,12 @@ class ConfigHotReloader private constructor(
 
         fun addFileFilter(filter: (String) -> Boolean) = apply { fileFilters += filter }
 
-        fun onConfigChange(callback: (ConfigChangeEvent) -> Unit) = apply { onConfigChange = callback }
-
-        fun onPluginChange(callback: (PluginChangeEvent) -> Unit) = apply { onPluginChange = callback }
-
         fun onModuleChange(callback: (ModuleChangeEvent) -> Unit) = apply { onModuleChange = callback }
 
         fun build(): ConfigHotReloader {
             return ConfigHotReloader(
                 watchDirectories = watchDirectories.values.toList(),
                 fileFilters = fileFilters.toList(),
-                onConfigChange = onConfigChange,
-                onPluginChange = onPluginChange,
                 onModuleChange = onModuleChange
             )
         }
@@ -528,27 +347,9 @@ internal data class WatchedDirectory(
 )
 
 internal enum class WatchDirectoryKind {
-    CONFIG,
-    PLUGIN_ARTIFACT,
     MODULE,
     MANUAL
 }
-
-data class ConfigChangeEvent(
-    val type: String,
-    val fileName: String,
-    val filePath: String = fileName,
-    val watchRoot: String? = null,
-    val timestamp: Long = Clock.System.now().toEpochMilliseconds()
-)
-
-data class PluginChangeEvent(
-    val type: PluginChangeType,
-    val pluginId: String,
-    val filePath: String,
-    val watchRoot: String? = null,
-    val timestamp: Long = Clock.System.now().toEpochMilliseconds()
-)
 
 data class ModuleChangeEvent(
     val type: ModuleChangeType,
@@ -558,20 +359,6 @@ data class ModuleChangeEvent(
     val relativePath: String,
     val timestamp: Long = Clock.System.now().toEpochMilliseconds()
 )
-
-enum class PluginChangeType {
-    CREATED,
-    MODIFIED,
-    DELETED,
-    RELOADED
-}
-
-enum class ConfigChangeType {
-    CREATED,
-    MODIFIED,
-    DELETED,
-    RELOADED
-}
 
 enum class ModuleChangeType {
     CREATED,

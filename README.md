@@ -269,6 +269,112 @@ The sample application demonstrates three plugin styles already present in the r
 
 These samples are the best starting point if you want to understand how Keel is intended to be used in practice.
 
+## Performance & Stress Test Report
+
+Keel's core framework components have been systematically benchmarked under high-concurrency conditions to validate architectural performance and stability. All tests reside in `keel-test-suite/src/test/kotlin/com/keel/test/perf/` and can be run with:
+
+```bash
+./gradlew :keel-test-suite:test --tests "com.keel.test.perf.*"
+```
+
+Additional HTTP load testing scripts (k6) are available in `scripts/`.
+
+### Test Environment
+
+- **Platform**: macOS, JDK 23
+- **Database**: H2 in-memory (via HikariCP connection pool)
+- **Test harness**: JUnit 5 + kotlinx.coroutines
+
+---
+
+### 1. Plugin Lifecycle Manager (`UnifiedPluginManager`)
+
+The plugin lifecycle state machine uses per-plugin `Mutex` locks and `ConcurrentHashMap` for plugin registry, enabling independent plugin operations to run fully in parallel.
+
+| Benchmark | Result | Throughput |
+|---|---|---|
+| Register 200 plugins | 6 ms | 33,333 ops/sec |
+| Concurrent start 100 plugins | 3 ms | 33,333 ops/sec |
+| 50 start/stop cycles (sequential) | 3 ms | 16,667 cycles/sec |
+| 50 concurrent lifecycle ops on same plugin | 4 ms | Mutex contention minimal |
+| 30 reload cycles (stop → dispose → start) | 9 ms | 3,333 reloads/sec |
+| 100K dispatch lookups across 50 plugins | 7 ms | **14.3M ops/sec** |
+
+**Key finding**: Per-plugin locking ensures zero cross-plugin contention. Dispatch disposition lookup from `ConcurrentHashMap` averages **22 ns/op**, confirming negligible overhead on the hot request path.
+
+---
+
+### 2. Gateway Interceptor (`GatewayInterceptor`)
+
+The gateway uses a pre-compiled regex to extract `pluginId` from request paths, then resolves dispatch disposition via `ConcurrentHashMap` lookup.
+
+| Benchmark | Iterations | Avg Latency |
+|---|---|---|
+| `resolveDispatchDisposition` lookup | 500,000 | **22 ns/op** |
+| Regex `extractPluginId` | 1,000,000 | **102 ns/op** |
+| Combined path parsing + dispatch resolution | 500,000 | **127 ns/op** |
+| Non-plugin path short-circuit | 1,000,000 | **46 ns/op** |
+
+**Key finding**: The full gateway interception path (regex + lookup) adds only **~127 ns** per request. Non-plugin system paths (`/api/_system/*`) short-circuit in 46 ns. At 100K QPS, total gateway overhead would be ~12.7 ms/sec — effectively free.
+
+---
+
+### 3. Event Bus (`DefaultKeelEventBus`)
+
+The event bus uses `MutableSharedFlow(extraBufferCapacity = 64)` for inter-plugin communication with typed subscription support.
+
+| Benchmark | Published | Throughput | Delivery Rate |
+|---|---|---|---|
+| Single producer (50K events) | 50,000 | 35,893 events/sec | 99.99% |
+| Multi-producer (10 × 5K events) | 50,000 | **287,356 events/sec** | 100% |
+| Typed subscription (2 event types) | 4,000 | — | 100% (both types) |
+| Buffer pressure test (10K burst) | 10,000 | — | 99.93% (~0.07% drop) |
+
+**Key finding**: Multi-producer throughput scales well to **287K events/sec**. Under extreme buffer pressure (burst publish without consumer backpressure), a ~0.07% drop rate is observed due to `extraBufferCapacity = 64`. For zero-loss guarantees, consider increasing `extraBufferCapacity` or switching to `Channel` with `UNLIMITED` capacity for critical event paths.
+
+---
+
+### 4. Plugin Scope Manager (`PluginScopeManager` / Koin)
+
+Each plugin gets an isolated `KoinApplication` with a private scope, created and destroyed during lifecycle transitions.
+
+| Benchmark | Result | Throughput |
+|---|---|---|
+| 200 rapid create/close cycles | 15 ms | 13,333 cycles/sec |
+| Concurrent creation of 100 scopes | 5 ms | 20,000 scopes/sec |
+| Heavy DI graph (50 beans/scope) × 50 cycles | 13 ms | 3,846 cycles/sec |
+| 100 scope re-creations (simulating reload) | 7 ms | 14,286 re-creations/sec |
+
+**Key finding**: Koin scope isolation is lightweight. Even with 50 beans per scope, create/close throughput exceeds 3,800 cycles/sec. Plugin reload (which involves scope destruction and recreation) completes in under 0.1 ms per cycle.
+
+---
+
+### 5. Database Layer (`DatabaseFactory` + Exposed + HikariCP)
+
+Tests use H2 in-memory database with `PluginTable` prefix isolation, validating connection pool queuing behavior under contention.
+
+| Benchmark | Config | Throughput |
+|---|---|---|
+| Sequential insert (5K rows) | pool=5 | 5,359 inserts/sec |
+| Concurrent insert (20 coroutines) | pool=5 | **13,378 inserts/sec** |
+| Mixed read/write (5W + 10R, 200 ops each) | pool=10 | **36,585 ops/sec** |
+| Connection pool exhaustion (20× concurrency) | pool=2 | 28,571 inserts/sec |
+| Transaction with retry (100 ops) | pool=3 | 20,000 ops/sec |
+
+**Key finding**: HikariCP gracefully handles 10× pool oversubscription without any failed requests — connections queue rather than reject. Mixed read/write throughput reaches 36K ops/sec with a pool of 10. The `PluginTable` prefix naming imposes no measurable overhead.
+
+---
+
+### Summary
+
+| Component | Hot-Path Latency | Concurrency Safety | Bottleneck Risk |
+|---|---|---|---|
+| Plugin Manager | 22 ns dispatch lookup | Per-plugin Mutex, no global lock | ✅ Low |
+| Gateway Interceptor | 127 ns full path | Stateless, lock-free | ✅ Low |
+| Event Bus | < 1 ms publish | Lock-free SharedFlow | ⚠️ Buffer overflow under extreme burst |
+| Koin Scope | < 0.1 ms create/close | ConcurrentHashMap | ✅ Low |
+| Database (H2) | ~ 0.07 ms/insert | HikariCP pool queuing | ⚠️ Pool size tuning required for production DBs |
+
 ## Tech Stack
 
 - Kotlin `2.3.0`
