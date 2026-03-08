@@ -1,6 +1,6 @@
 package com.keel.test.config
 
-import com.keel.kernel.config.buildKernel
+import com.keel.kernel.config.buildKeel
 import com.keel.kernel.plugin.KeelPlugin
 import com.keel.kernel.plugin.PluginDescriptor
 import com.keel.kernel.plugin.PluginRouteDefinition
@@ -20,7 +20,7 @@ class KernelBuilderPluginRegistrationTest {
 
     @Test
     fun pluginFlagsControlEnabledAndHotReloadSourceRegistration() {
-        val kernel = buildKernel {
+        val kernel = buildKeel {
             plugin(HotReloadOnPlugin(), enabled = true, hotReloadEnabled = true)
             plugin(HotReloadOffPlugin(), enabled = false, hotReloadEnabled = false)
             enablePluginHotReload(false)
@@ -40,7 +40,7 @@ class KernelBuilderPluginRegistrationTest {
         val dir1 = Files.createTempDirectory("keel-watch-1").toFile().absolutePath
         val dir2 = Files.createTempDirectory("keel-watch-2").toFile().absolutePath
 
-        val kernel = buildKernel {
+        val kernel = buildKeel {
             watchDirectories(dir1, dir2)
             enablePluginHotReload(false)
         }

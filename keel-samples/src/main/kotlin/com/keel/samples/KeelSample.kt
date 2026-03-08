@@ -1,6 +1,7 @@
 package com.keel.samples
 
-import com.keel.kernel.config.runKernel
+import com.keel.kernel.config.KeelEngine
+import com.keel.kernel.config.runKeel
 import com.keel.samples.dbdemo.DbDemoPlugin
 import com.keel.samples.helloworld.HelloWorldPlugin
 import com.keel.samples.observability.ObservabilityPlugin
@@ -27,7 +28,7 @@ import io.ktor.server.http.content.*
  * Hot reload behavior:
  * - Dev mode enables hot reload globally by default.
  * - Each plugin can opt in/out with plugin(..., hotReloadEnabled = true|false).
- * - Call runKernel { enablePluginHotReload(false) } to disable dev hot reload entirely.
+ * - Call runKeel { enablePluginHotReload(false) } to disable dev hot reload entirely.
  *
  * Run this app and visit:
  * - http://localhost:8080/api/plugins/helloworld
@@ -42,7 +43,7 @@ import io.ktor.server.http.content.*
  * Or set environment variable:
  *   KEEL_ENV=development java -jar keel-samples.jar
  */
-fun main() = runKernel {
+fun main() = runKeel {
     // Mount Plugins
     plugin(HelloWorldPlugin())
     plugin(DbDemoPlugin())

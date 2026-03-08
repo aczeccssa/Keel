@@ -1,6 +1,6 @@
 package com.keel.test.config
 
-import com.keel.kernel.config.buildKernel
+import com.keel.kernel.config.buildKeel
 import com.keel.kernel.plugin.KeelPlugin
 import com.keel.kernel.plugin.PluginDescriptor
 import com.keel.kernel.plugin.PluginRouteDefinition
@@ -17,7 +17,7 @@ class KernelBuilderPluginSourceTest {
 
     @Test
     fun pluginRegistrationInfersSourceMetadata() {
-        val kernel = buildKernel {
+        val kernel = buildKeel {
             plugin(SourceOnlyPlugin(), hotReloadEnabled = true)
             enablePluginHotReload(true)
         }
