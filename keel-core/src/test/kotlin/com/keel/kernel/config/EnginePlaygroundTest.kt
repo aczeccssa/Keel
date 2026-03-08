@@ -6,64 +6,29 @@ import kotlin.concurrent.thread
 import kotlin.system.exitProcess
 
 fun main() {
-    println("Testing Keel with Netty Engine")
-    thread {
-        runKeel(port = 8081) {
-            server {
-                engine = KeelEngine.Netty
-            }
-            routing {
-                get("/") {
-                    call.respondText("Hello Netty from Keel!")
-                }
-            }
-        }
-    }
-
-    println("Testing Keel with CIO Engine")
-    thread {
-        runKeel(port = 8082) {
-            server {
-                engine = KeelEngine.CIO
-            }
-            routing {
-                get("/") {
-                    call.respondText("Hello CIO from Keel!")
-                }
-            }
-        }
-    }
-
-    println("Testing Keel with Tomcat Engine")
-    thread {
-        runKeel(port = 8083) {
-            server {
-                engine = KeelEngine.Tomcat
-            }
-            routing {
-                get("/") {
-                    call.respondText("Hello Tomcat from Keel!")
-                }
-            }
-        }
-    }
-
-    println("Testing Keel with Jetty Engine")
-    thread {
-        runKeel(port = 8084) {
-            server {
-                engine = KeelEngine.Jetty
-            }
-            routing {
-                get("/") {
-                    call.respondText("Hello Jetty from Keel!")
-                }
-            }
-        }
-    }
+    testEngine("Netty", KeelEngine.Netty, 8081)
+    testEngine("CIO", KeelEngine.CIO, 8082)
+    testEngine("Tomcat", KeelEngine.Tomcat, 8083)
+    testEngine("Jetty", KeelEngine.Jetty, 8084)
 
     println("All Keel kernels starting on ports 8081-8084! Press enter to exit.")
     readlnOrNull()
 
     exitProcess(0)
+}
+
+private fun testEngine(name: String, engine: KeelEngine, port: Int) {
+    println("Testing Keel with $name Engine")
+    thread {
+        runKeel(port = port) {
+            server {
+                this.engine = engine
+            }
+            routing {
+                get("/") {
+                    call.respondText("Hello $name from Keel!")
+                }
+            }
+        }
+    }
 }

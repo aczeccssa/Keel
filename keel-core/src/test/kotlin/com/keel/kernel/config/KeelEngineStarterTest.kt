@@ -116,9 +116,13 @@ class KeelEngineStarterTest {
     }
 
     private fun configuredWatchPaths(server: Any): List<String> {
-        val field = server.javaClass.getDeclaredField("configuredWatchPath")
-        field.isAccessible = true
+        val rootConfigField = server.javaClass.getDeclaredField("rootConfig")
+        rootConfigField.isAccessible = true
+        val rootConfig = rootConfigField.get(server)
+
+        val watchPathsField = rootConfig.javaClass.getDeclaredField("watchPaths")
+        watchPathsField.isAccessible = true
         @Suppress("UNCHECKED_CAST")
-        return field.get(server) as List<String>
+        return watchPathsField.get(rootConfig) as List<String>
     }
 }

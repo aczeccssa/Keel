@@ -104,8 +104,8 @@ class Kernel(
     fun run(port: Int? = null) {
         if (port != null) {
             serverConfig.port = port
-        } else if (ConfigHotReloader.getServerPort() != 8080) {
-            // Respect hot reload config port if present and no port was passed explicitly
+        } else if (serverConfig.port == 8080 && ConfigHotReloader.getServerPort() != 8080) {
+            // Respect hot reload config port only when neither run() nor server {} set a port.
             serverConfig.port = ConfigHotReloader.getServerPort()
         }
         serverPort = serverConfig.port
