@@ -31,6 +31,7 @@ subprojects {
     group = "com.keel"
 
     repositories {
+        maven(url = rootProject.rootDir.resolve("third_party/maven"))
         google()
         mavenCentral()
         gradlePluginPortal()

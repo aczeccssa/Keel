@@ -7,6 +7,7 @@ pluginManagement {
 
 dependencyResolutionManagement {
     repositories {
+        maven(url = rootDir.resolve("third_party/maven"))
         gradlePluginPortal()
         mavenCentral()
         google()

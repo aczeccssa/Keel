@@ -163,7 +163,7 @@ Default directories:
 Hot reload behavior:
 
 - Development mode enables config watching by default.
-- Plugin directory watching can be toggled through `runKernel { enablePluginHotReload(true | false) }`.
+- Plugin directory watching can be toggled through `runKeel { enablePluginHotReload(true | false) }`.
 
 ### Dev HotReload Trigger Rules
 
@@ -224,7 +224,7 @@ Register the plugin in the kernel:
 
 ```kotlin
 fun main() {
-    runKernel(port = 8080) {
+    runKeel(port = 8080) {
         plugin(
             plugin = MyPlugin(),
             enabled = true,

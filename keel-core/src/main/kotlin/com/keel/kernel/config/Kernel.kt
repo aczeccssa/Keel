@@ -31,9 +31,7 @@ import io.ktor.server.application.ApplicationStarted
 import io.ktor.server.application.ApplicationStopping
 import io.ktor.server.application.call
 import io.ktor.server.application.install
-import io.ktor.server.engine.embeddedServer
 import io.ktor.server.http.content.staticResources
-import io.ktor.server.netty.Netty
 import io.ktor.server.request.httpMethod
 import io.ktor.server.request.path
 import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
@@ -58,7 +56,8 @@ class Kernel(
     private val enablePluginHotReload: Boolean = ConfigHotReloader.isDevelopmentMode(),
     private val moduleWatchDirectories: List<String> = emptyList(),
     private val pluginDevelopmentSources: List<PluginDevelopmentSource> = emptyList(),
-    private val customRouting: (Route.() -> Unit)? = null
+    private val customRouting: (Route.() -> Unit)? = null,
+    private val serverConfig: KeelServerConfig = KeelServerConfig()
 ) {
     private val logger = KeelLoggerService.getLogger("Kernel")
     private val repoRoot: File = locateRepoRoot(File(System.getProperty("user.dir")).absoluteFile.normalize())
@@ -79,7 +78,7 @@ class Kernel(
         if (enablePluginHotReload) devHotReloadEngine else null
     )
     private val gatewayInterceptor = GatewayInterceptor(pluginManager)
-    private var serverPort: Int = ConfigHotReloader.getServerPort()
+    private var serverPort: Int = serverConfig.port
 
     private var hotReloaderInitialized = false
     private val configHotReloader: ConfigHotReloader by lazy {
@@ -102,14 +101,21 @@ class Kernel(
         return this
     }
 
-    fun run(port: Int = 8080) {
-        serverPort = port
+    fun run(port: Int? = null) {
+        if (port != null) {
+            serverConfig.port = port
+        } else if (serverConfig.port == 8080 && ConfigHotReloader.getServerPort() != 8080) {
+            // Respect hot reload config port only when neither run() nor server {} set a port.
+            serverConfig.port = ConfigHotReloader.getServerPort()
+        }
+        serverPort = serverConfig.port
         if (ConfigHotReloader.isDevelopmentMode()) {
             System.setProperty("io.ktor.development", "true")
         } else {
             System.setProperty("io.ktor.development", "false")
         }
-        embeddedServer(Netty, port = port, watchPaths = emptyList()) {
+        
+        val engine = KeelEngineStarter.start(serverConfig) {
             install(ContentNegotiation) {
                 json(Json {
                     prettyPrint = true
@@ -149,7 +155,8 @@ class Kernel(
                 staticResources("/", "static")
                 customRouting?.invoke(this)
             }
-        }.start(wait = true)
+        }
+        engine.start(wait = true)
     }
 
     fun configureApplication(app: Application) {
@@ -255,9 +262,14 @@ class KernelBuilder {
     private val watchDirectories = linkedSetOf<String>()
     private var watchDirectoriesExplicitlySet: Boolean = false
     private var customRouting: (Route.() -> Unit)? = null
+    private var serverConfigBlock: (KeelServerConfig.() -> Unit)? = null
 
     fun koin(config: KoinApplication.() -> Unit) {
         koinConfig = config
+    }
+
+    fun server(block: KeelServerConfig.() -> Unit) {
+        serverConfigBlock = block
     }
 
     fun plugin(
@@ -344,12 +356,17 @@ class KernelBuilder {
                 }
             }
 
+        val serverConfig = KeelServerConfig().apply {
+            serverConfigBlock?.invoke(this)
+        }
+
         val kernel = Kernel(
             koin = koin,
             enablePluginHotReload = enablePluginHotReload,
             moduleWatchDirectories = effectiveWatchDirectories,
             pluginDevelopmentSources = pluginSourceById.values.toList(),
-            customRouting = customRouting
+            customRouting = customRouting,
+            serverConfig = serverConfig
         )
         val registeredPluginIds = linkedSetOf<String>()
         plugins.forEach { registration ->
@@ -380,9 +397,20 @@ class KernelBuilder {
     }
 }
 
-fun buildKernel(block: KernelBuilder.() -> Unit) = KernelBuilder().apply(block).build()
+fun buildKeel(block: KernelBuilder.() -> Unit) = KernelBuilder().apply(block).build()
 
-fun runKernel(port: Int = 8080, block: KernelBuilder.() -> Unit) = buildKernel(block).run(port)
+fun runKeel(block: KernelBuilder.() -> Unit) = buildKeel(block).run()
+
+fun runKeel(port: Int, block: KernelBuilder.() -> Unit) = buildKeel(block).run(port)
+
+@Deprecated("Use buildKeel instead", ReplaceWith("buildKeel(block)"))
+fun buildKernel(block: KernelBuilder.() -> Unit) = buildKeel(block)
+
+@Deprecated("Use runKeel instead", ReplaceWith("runKeel(block)"))
+fun runKernel(block: KernelBuilder.() -> Unit) = runKeel(block)
+
+@Deprecated("Use runKeel instead", ReplaceWith("runKeel(port, block)"))
+fun runKernel(port: Int = 8080, block: KernelBuilder.() -> Unit) = runKeel(port, block)
 
 private fun locateRepoRoot(start: File): File {
     return generateSequence(start) { it.parentFile }

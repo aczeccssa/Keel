@@ -19,6 +19,12 @@ dependencies {
     // Ktor
     implementation(libs.ktor.server.core)
     implementation(libs.ktor.server.netty)
+    compileOnly(libs.ktor.server.cio)
+    compileOnly(libs.ktor.server.tomcat)
+    compileOnly(libs.ktor.server.jetty)
+    testImplementation(libs.ktor.server.cio)
+    testImplementation(libs.ktor.server.tomcat)
+    testImplementation(libs.ktor.server.jetty)
     implementation(libs.ktor.server.content.negotiation)
     implementation(libs.ktor.serialization.kotlinx.json)
     implementation(libs.ktor.server.cors)
@@ -67,6 +73,7 @@ dependencies {
     implementation(project(":keel-openapi-annotations"))
     implementation(project(":keel-openapi-runtime"))
     implementation(kotlin("reflect"))
+    testImplementation(kotlin("test"))
 
     ksp(project(":keel-openapi-processor"))
 }

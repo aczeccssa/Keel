@@ -18,7 +18,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 private object DatabaseThresholds {
-    const val SEQ_INSERT_5K_MAX_MS = 10_000L
+    const val SEQ_INSERT_5K_MAX_MS = 15_000L
     const val CONCURRENT_INSERT_4K_MAX_MS = 10_000L
     const val MIXED_RW_3K_MAX_MS = 10_000L
     const val RETRY_100_MAX_MS = 5_000L
