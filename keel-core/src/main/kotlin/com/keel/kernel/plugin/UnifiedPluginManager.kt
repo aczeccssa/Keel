@@ -75,7 +75,11 @@ class UnifiedPluginManager(
     private val kernelInstanceId = Uuid.random().toString()
     private val kernelRuntimeDir = runtimeRoot.toPath().resolve(kernelInstanceId.take(8)).createDirectories().toFile()
 
-    fun registerPlugin(plugin: KeelPlugin, enabledOverride: Boolean? = null) {
+    fun registerPlugin(
+        plugin: KeelPlugin,
+        enabledOverride: Boolean? = null,
+        serviceRouteInstallers: List<Route.() -> Unit> = emptyList()
+    ) {
         val descriptor = plugin.descriptor
         val config = descriptor.toConfig(enabled = enabledOverride ?: true)
         val routeDefinitions = plugin.endpoints()
@@ -93,7 +97,8 @@ class UnifiedPluginManager(
             lifecycleState = PluginLifecycleState.REGISTERED,
             healthState = PluginHealthState.UNKNOWN,
             generation = PluginGeneration.INITIAL,
-            processState = if (config.runtimeMode == PluginRuntimeMode.EXTERNAL_JVM) PluginProcessState.STOPPED else null
+            processState = if (config.runtimeMode == PluginRuntimeMode.EXTERNAL_JVM) PluginProcessState.STOPPED else null,
+            serviceRouteInstallers = serviceRouteInstallers
         )
         logger.info("Registered unified plugin ${descriptor.pluginId} mode=${config.runtimeMode}")
     }
@@ -697,6 +702,9 @@ class UnifiedPluginManager(
             error("OpenAPI declared operations for pluginId=$pluginId are not backed by KeelPlugin.endpoints(): ${missing.sorted().joinToString()}")
         }
         routing.route("/api/plugins/$pluginId") {
+            entry.serviceRouteInstallers.forEach { installer ->
+                installer(this)
+            }
             for (endpoint in endpoints) {
                 registerPluginOperation(pluginId, endpoint)
                 val fullPath = endpoint.path.ifBlank { "" }
@@ -1093,7 +1101,8 @@ class UnifiedPluginManager(
         var privateScopeHandle: PluginPrivateScopeHandle? = null,
         var lastFailure: PluginFailureRecord? = null,
         var runtimeContext: BasicPluginRuntimeContext? = null,
-        var sourceClassLoader: URLClassLoader? = null
+        var sourceClassLoader: URLClassLoader? = null,
+        val serviceRouteInstallers: List<Route.() -> Unit> = emptyList()
     )
 
     private data class BasicPluginInitContext(

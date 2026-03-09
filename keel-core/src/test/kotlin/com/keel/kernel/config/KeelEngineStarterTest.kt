@@ -72,9 +72,9 @@ class KeelEngineStarterTest {
 
     @Test
     fun legacyKernelEntryPointsRemainAvailable() {
-        val legacyBuilder = ::buildKernel
-        val legacyRunner: (Int, KernelBuilder.() -> Unit) -> Unit = ::runKernel
-        val legacyNoArgRunner: (KernelBuilder.() -> Unit) -> Unit = ::runKernel
+        val legacyBuilder = ::buildKeel
+        val legacyRunner: (Int, KernelBuilder.() -> Unit) -> Unit = ::runKeel
+        val legacyNoArgRunner: (KernelBuilder.() -> Unit) -> Unit = ::runKeel
 
         assertNotNull(legacyBuilder)
         assertNotNull(legacyRunner)

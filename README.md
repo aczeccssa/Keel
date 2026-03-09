@@ -165,6 +165,63 @@ Hot reload behavior:
 - Development mode enables config watching by default.
 - Plugin directory watching can be toggled through `runKeel { enablePluginHotReload(true | false) }`.
 
+### Ktor Plugin Configuration Scopes
+
+Keel supports two explicit Ktor plugin configuration scopes:
+
+1. Global scope (`server { globalKtorPlugin { ... } }`)
+2. Service scope (`plugin(...) { ... }`) for a single `/api/plugins/{pluginId}` route tree
+
+Both scopes are intentionally **install-only**.
+
+- Global scope only allows installing application-level plugins.
+- Service scope only allows installing route-scoped plugins.
+- Direct arbitrary `Application`/`Route` mutation is not exposed in these blocks.
+
+Global scope example:
+
+```kotlin
+import io.ktor.server.application.createApplicationPlugin
+
+val RequestIdHeader = createApplicationPlugin("request-id-header") {
+    onCall { call ->
+        call.response.headers.append("X-Global-Scope", "enabled")
+    }
+}
+
+runKeel {
+    server {
+        globalKtorPlugin {
+            install(RequestIdHeader)
+        }
+    }
+}
+```
+
+Service scope example (only affects the configured plugin route tree):
+
+```kotlin
+import io.ktor.server.application.createRouteScopedPlugin
+
+val ServiceOnlyHeader = createRouteScopedPlugin("service-only-header") {
+    onCall { call ->
+        call.response.headers.append("X-Service-Scope", "enabled")
+    }
+}
+
+runKeel {
+    plugin(MyPlugin()) {
+        install(ServiceOnlyHeader)
+    }
+}
+```
+
+Scope boundary summary:
+
+- Global scope applies to both `/api/plugins/**` and `/api/_system/**`.
+- Service scope applies only to the configured plugin's route subtree.
+- Service scope does not affect other plugins or system routes.
+
 ### Dev HotReload Trigger Rules
 
 Dev HotReload is source-oriented and only applies to plugins registered with `hotReloadEnabled = true`.
@@ -230,6 +287,26 @@ fun main() {
             enabled = true,
             hotReloadEnabled = true
         )
+    }
+}
+```
+
+Register with service-scope Ktor plugin install:
+
+```kotlin
+import io.ktor.server.application.createRouteScopedPlugin
+
+val ServiceMetricTag = createRouteScopedPlugin("service-metric-tag") {
+    onCall { call ->
+        call.response.headers.append("X-Service", "myplugin")
+    }
+}
+
+fun main() {
+    runKeel {
+        plugin(MyPlugin()) {
+            install(ServiceMetricTag)
+        }
     }
 }
 ```
