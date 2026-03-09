@@ -71,14 +71,14 @@ class KeelEngineStarterTest {
     }
 
     @Test
-    fun legacyKernelEntryPointsRemainAvailable() {
-        val legacyBuilder = ::buildKeel
-        val legacyRunner: (Int, KernelBuilder.() -> Unit) -> Unit = ::runKeel
-        val legacyNoArgRunner: (KernelBuilder.() -> Unit) -> Unit = ::runKeel
+    fun keelBuilderAndRunnerEntryPointsAreAvailable() {
+        val builder = ::buildKeel
+        val runnerWithPort: (Int, KernelBuilder.() -> Unit) -> Unit = ::runKeel
+        val runnerWithoutPort: (KernelBuilder.() -> Unit) -> Unit = ::runKeel
 
-        assertNotNull(legacyBuilder)
-        assertNotNull(legacyRunner)
-        assertNotNull(legacyNoArgRunner)
+        assertNotNull(builder)
+        assertNotNull(runnerWithPort)
+        assertNotNull(runnerWithoutPort)
     }
 
     @Test

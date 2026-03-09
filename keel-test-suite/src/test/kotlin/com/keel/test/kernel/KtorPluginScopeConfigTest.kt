@@ -28,19 +28,16 @@ import kotlin.test.assertEquals
 import kotlin.test.assertNull
 
 class KtorPluginScopeConfigTest {
-    private var koinStarted = false
-
     @AfterTest
     fun teardown() {
-        if (koinStarted) {
+        runCatching {
             stopKoin()
-            koinStarted = false
         }
     }
 
     @Test
     fun globalKtorPluginAppliesToPluginAndSystemRoutes() = testApplication {
-        val koin = startKoin {}.also { koinStarted = true }.koin
+        val koin = startKoin {}.koin
         val manager = UnifiedPluginManager(koin)
         manager.registerPlugin(PingPlugin("plug-global"))
 
@@ -73,7 +70,7 @@ class KtorPluginScopeConfigTest {
 
     @Test
     fun serviceScopedKtorPluginOnlyAppliesToConfiguredPluginRouteTree() = testApplication {
-        val koin = startKoin {}.also { koinStarted = true }.koin
+        val koin = startKoin {}.koin
         val manager = UnifiedPluginManager(koin)
         manager.registerPlugin(
             plugin = PingPlugin("plug-a"),
@@ -109,7 +106,7 @@ class KtorPluginScopeConfigTest {
 
     @Test
     fun scopeResponsibilitiesAreSeparatedBetweenGlobalAndServiceScopes() = testApplication {
-        val koin = startKoin {}.also { koinStarted = true }.koin
+        val koin = startKoin {}.koin
         val manager = UnifiedPluginManager(koin)
         manager.registerPlugin(
             plugin = PingPlugin("plug-a"),
