@@ -31,6 +31,7 @@ import io.ktor.server.application.ApplicationStarted
 import io.ktor.server.application.ApplicationStopping
 import io.ktor.server.application.call
 import io.ktor.server.application.install
+import io.ktor.server.application.BaseRouteScopedPlugin
 import io.ktor.server.http.content.staticResources
 import io.ktor.server.request.httpMethod
 import io.ktor.server.request.path
@@ -96,8 +97,12 @@ class Kernel(
             .build()
     }
 
-    fun registerPlugin(plugin: KeelPlugin, enabledOverride: Boolean? = null): Kernel {
-        pluginManager.registerPlugin(plugin, enabledOverride)
+    fun registerPlugin(
+        plugin: KeelPlugin,
+        enabledOverride: Boolean? = null,
+        serviceRouteInstallers: List<Route.() -> Unit> = emptyList()
+    ): Kernel {
+        pluginManager.registerPlugin(plugin, enabledOverride, serviceRouteInstallers)
         return this
     }
 
@@ -132,6 +137,7 @@ class Kernel(
                     level = SoulLogger.Level.INFO
                 }
             }
+            serverConfig.installConfiguredGlobalKtorPlugins(this)
 
             val loggerService = KeelLoggerService.initialize()
             if (ConfigHotReloader.isDevelopmentMode()) {
@@ -247,11 +253,29 @@ class Kernel(
     fun pluginDevelopmentSourceIds(): Set<String> = pluginDevelopmentSources.map { it.pluginId }.toSet()
 }
 
+class ServicePluginConfig {
+    private val inScopeKtorPluginInstallers = mutableListOf<Route.() -> Unit>()
+
+    fun <B : Any, F : Any> install(
+        plugin: BaseRouteScopedPlugin<B, F>,
+        configure: B.() -> Unit = {}
+    ) {
+        inScopeKtorPluginInstallers += {
+            install(plugin, configure)
+        }
+    }
+
+    internal fun configuredInScopeKtorPlugins(): List<Route.() -> Unit> {
+        return inScopeKtorPluginInstallers.toList()
+    }
+}
+
 class KernelBuilder {
     private data class PluginRegistration(
         val plugin: KeelPlugin,
         val enabled: Boolean,
-        val hotReloadEnabled: Boolean
+        val hotReloadEnabled: Boolean,
+        val serviceRouteInstallers: List<Route.() -> Unit>
     )
 
     private val logger = KeelLoggerService.getLogger("KernelBuilder")
@@ -275,12 +299,15 @@ class KernelBuilder {
     fun plugin(
         plugin: KeelPlugin,
         enabled: Boolean = true,
-        hotReloadEnabled: Boolean = ConfigHotReloader.isDevelopmentMode()
+        hotReloadEnabled: Boolean = ConfigHotReloader.isDevelopmentMode(),
+        configure: ServicePluginConfig.() -> Unit = {}
     ) {
+        val serviceConfig = ServicePluginConfig().apply(configure)
         plugins += PluginRegistration(
             plugin = plugin,
             enabled = enabled,
-            hotReloadEnabled = hotReloadEnabled
+            hotReloadEnabled = hotReloadEnabled,
+            serviceRouteInstallers = serviceConfig.configuredInScopeKtorPlugins()
         )
     }
 
@@ -372,7 +399,11 @@ class KernelBuilder {
         plugins.forEach { registration ->
             val plugin = registration.plugin
             registeredPluginIds += plugin.descriptor.pluginId
-            kernel.registerPlugin(plugin, enabledOverride = registration.enabled)
+            kernel.registerPlugin(
+                plugin = plugin,
+                enabledOverride = registration.enabled,
+                serviceRouteInstallers = registration.serviceRouteInstallers
+            )
         }
         pluginSourceById.values.forEach { source ->
             if (!registeredPluginIds.add(source.pluginId)) {
@@ -402,15 +433,6 @@ fun buildKeel(block: KernelBuilder.() -> Unit) = KernelBuilder().apply(block).bu
 fun runKeel(block: KernelBuilder.() -> Unit) = buildKeel(block).run()
 
 fun runKeel(port: Int, block: KernelBuilder.() -> Unit) = buildKeel(block).run(port)
-
-@Deprecated("Use buildKeel instead", ReplaceWith("buildKeel(block)"))
-fun buildKernel(block: KernelBuilder.() -> Unit) = buildKeel(block)
-
-@Deprecated("Use runKeel instead", ReplaceWith("runKeel(block)"))
-fun runKernel(block: KernelBuilder.() -> Unit) = runKeel(block)
-
-@Deprecated("Use runKeel instead", ReplaceWith("runKeel(port, block)"))
-fun runKernel(port: Int = 8080, block: KernelBuilder.() -> Unit) = runKeel(port, block)
 
 private fun locateRepoRoot(start: File): File {
     return generateSequence(start) { it.parentFile }
