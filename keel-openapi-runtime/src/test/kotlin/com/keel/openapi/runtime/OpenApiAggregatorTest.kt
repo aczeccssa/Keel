@@ -44,6 +44,10 @@ class OpenApiAggregatorTest {
         val getOperation = spec["paths"]!!.jsonObject["/api/_system/plugins/{pluginId}"]!!.jsonObject["get"]!!.jsonObject
         val parameters = getOperation["parameters"]!!.jsonArray
         assertEquals("pluginId", parameters.first().jsonObject["name"]?.jsonPrimitive?.content)
+        assertEquals(
+            listOf("system", "plugins"),
+            getOperation["tags"]!!.jsonArray.map { it.jsonPrimitive.content }
+        )
 
         val tags = spec["tags"]!!.jsonArray.map { it.jsonObject["name"]!!.jsonPrimitive.content }.toSet()
         assertTrue("system" in tags)
@@ -128,6 +132,29 @@ class OpenApiAggregatorTest {
         assertEquals("", operation["summary"]?.jsonPrimitive?.content)
         val schemas = spec["components"]!!.jsonObject["schemas"]!!.jsonObject
         assertTrue("TestPayload" in schemas)
+    }
+
+    @Test
+    fun `system hotreload route falls back to system and domain tags`() {
+        OpenApiRegistry.register(
+            OpenApiOperation(
+                method = HttpMethod.Get,
+                path = "/api/_system/hotreload/status",
+                responseBodyType = typeOf<TestPayload>(),
+                typeBound = true
+            )
+        )
+
+        val spec = json.parseToJsonElement(OpenApiAggregator.buildSpec()).jsonObject
+        val operation = spec["paths"]!!
+            .jsonObject["/api/_system/hotreload/status"]!!
+            .jsonObject["get"]!!
+            .jsonObject
+
+        assertEquals(
+            listOf("system", "hotreload"),
+            operation["tags"]!!.jsonArray.map { it.jsonPrimitive.content }
+        )
     }
 
     @Test

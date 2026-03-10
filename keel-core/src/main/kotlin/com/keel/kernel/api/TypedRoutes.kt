@@ -159,7 +159,12 @@ inline fun <reified Res : Any> Route.typedDelete(
 
 @Deprecated(
     message = "Use typedGet with doc = OpenApiDoc(...).",
-    replaceWith = ReplaceWith("typedGet<Res>(path = path, doc = OpenApiDoc(summary, description, tags, successStatus, errorStatuses, responseEnvelope), body = body)")
+    replaceWith = ReplaceWith(
+        expression = "typedGet<Res>(path = path, doc = OpenApiDoc(" +
+            "summary = summary, description = description, tags = tags, " +
+            "successStatus = successStatus, errorStatuses = errorStatuses, responseEnvelope = responseEnvelope" +
+            "), body = body)"
+    )
 )
 inline fun <reified Res : Any> Route.documentedGet(
     path: String = "",
@@ -190,7 +195,12 @@ inline fun <reified Res : Any> Route.documentedGet(
 
 @Deprecated(
     message = "Use typedPost with doc = OpenApiDoc(...).",
-    replaceWith = ReplaceWith("typedPost<Res>(path = path, doc = OpenApiDoc(summary, description, tags, successStatus, errorStatuses, responseEnvelope), body = body)")
+    replaceWith = ReplaceWith(
+        expression = "typedPost<Res>(path = path, doc = OpenApiDoc(" +
+            "summary = summary, description = description, tags = tags, " +
+            "successStatus = successStatus, errorStatuses = errorStatuses, responseEnvelope = responseEnvelope" +
+            "), body = body)"
+    )
 )
 @JvmName("documentedPostWithoutRequest")
 inline fun <reified Res : Any> Route.documentedPost(
@@ -222,7 +232,12 @@ inline fun <reified Res : Any> Route.documentedPost(
 
 @Deprecated(
     message = "Use typedPost with doc = OpenApiDoc(...).",
-    replaceWith = ReplaceWith("typedPost<Req, Res>(path = path, doc = OpenApiDoc(summary, description, tags, successStatus, errorStatuses, responseEnvelope), body = body)")
+    replaceWith = ReplaceWith(
+        expression = "typedPost<Req, Res>(path = path, doc = OpenApiDoc(" +
+            "summary = summary, description = description, tags = tags, " +
+            "successStatus = successStatus, errorStatuses = errorStatuses, responseEnvelope = responseEnvelope" +
+            "), body = body)"
+    )
 )
 inline fun <reified Req : Any, reified Res : Any> Route.documentedPost(
     path: String = "",
@@ -253,7 +268,12 @@ inline fun <reified Req : Any, reified Res : Any> Route.documentedPost(
 
 @Deprecated(
     message = "Use typedPut with doc = OpenApiDoc(...).",
-    replaceWith = ReplaceWith("typedPut<Req, Res>(path = path, doc = OpenApiDoc(summary, description, tags, successStatus, errorStatuses, responseEnvelope), body = body)")
+    replaceWith = ReplaceWith(
+        expression = "typedPut<Req, Res>(path = path, doc = OpenApiDoc(" +
+            "summary = summary, description = description, tags = tags, " +
+            "successStatus = successStatus, errorStatuses = errorStatuses, responseEnvelope = responseEnvelope" +
+            "), body = body)"
+    )
 )
 inline fun <reified Req : Any, reified Res : Any> Route.documentedPut(
     path: String = "",
@@ -284,7 +304,12 @@ inline fun <reified Req : Any, reified Res : Any> Route.documentedPut(
 
 @Deprecated(
     message = "Use typedDelete with doc = OpenApiDoc(...).",
-    replaceWith = ReplaceWith("typedDelete<Res>(path = path, doc = OpenApiDoc(summary, description, tags, successStatus, errorStatuses, responseEnvelope), body = body)")
+    replaceWith = ReplaceWith(
+        expression = "typedDelete<Res>(path = path, doc = OpenApiDoc(" +
+            "summary = summary, description = description, tags = tags, " +
+            "successStatus = successStatus, errorStatuses = errorStatuses, responseEnvelope = responseEnvelope" +
+            "), body = body)"
+    )
 )
 inline fun <reified Res : Any> Route.documentedDelete(
     path: String = "",

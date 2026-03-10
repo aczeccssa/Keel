@@ -15,6 +15,7 @@ import com.keel.kernel.plugin.registerPluginStaticOperation
 import com.keel.kernel.plugin.respondPluginResult
 import com.keel.kernel.plugin.runtimeJson
 import com.keel.kernel.plugin.serializer
+import com.keel.openapi.runtime.OpenApiRegistry
 import com.keel.kernel.di.PluginPrivateScopeHandle
 import com.keel.kernel.di.PluginScopeManager
 import com.keel.kernel.isolation.PluginProcessSupervisor
@@ -672,6 +673,7 @@ class UnifiedPluginManager(
         if (duplicateSse.isNotEmpty()) {
             error("Duplicate plugin SSE registration for pluginId=$pluginId: ${duplicateSse.joinToString()}")
         }
+        val staticOperationKeys = staticRoutes.map { operationKey(HttpMethod.Get, fullPluginPath(pluginId, it.path)) }
         val staticKeys = staticRoutes.map { fullPluginPath(pluginId, it.path) }
         val duplicateStatic = staticKeys.groupingBy { it }.eachCount().filterValues { it > 1 }.keys
         if (duplicateStatic.isNotEmpty()) {
@@ -712,6 +714,35 @@ class UnifiedPluginManager(
                 registerPluginStaticOperation(pluginId, definition.path, definition.index != null, definition.doc)
                 staticResources(definition.path, definition.basePackage, definition.index)
             }
+        }
+        validateOpenApiTopologyRegistration(
+            pluginId = pluginId,
+            expectedKeys = buildSet {
+                addAll(endpointKeys)
+                addAll(sseKeys)
+                addAll(staticOperationKeys)
+            }
+        )
+    }
+
+    private fun validateOpenApiTopologyRegistration(pluginId: String, expectedKeys: Set<String>) {
+        if (expectedKeys.isEmpty()) {
+            return
+        }
+        val pluginPrefix = "/api/plugins/$pluginId"
+        val actualKeys = OpenApiRegistry.operations()
+            .asSequence()
+            .filter { operation ->
+                operation.path == pluginPrefix || operation.path.startsWith("$pluginPrefix/")
+            }
+            .map { operationKey(it.method, it.path) }
+            .toSet()
+        val missingKeys = expectedKeys - actualKeys
+        if (missingKeys.isNotEmpty()) {
+            error(
+                "OpenAPI registered operations for pluginId=$pluginId are missing " +
+                    "route topology keys: ${missingKeys.sorted().joinToString()}"
+            )
         }
     }
 
