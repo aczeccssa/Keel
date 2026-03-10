@@ -1,6 +1,7 @@
 package com.keel.kernel.api
 
 import com.keel.openapi.runtime.OpenApiOperation
+import com.keel.openapi.runtime.OpenApiDoc
 import com.keel.openapi.runtime.OpenApiRegistry
 import io.ktor.http.HttpMethod
 import io.ktor.server.routing.Route
@@ -33,12 +34,7 @@ internal fun Route.registerTypedOperation(
     path: String,
     requestType: KType?,
     responseType: KType?,
-    summary: String = "",
-    description: String = "",
-    tags: List<String> = emptyList(),
-    successStatus: Int = 200,
-    errorStatuses: Set<Int> = emptySet(),
-    responseEnvelope: Boolean = false
+    doc: OpenApiDoc = OpenApiDoc()
 ) {
     OpenApiRegistry.register(
         OpenApiOperation(
@@ -47,12 +43,12 @@ internal fun Route.registerTypedOperation(
             requestBodyType = requestType,
             responseBodyType = responseType,
             typeBound = true,
-            summary = summary,
-            description = description,
-            tags = tags,
-            successStatus = successStatus,
-            errorStatuses = errorStatuses,
-            responseEnvelope = responseEnvelope
+            summary = doc.summary,
+            description = doc.description,
+            tags = doc.tags,
+            successStatus = doc.successStatus,
+            errorStatuses = doc.errorStatuses,
+            responseEnvelope = doc.responseEnvelope
         )
     )
 }
@@ -87,13 +83,15 @@ fun Route.typedRoute(path: String, block: Route.() -> Unit) {
 
 inline fun <reified Res : Any> Route.typedGet(
     path: String = "",
+    doc: OpenApiDoc = OpenApiDoc(),
     noinline body: suspend RoutingContext.() -> Unit
 ) {
     registerTypedOperation(
         method = HttpMethod.Get,
         path = path,
         requestType = null,
-        responseType = typeOf<Res>()
+        responseType = typeOf<Res>(),
+        doc = doc
     )
     invokeGet(path, body)
 }
@@ -101,59 +99,72 @@ inline fun <reified Res : Any> Route.typedGet(
 @JvmName("typedPostWithoutRequest")
 inline fun <reified Res : Any> Route.typedPost(
     path: String = "",
+    doc: OpenApiDoc = OpenApiDoc(),
     noinline body: suspend RoutingContext.() -> Unit
 ) {
     registerTypedOperation(
         method = HttpMethod.Post,
         path = path,
         requestType = null,
-        responseType = typeOf<Res>()
+        responseType = typeOf<Res>(),
+        doc = doc
     )
     invokePost(path, body)
 }
 
 inline fun <reified Req : Any, reified Res : Any> Route.typedPost(
     path: String = "",
+    doc: OpenApiDoc = OpenApiDoc(),
     noinline body: suspend RoutingContext.() -> Unit
 ) {
     registerTypedOperation(
         method = HttpMethod.Post,
         path = path,
         requestType = typeOf<Req>(),
-        responseType = typeOf<Res>()
+        responseType = typeOf<Res>(),
+        doc = doc
     )
     invokePost(path, body)
 }
 
 inline fun <reified Req : Any, reified Res : Any> Route.typedPut(
     path: String = "",
+    doc: OpenApiDoc = OpenApiDoc(),
     noinline body: suspend RoutingContext.() -> Unit
 ) {
     registerTypedOperation(
         method = HttpMethod.Put,
         path = path,
         requestType = typeOf<Req>(),
-        responseType = typeOf<Res>()
+        responseType = typeOf<Res>(),
+        doc = doc
     )
     invokePut(path, body)
 }
 
 inline fun <reified Res : Any> Route.typedDelete(
     path: String = "",
+    doc: OpenApiDoc = OpenApiDoc(),
     noinline body: suspend RoutingContext.() -> Unit
 ) {
     registerTypedOperation(
         method = HttpMethod.Delete,
         path = path,
         requestType = null,
-        responseType = typeOf<Res>()
+        responseType = typeOf<Res>(),
+        doc = doc
     )
     invokeDelete(path, body)
 }
 
 @Deprecated(
-    message = "Move documentation metadata to @KeelApi; use typedGet only for route registration and type binding.",
-    replaceWith = ReplaceWith("typedGet<Res>(path, body)")
+    message = "Use typedGet with doc = OpenApiDoc(...).",
+    replaceWith = ReplaceWith(
+        expression = "typedGet<Res>(path = path, doc = OpenApiDoc(" +
+            "summary = summary, description = description, tags = tags, " +
+            "successStatus = successStatus, errorStatuses = errorStatuses, responseEnvelope = responseEnvelope" +
+            "), body = body)"
+    )
 )
 inline fun <reified Res : Any> Route.documentedGet(
     path: String = "",
@@ -170,19 +181,26 @@ inline fun <reified Res : Any> Route.documentedGet(
         path = path,
         requestType = null,
         responseType = typeOf<Res>(),
-        summary = summary,
-        description = description,
-        tags = tags,
-        successStatus = successStatus,
-        errorStatuses = errorStatuses,
-        responseEnvelope = responseEnvelope
+        doc = OpenApiDoc(
+            summary = summary,
+            description = description,
+            tags = tags,
+            successStatus = successStatus,
+            errorStatuses = errorStatuses,
+            responseEnvelope = responseEnvelope
+        )
     )
     invokeGet(path, body)
 }
 
 @Deprecated(
-    message = "Move documentation metadata to @KeelApi; use typedPost only for route registration and type binding.",
-    replaceWith = ReplaceWith("typedPost<Res>(path, body)")
+    message = "Use typedPost with doc = OpenApiDoc(...).",
+    replaceWith = ReplaceWith(
+        expression = "typedPost<Res>(path = path, doc = OpenApiDoc(" +
+            "summary = summary, description = description, tags = tags, " +
+            "successStatus = successStatus, errorStatuses = errorStatuses, responseEnvelope = responseEnvelope" +
+            "), body = body)"
+    )
 )
 @JvmName("documentedPostWithoutRequest")
 inline fun <reified Res : Any> Route.documentedPost(
@@ -200,19 +218,26 @@ inline fun <reified Res : Any> Route.documentedPost(
         path = path,
         requestType = null,
         responseType = typeOf<Res>(),
-        summary = summary,
-        description = description,
-        tags = tags,
-        successStatus = successStatus,
-        errorStatuses = errorStatuses,
-        responseEnvelope = responseEnvelope
+        doc = OpenApiDoc(
+            summary = summary,
+            description = description,
+            tags = tags,
+            successStatus = successStatus,
+            errorStatuses = errorStatuses,
+            responseEnvelope = responseEnvelope
+        )
     )
     invokePost(path, body)
 }
 
 @Deprecated(
-    message = "Move documentation metadata to @KeelApi; use typedPost only for route registration and type binding.",
-    replaceWith = ReplaceWith("typedPost<Req, Res>(path, body)")
+    message = "Use typedPost with doc = OpenApiDoc(...).",
+    replaceWith = ReplaceWith(
+        expression = "typedPost<Req, Res>(path = path, doc = OpenApiDoc(" +
+            "summary = summary, description = description, tags = tags, " +
+            "successStatus = successStatus, errorStatuses = errorStatuses, responseEnvelope = responseEnvelope" +
+            "), body = body)"
+    )
 )
 inline fun <reified Req : Any, reified Res : Any> Route.documentedPost(
     path: String = "",
@@ -229,19 +254,26 @@ inline fun <reified Req : Any, reified Res : Any> Route.documentedPost(
         path = path,
         requestType = typeOf<Req>(),
         responseType = typeOf<Res>(),
-        summary = summary,
-        description = description,
-        tags = tags,
-        successStatus = successStatus,
-        errorStatuses = errorStatuses,
-        responseEnvelope = responseEnvelope
+        doc = OpenApiDoc(
+            summary = summary,
+            description = description,
+            tags = tags,
+            successStatus = successStatus,
+            errorStatuses = errorStatuses,
+            responseEnvelope = responseEnvelope
+        )
     )
     invokePost(path, body)
 }
 
 @Deprecated(
-    message = "Move documentation metadata to @KeelApi; use typedPut only for route registration and type binding.",
-    replaceWith = ReplaceWith("typedPut<Req, Res>(path, body)")
+    message = "Use typedPut with doc = OpenApiDoc(...).",
+    replaceWith = ReplaceWith(
+        expression = "typedPut<Req, Res>(path = path, doc = OpenApiDoc(" +
+            "summary = summary, description = description, tags = tags, " +
+            "successStatus = successStatus, errorStatuses = errorStatuses, responseEnvelope = responseEnvelope" +
+            "), body = body)"
+    )
 )
 inline fun <reified Req : Any, reified Res : Any> Route.documentedPut(
     path: String = "",
@@ -258,19 +290,26 @@ inline fun <reified Req : Any, reified Res : Any> Route.documentedPut(
         path = path,
         requestType = typeOf<Req>(),
         responseType = typeOf<Res>(),
-        summary = summary,
-        description = description,
-        tags = tags,
-        successStatus = successStatus,
-        errorStatuses = errorStatuses,
-        responseEnvelope = responseEnvelope
+        doc = OpenApiDoc(
+            summary = summary,
+            description = description,
+            tags = tags,
+            successStatus = successStatus,
+            errorStatuses = errorStatuses,
+            responseEnvelope = responseEnvelope
+        )
     )
     invokePut(path, body)
 }
 
 @Deprecated(
-    message = "Move documentation metadata to @KeelApi; use typedDelete only for route registration and type binding.",
-    replaceWith = ReplaceWith("typedDelete<Res>(path, body)")
+    message = "Use typedDelete with doc = OpenApiDoc(...).",
+    replaceWith = ReplaceWith(
+        expression = "typedDelete<Res>(path = path, doc = OpenApiDoc(" +
+            "summary = summary, description = description, tags = tags, " +
+            "successStatus = successStatus, errorStatuses = errorStatuses, responseEnvelope = responseEnvelope" +
+            "), body = body)"
+    )
 )
 inline fun <reified Res : Any> Route.documentedDelete(
     path: String = "",
@@ -287,12 +326,14 @@ inline fun <reified Res : Any> Route.documentedDelete(
         path = path,
         requestType = null,
         responseType = typeOf<Res>(),
-        summary = summary,
-        description = description,
-        tags = tags,
-        successStatus = successStatus,
-        errorStatuses = errorStatuses,
-        responseEnvelope = responseEnvelope
+        doc = OpenApiDoc(
+            summary = summary,
+            description = description,
+            tags = tags,
+            successStatus = successStatus,
+            errorStatuses = errorStatuses,
+            responseEnvelope = responseEnvelope
+        )
     )
     invokeDelete(path, body)
 }

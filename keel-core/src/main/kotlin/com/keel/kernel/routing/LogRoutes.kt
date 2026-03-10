@@ -1,12 +1,12 @@
 package com.keel.kernel.routing
 
 import com.keel.contract.dto.KeelResponse
-import com.keel.kernel.api.KeelApi
 import com.keel.kernel.logging.KeelLoggerService
 import com.keel.kernel.logging.LogEntry
 import com.keel.kernel.logging.LogLevel
 import com.keel.kernel.logging.LogLevelData
 import com.keel.kernel.logging.SetLogLevelRequest
+import com.keel.openapi.runtime.OpenApiDoc
 import com.lestere.opensource.logger.SoulLogger
 import io.ktor.http.ContentDisposition
 import io.ktor.http.ContentType
@@ -30,16 +30,14 @@ object LogRouteInstaller {
         with(route) {
             systemApi {
                 typedRoute("/logs") {
-                    @KeelApi("Get recent log entries", tags = ["system", "logs"], responseEnvelope = true)
-                    typedGet<List<LogEntry>>("/recent") {
+                    typedGet<List<LogEntry>>("/recent", doc = OpenApiDoc(summary = "Get recent log entries", tags = listOf("system", "logs"), responseEnvelope = true)) {
                         val limit = call.parameters["limit"]?.toIntOrNull() ?: 100
                         val service = KeelLoggerService.getInstance()
                         val logs = service.getRecentLogs(limit)
                         call.respond(KeelResponse.success(data = logs))
                     }
 
-                    @KeelApi("Get available log levels", tags = ["system", "logs"], responseEnvelope = true)
-                    typedGet<LogLevelData>("/levels") {
+                    typedGet<LogLevelData>("/levels", doc = OpenApiDoc(summary = "Get available log levels", tags = listOf("system", "logs"), responseEnvelope = true)) {
                         val service = KeelLoggerService.getInstance()
                         val data = LogLevelData(
                             currentLevel = service.currentLevel.value.name,
@@ -48,13 +46,15 @@ object LogRouteInstaller {
                         call.respond(KeelResponse.success(data = data))
                     }
 
-                    @KeelApi(
-                        "Set log level",
-                        tags = ["system", "logs"],
-                        errorStatuses = [400],
-                        responseEnvelope = true
-                    )
-                    typedPost<SetLogLevelRequest, LogLevelData>("/level") {
+                    typedPost<SetLogLevelRequest, LogLevelData>(
+                        "/level",
+                        doc = OpenApiDoc(
+                            summary = "Set log level",
+                            tags = listOf("system", "logs"),
+                            errorStatuses = setOf(400),
+                            responseEnvelope = true
+                        )
+                    ) {
                         try {
                             val request = call.receive<SetLogLevelRequest>()
                             val level = LogLevel.fromString(request.level)
@@ -70,8 +70,7 @@ object LogRouteInstaller {
                         }
                     }
 
-                    @KeelApi("Clear log buffer", tags = ["system", "logs"], responseEnvelope = true)
-                    typedPost<String>("/clear") {
+                    typedPost<String>("/clear", doc = OpenApiDoc(summary = "Clear log buffer", tags = listOf("system", "logs"), responseEnvelope = true)) {
                         val service = KeelLoggerService.getInstance()
                         service.clear()
                         call.respond(KeelResponse.success(data = "Log buffer cleared"))
@@ -129,8 +128,7 @@ object LogRouteInstaller {
                         }
                     }
 
-                    @KeelApi("Download logs as JSON file", tags = ["system", "logs"])
-                    get("/download") {
+                    typedGet<List<LogEntry>>("/download", doc = OpenApiDoc(summary = "Download logs as JSON file", tags = listOf("system", "logs"))) {
                         val service = KeelLoggerService.getInstance()
                         val logs = service.getRecentLogs(1000)
                         val json = Json { prettyPrint = true }

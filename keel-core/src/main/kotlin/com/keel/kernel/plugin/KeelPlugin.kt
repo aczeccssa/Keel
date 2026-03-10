@@ -3,6 +3,7 @@ package com.keel.kernel.plugin
 import io.ktor.http.HttpMethod
 import io.ktor.server.sse.ServerSSESession
 import io.ktor.sse.ServerSentEvent
+import com.keel.openapi.runtime.OpenApiDoc
 import kotlin.reflect.KType
 import kotlin.reflect.typeOf
 import org.koin.core.module.Module
@@ -160,6 +161,7 @@ data class PluginEndpointDefinition<Req : Any, Res : Any>(
     override val path: String,
     val requestType: KType?,
     val responseType: KType,
+    val doc: OpenApiDoc = OpenApiDoc(),
     val executionPolicy: EndpointExecutionPolicy = EndpointExecutionPolicy(),
     val handler: suspend PluginRequestContext.(Req?) -> PluginResult<Res>
 ) : PluginRouteDefinition {
@@ -173,12 +175,14 @@ data class PluginEndpointDefinition<Req : Any, Res : Any>(
 
 data class PluginSseDefinition(
     override val path: String,
+    val doc: OpenApiDoc = OpenApiDoc(),
     val handler: suspend PluginSseSession.() -> Unit
 ) : PluginRouteDefinition
 
 data class PluginStaticResourceDefinition(
     override val path: String,
     val basePackage: String,
+    val doc: OpenApiDoc = OpenApiDoc(),
     val index: String? = null
 ) : PluginRouteDefinition
 
@@ -216,6 +220,7 @@ class PluginEndpointDsl internal constructor(
 
     inline fun <reified Res : Any> get(
         path: String = "",
+        doc: OpenApiDoc = OpenApiDoc(),
         executionPolicy: EndpointExecutionPolicy = EndpointExecutionPolicy(),
         noinline handler: suspend PluginRequestContext.() -> PluginResult<Res>
     ) {
@@ -226,6 +231,7 @@ class PluginEndpointDsl internal constructor(
             path = resolvedPath,
             requestType = null,
             responseType = typeOf<Res>(),
+            doc = doc,
             executionPolicy = executionPolicy,
             handler = { _: Unit? -> handler() }
         )
@@ -233,6 +239,7 @@ class PluginEndpointDsl internal constructor(
 
     inline fun <reified Req : Any, reified Res : Any> post(
         path: String = "",
+        doc: OpenApiDoc = OpenApiDoc(),
         executionPolicy: EndpointExecutionPolicy = EndpointExecutionPolicy(),
         noinline handler: suspend PluginRequestContext.(Req) -> PluginResult<Res>
     ) {
@@ -243,6 +250,7 @@ class PluginEndpointDsl internal constructor(
             path = resolvedPath,
             requestType = typeOf<Req>(),
             responseType = typeOf<Res>(),
+            doc = doc,
             executionPolicy = executionPolicy,
             handler = { request -> handler(requireNotNull(request)) }
         )
@@ -250,6 +258,7 @@ class PluginEndpointDsl internal constructor(
 
     inline fun <reified Res : Any> post(
         path: String = "",
+        doc: OpenApiDoc = OpenApiDoc(),
         executionPolicy: EndpointExecutionPolicy = EndpointExecutionPolicy(),
         noinline handler: suspend PluginRequestContext.() -> PluginResult<Res>
     ) {
@@ -260,6 +269,7 @@ class PluginEndpointDsl internal constructor(
             path = resolvedPath,
             requestType = null,
             responseType = typeOf<Res>(),
+            doc = doc,
             executionPolicy = executionPolicy,
             handler = { _: Unit? -> handler() }
         )
@@ -267,6 +277,7 @@ class PluginEndpointDsl internal constructor(
 
     inline fun <reified Req : Any, reified Res : Any> put(
         path: String = "",
+        doc: OpenApiDoc = OpenApiDoc(),
         executionPolicy: EndpointExecutionPolicy = EndpointExecutionPolicy(),
         noinline handler: suspend PluginRequestContext.(Req) -> PluginResult<Res>
     ) {
@@ -277,6 +288,7 @@ class PluginEndpointDsl internal constructor(
             path = resolvedPath,
             requestType = typeOf<Req>(),
             responseType = typeOf<Res>(),
+            doc = doc,
             executionPolicy = executionPolicy,
             handler = { request -> handler(requireNotNull(request)) }
         )
@@ -284,6 +296,7 @@ class PluginEndpointDsl internal constructor(
 
     inline fun <reified Res : Any> delete(
         path: String = "",
+        doc: OpenApiDoc = OpenApiDoc(),
         executionPolicy: EndpointExecutionPolicy = EndpointExecutionPolicy(),
         noinline handler: suspend PluginRequestContext.() -> PluginResult<Res>
     ) {
@@ -294,6 +307,7 @@ class PluginEndpointDsl internal constructor(
             path = resolvedPath,
             requestType = null,
             responseType = typeOf<Res>(),
+            doc = doc,
             executionPolicy = executionPolicy,
             handler = { _: Unit? -> handler() }
         )
@@ -301,20 +315,23 @@ class PluginEndpointDsl internal constructor(
 
     fun sse(
         path: String,
+        doc: OpenApiDoc = OpenApiDoc(),
         handler: suspend PluginSseSession.() -> Unit
     ) {
-        endpoints += PluginSseDefinition(path = resolvePath(path), handler = handler)
+        endpoints += PluginSseDefinition(path = resolvePath(path), doc = doc, handler = handler)
     }
 
     fun staticResources(
         path: String,
         basePackage: String,
+        doc: OpenApiDoc = OpenApiDoc(),
         index: String? = null
     ) {
         require(basePackage.isNotBlank()) { "basePackage must not be blank" }
         endpoints += PluginStaticResourceDefinition(
             path = resolvePath(path),
             basePackage = basePackage,
+            doc = doc,
             index = index
         )
     }

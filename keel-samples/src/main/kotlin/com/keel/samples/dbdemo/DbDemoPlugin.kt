@@ -2,7 +2,6 @@ package com.keel.samples.dbdemo
 
 import com.keel.db.database.DatabaseFactory
 import com.keel.db.database.KeelDatabase
-import com.keel.kernel.api.KeelApi
 import com.keel.kernel.logging.KeelLoggerService
 import com.keel.kernel.plugin.KeelPlugin
 import com.keel.kernel.plugin.PluginApiException
@@ -14,6 +13,7 @@ import com.keel.kernel.plugin.PluginResult
 import com.keel.kernel.plugin.PluginRuntimeContext
 import com.keel.kernel.plugin.PluginRuntimeMode
 import com.keel.openapi.annotations.KeelApiPlugin
+import com.keel.openapi.runtime.OpenApiDoc
 
 @KeelApiPlugin(
     pluginId = "dbdemo",
@@ -46,39 +46,40 @@ class DbDemoPlugin : KeelPlugin {
 
     override fun endpoints() = pluginEndpoints(descriptor.pluginId) {
         route("/notes") {
-            @KeelApi("List all active notes", tags = ["notes"], responseEnvelope = true)
-            get<NoteListData> {
+            get<NoteListData>(doc = OpenApiDoc(summary = "List all active notes", tags = listOf("notes"), responseEnvelope = true)) {
                 PluginResult(body = NoteListData(notes = repository.findAll(), total = repository.countActive()))
             }
 
-            @KeelApi("List all notes including soft-deleted", tags = ["notes"], responseEnvelope = true)
-            get<NoteListData>("all") {
+            get<NoteListData>("all", doc = OpenApiDoc(summary = "List all notes including soft-deleted", tags = listOf("notes"), responseEnvelope = true)) {
                 PluginResult(body = NoteListData(notes = repository.findAllIncludingDeleted(), total = repository.count()))
             }
 
-            @KeelApi("Create a new note", tags = ["notes"], errorStatuses = [400], responseEnvelope = true)
-            post<CreateNoteRequest, Note> { request ->
+            post<CreateNoteRequest, Note>(
+                doc = OpenApiDoc(summary = "Create a new note", tags = listOf("notes"), errorStatuses = setOf(400), responseEnvelope = true)
+            ) { request ->
                 val note = repository.save(Note(title = request.title, content = request.content, author = request.author, pinned = request.pinned))
                 PluginResult(body = note)
             }
 
             route("/{id}") {
-                @KeelApi("Get a single note by ID", tags = ["notes"], errorStatuses = [400, 404], responseEnvelope = true)
-                get<Note> {
+                get<Note>(doc = OpenApiDoc(summary = "Get a single note by ID", tags = listOf("notes"), errorStatuses = setOf(400, 404), responseEnvelope = true)) {
                     val id = pathParameters["id"]?.toIntOrNull() ?: throw PluginApiException(400, "Invalid id")
                     val note = repository.findById(id) ?: throw PluginApiException(404, "Note not found")
                     PluginResult(body = note)
                 }
 
-                @KeelApi("Update an existing note", tags = ["notes"], errorStatuses = [400, 404], responseEnvelope = true)
-                put<UpdateNoteRequest, Note> { request ->
+                put<UpdateNoteRequest, Note>(
+                    doc = OpenApiDoc(summary = "Update an existing note", tags = listOf("notes"), errorStatuses = setOf(400, 404), responseEnvelope = true)
+                ) { request ->
                     val id = pathParameters["id"]?.toIntOrNull() ?: throw PluginApiException(400, "Invalid id")
                     val note = repository.update(id, request) ?: throw PluginApiException(404, "Note not found")
                     PluginResult(body = note)
                 }
 
-                @KeelApi("Soft-delete a note", tags = ["notes"], errorStatuses = [400, 404], responseEnvelope = true)
-                post<String>("delete") {
+                post<String>(
+                    "delete",
+                    doc = OpenApiDoc(summary = "Soft-delete a note", tags = listOf("notes"), errorStatuses = setOf(400, 404), responseEnvelope = true)
+                ) {
                     val id = pathParameters["id"]?.toIntOrNull() ?: throw PluginApiException(400, "Invalid id")
                     if (!repository.softDelete(id)) {
                         throw PluginApiException(404, "Note not found")
@@ -86,8 +87,10 @@ class DbDemoPlugin : KeelPlugin {
                     PluginResult(body = "Note soft-deleted")
                 }
 
-                @KeelApi("Restore a soft-deleted note", tags = ["notes"], errorStatuses = [400, 404], responseEnvelope = true)
-                post<String>("restore") {
+                post<String>(
+                    "restore",
+                    doc = OpenApiDoc(summary = "Restore a soft-deleted note", tags = listOf("notes"), errorStatuses = setOf(400, 404), responseEnvelope = true)
+                ) {
                     val id = pathParameters["id"]?.toIntOrNull() ?: throw PluginApiException(400, "Invalid id")
                     if (!repository.restore(id)) {
                         throw PluginApiException(404, "Note not found")
@@ -95,8 +98,7 @@ class DbDemoPlugin : KeelPlugin {
                     PluginResult(body = "Note restored")
                 }
 
-                @KeelApi("Permanently delete a note", tags = ["notes"], errorStatuses = [400, 404], responseEnvelope = true)
-                delete<String> {
+                delete<String>(doc = OpenApiDoc(summary = "Permanently delete a note", tags = listOf("notes"), errorStatuses = setOf(400, 404), responseEnvelope = true)) {
                     val id = pathParameters["id"]?.toIntOrNull() ?: throw PluginApiException(400, "Invalid id")
                     if (!repository.deleteById(id)) {
                         throw PluginApiException(404, "Note not found")
@@ -106,8 +108,7 @@ class DbDemoPlugin : KeelPlugin {
             }
         }
 
-        @KeelApi("Get database statistics", tags = ["notes", "stats"], responseEnvelope = true)
-        get<DbStatsData>("/stats") {
+        get<DbStatsData>("/stats", doc = OpenApiDoc(summary = "Get database statistics", tags = listOf("notes", "stats"), responseEnvelope = true)) {
             PluginResult(
                 body = DbStatsData(
                     totalNotes = repository.count(),

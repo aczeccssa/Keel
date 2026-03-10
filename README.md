@@ -277,6 +277,30 @@ class MyPlugin : KeelPlugin {
 }
 ```
 
+### OpenAPI Migration (`@KeelApi` -> `OpenApiDoc`)
+
+`@KeelApi` is no longer supported. Route documentation now lives on the DSL call via `doc = OpenApiDoc(...)`.
+
+Before:
+
+```kotlin
+@KeelApi("List notes", tags = ["notes"], responseEnvelope = true)
+typedGet<NoteListData>("/notes") { ... }
+```
+
+After:
+
+```kotlin
+typedGet<NoteListData>(
+    path = "/notes",
+    doc = OpenApiDoc(
+        summary = "List notes",
+        tags = listOf("notes"),
+        responseEnvelope = true
+    )
+) { ... }
+```
+
 Register the plugin in the kernel:
 
 ```kotlin

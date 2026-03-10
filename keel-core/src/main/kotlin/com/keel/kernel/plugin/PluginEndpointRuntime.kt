@@ -1,8 +1,7 @@
 package com.keel.kernel.plugin
 
 import com.keel.contract.dto.KeelResponse
-import com.keel.openapi.runtime.OpenApiAggregator
-import com.keel.openapi.runtime.OpenApiDeclaredOperation
+import com.keel.openapi.runtime.OpenApiDoc
 import com.keel.openapi.runtime.OpenApiOperation
 import com.keel.openapi.runtime.OpenApiRegistry
 import io.ktor.http.ContentType
@@ -28,24 +27,10 @@ internal val runtimeJson = Json {
     encodeDefaults = true
 }
 
-internal object PluginDocumentationLookup {
-    private val declaredOperations: Map<String, OpenApiDeclaredOperation> by lazy {
-        OpenApiAggregator.discoverDeclaredOperations().associateBy { operationKey(it.method, it.path) }
-    }
-
-    fun find(method: HttpMethod, path: String): OpenApiDeclaredOperation? = declaredOperations[operationKey(method, path)]
-
-    fun declaredOperationsForPlugin(pluginId: String): List<OpenApiDeclaredOperation> {
-        val prefix = "/api/plugins/$pluginId"
-        return declaredOperations.values.filter { it.path == prefix || it.path.startsWith("$prefix/") }
-    }
-}
-
 internal fun operationKey(method: HttpMethod, path: String): String = "${method.value} $path"
 
 internal fun registerPluginOperation(pluginId: String, endpoint: PluginEndpointDefinition<*, *>) {
     val fullPath = fullPluginPath(pluginId, endpoint.path)
-    val doc = PluginDocumentationLookup.find(endpoint.method, fullPath)
     OpenApiRegistry.register(
         OpenApiOperation(
             method = endpoint.method,
@@ -54,19 +39,18 @@ internal fun registerPluginOperation(pluginId: String, endpoint: PluginEndpointD
             responseBodyType = endpoint.responseType,
             responseContentTypes = null,
             typeBound = true,
-            summary = doc?.summary.orEmpty(),
-            description = doc?.description.orEmpty(),
-            tags = doc?.tags ?: emptyList(),
-            responseEnvelope = doc?.responseEnvelope ?: false,
-            successStatus = doc?.successStatus ?: 200,
-            errorStatuses = doc?.errorStatuses ?: emptySet()
+            summary = endpoint.doc.summary,
+            description = endpoint.doc.description,
+            tags = endpoint.doc.tags,
+            responseEnvelope = endpoint.doc.responseEnvelope,
+            successStatus = endpoint.doc.successStatus,
+            errorStatuses = endpoint.doc.errorStatuses
         )
     )
 }
 
-internal fun registerPluginSseOperation(pluginId: String, path: String) {
+internal fun registerPluginSseOperation(pluginId: String, path: String, doc: OpenApiDoc) {
     val fullPath = fullPluginPath(pluginId, path)
-    val doc = PluginDocumentationLookup.find(HttpMethod.Get, fullPath)
     OpenApiRegistry.register(
         OpenApiOperation(
             method = HttpMethod.Get,
@@ -75,19 +59,23 @@ internal fun registerPluginSseOperation(pluginId: String, path: String) {
             responseBodyType = null,
             responseContentTypes = listOf("text/event-stream"),
             typeBound = false,
-            summary = doc?.summary.orEmpty(),
-            description = doc?.description.orEmpty(),
-            tags = doc?.tags ?: emptyList(),
+            summary = doc.summary,
+            description = doc.description,
+            tags = doc.tags,
             responseEnvelope = false,
-            successStatus = doc?.successStatus ?: 200,
-            errorStatuses = doc?.errorStatuses ?: emptySet()
+            successStatus = doc.successStatus,
+            errorStatuses = doc.errorStatuses
         )
     )
 }
 
-internal fun registerPluginStaticOperation(pluginId: String, path: String, hasIndex: Boolean) {
+internal fun registerPluginStaticOperation(
+    pluginId: String,
+    path: String,
+    hasIndex: Boolean,
+    doc: OpenApiDoc
+) {
     val fullPath = fullPluginPath(pluginId, path)
-    val doc = PluginDocumentationLookup.find(HttpMethod.Get, fullPath)
     val contentTypes = buildList {
         add("application/octet-stream")
         if (hasIndex) {
@@ -102,12 +90,12 @@ internal fun registerPluginStaticOperation(pluginId: String, path: String, hasIn
             responseBodyType = null,
             responseContentTypes = contentTypes,
             typeBound = false,
-            summary = doc?.summary.orEmpty(),
-            description = doc?.description.orEmpty(),
-            tags = doc?.tags ?: emptyList(),
+            summary = doc.summary,
+            description = doc.description,
+            tags = doc.tags,
             responseEnvelope = false,
-            successStatus = doc?.successStatus ?: 200,
-            errorStatuses = doc?.errorStatuses ?: emptySet()
+            successStatus = doc.successStatus,
+            errorStatuses = doc.errorStatuses
         )
     )
 }

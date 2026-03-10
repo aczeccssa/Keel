@@ -21,8 +21,6 @@ object OpenApiAggregator {
     @Volatile
     private var fragmentCache: List<OpenApiFragment>? = null
     @Volatile
-    private var declaredOperationsCache: List<OpenApiDeclaredOperation>? = null
-    @Volatile
     private var specCache: CachedSpec? = null
 
     /**
@@ -36,16 +34,6 @@ object OpenApiAggregator {
         ).also { fragmentCache = it }
     }
 
-    fun discoverDeclaredOperations(): List<OpenApiDeclaredOperation> {
-        declaredOperationsCache?.let { return it }
-        return discoverImplementations(
-            interfaceClass = OpenApiOperationFragment::class.java,
-            generatedClassNameFilter = { it.contains(".AnnotatedOps") }
-        )
-            .flatMap { it.operations() }
-            .also { declaredOperationsCache = it }
-    }
-
     fun buildSpec(serverUrl: String = "http://localhost:8080"): String {
         val topologyVersion = OpenApiRegistry.topologyVersion()
         specCache?.takeIf { it.serverUrl == serverUrl && it.topologyVersion == topologyVersion }?.let { cached ->
@@ -54,7 +42,7 @@ object OpenApiAggregator {
         val fragments = discoverFragments()
         val operations = enrichOperationsWithFallbackTags(
             fragments = fragments,
-            operations = mergeOperations(discoverDeclaredOperations(), OpenApiRegistry.operations())
+            operations = OpenApiRegistry.operations()
         )
         val spec = if (operations.isEmpty()) {
             buildMinimalSpec(serverUrl)
@@ -212,53 +200,19 @@ object OpenApiAggregator {
 
     private fun fallbackTags(path: String, fragments: List<OpenApiFragment>): List<String> {
         if (path.startsWith("/api/_system")) {
-            return listOf("system")
+            val subPath = path.removePrefix("/api/_system").trim('/')
+            val systemDomain = subPath.substringBefore('/', "").takeIf { it.isNotBlank() }
+            return listOfNotNull("system", systemDomain)
         }
 
         val fragment = fragments.firstOrNull { candidate ->
             path == candidate.basePath || path.startsWith("${candidate.basePath}/")
         }
-        return fragment?.let { listOf(it.pluginId) } ?: emptyList()
-    }
-
-    private fun mergeOperations(
-        declaredOperations: List<OpenApiDeclaredOperation>,
-        runtimeOperations: List<OpenApiOperation>
-    ): List<OpenApiOperation> {
-        val runtimeByKey = runtimeOperations.associateBy { "${it.method.value} ${it.path}" }
-        val declaredByKey = declaredOperations.associateBy { "${it.method.value} ${it.path}" }
-        val allKeys = (runtimeByKey.keys + declaredByKey.keys).sorted()
-
-        return allKeys.mapNotNull { key ->
-            val runtime = runtimeByKey[key]
-            val declared = declaredByKey[key]
-            when {
-                runtime != null && declared != null -> runtime.copy(
-                    summary = runtime.summary.ifBlank { declared.summary },
-                    description = runtime.description.ifBlank { declared.description },
-                    tags = if (declared.tags.isNotEmpty()) declared.tags else runtime.tags,
-                    successStatus = declared.successStatus,
-                    errorStatuses = if (declared.errorStatuses.isNotEmpty()) declared.errorStatuses else runtime.errorStatuses,
-                    responseEnvelope = declared.responseEnvelope
-                )
-                runtime != null -> runtime
-                declared != null -> OpenApiOperation(
-                    method = declared.method,
-                    path = declared.path,
-                    requestBodyType = null,
-                    responseBodyType = null,
-                    responseContentTypes = null,
-                    typeBound = false,
-                    summary = declared.summary,
-                    description = declared.description,
-                    tags = declared.tags,
-                    successStatus = declared.successStatus,
-                    errorStatuses = declared.errorStatuses,
-                    responseEnvelope = declared.responseEnvelope
-                )
-                else -> null
-            }
+        if (fragment != null) {
+            return listOf(fragment.pluginId)
         }
+        val pluginId = Regex("""^/api/plugins/([^/]+)""").find(path)?.groupValues?.get(1)
+        return pluginId?.let(::listOf) ?: emptyList()
     }
 
     private fun <T : Any> discoverImplementations(

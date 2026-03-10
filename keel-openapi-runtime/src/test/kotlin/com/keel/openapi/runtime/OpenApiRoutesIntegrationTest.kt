@@ -1,7 +1,6 @@
 package com.keel.openapi.runtime
 
 import com.keel.contract.dto.KeelResponse
-import com.keel.kernel.api.KeelApi
 import com.keel.kernel.api.pluginApi
 import com.keel.kernel.api.systemApi
 import com.keel.kernel.api.typedGet
@@ -113,8 +112,10 @@ class OpenApiRoutesIntegrationTest {
         application {
             routing {
                 pluginApi("compat") {
-                    @KeelApi(summary = "Legacy route", tags = ["compat"], responseEnvelope = false)
-                    typedGet<GreetingData>(path = "/legacy") {
+                    typedGet<GreetingData>(
+                        path = "/legacy",
+                        doc = OpenApiDoc(summary = "Compat route", tags = listOf("compat"))
+                    ) {
                         call.respond(GreetingData("legacy"))
                     }
                 }
@@ -128,11 +129,11 @@ class OpenApiRoutesIntegrationTest {
         val paths = spec["paths"]!!.jsonObject
         assertTrue("/api/plugins/compat/legacy" in paths)
 
-        val helloOperation = paths["/api/plugins/helloworld"]!!
+        val compatOperation = paths["/api/plugins/compat/legacy"]!!
             .jsonObject["get"]!!
             .jsonObject
-        assertEquals("Hello World greeting", helloOperation["summary"]?.jsonPrimitive?.content)
-        assertEquals(listOf("helloworld"), helloOperation["tags"]?.jsonArray?.map { it.jsonPrimitive.content })
+        assertEquals("Compat route", compatOperation["summary"]?.jsonPrimitive?.content)
+        assertEquals(listOf("compat"), compatOperation["tags"]?.jsonArray?.map { it.jsonPrimitive.content })
     }
 
     @Test

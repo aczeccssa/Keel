@@ -1,6 +1,5 @@
 package com.keel.samples.helloworld
 
-import com.keel.kernel.api.KeelApi
 import com.keel.kernel.logging.KeelLoggerService
 import com.keel.kernel.plugin.KeelPlugin
 import com.keel.kernel.plugin.PluginDescriptor
@@ -10,6 +9,7 @@ import com.keel.kernel.plugin.PluginInitContext
 import com.keel.kernel.plugin.PluginResult
 import com.keel.kernel.plugin.PluginRuntimeContext
 import com.keel.openapi.annotations.KeelApiPlugin
+import com.keel.openapi.runtime.OpenApiDoc
 
 @KeelApiPlugin("helloworld", "Hello World Plugin")
 class HelloWorldPlugin : KeelPlugin {
@@ -22,23 +22,19 @@ class HelloWorldPlugin : KeelPlugin {
     }
 
     override fun endpoints() = pluginEndpoints(descriptor.pluginId) {
-        @KeelApi("Hello World greeting", tags = ["helloworld"])
-        get<GreetingData> {
+        get<GreetingData>(doc = OpenApiDoc(summary = "Hello World greeting", tags = listOf("helloworld"))) {
             PluginResult(body = GreetingData("Hello from HelloWorldPlugin!"))
         }
 
-        @KeelApi("Get plugin version", tags = ["helloworld"])
-        get<VersionData>("/version") {
+        get<VersionData>("/version", doc = OpenApiDoc(summary = "Get plugin version", tags = listOf("helloworld"))) {
             PluginResult(body = VersionData(descriptor.version))
         }
 
-        @KeelApi("Get plugin status", tags = ["helloworld"])
-        get<StatusData>("/status") {
+        get<StatusData>("/status", doc = OpenApiDoc(summary = "Get plugin status", tags = listOf("helloworld"))) {
             PluginResult(body = StatusData("OK"))
         }
 
-        @KeelApi("Get plugin status", tags = ["helloworld"])
-        get<StatusData>("/sample") {
+        get<StatusData>("/sample", doc = OpenApiDoc(summary = "Get plugin status", tags = listOf("helloworld"))) {
             PluginResult(body = StatusData("False"))
         }
     }

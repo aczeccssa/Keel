@@ -3,7 +3,6 @@ package com.keel.kernel.plugin
 import com.keel.kernel.hotreload.DevReloadOutcome
 import com.keel.kernel.hotreload.PluginDevelopmentSource
 import com.keel.kernel.hotreload.ReloadAttemptResult
-import com.keel.kernel.plugin.PluginDocumentationLookup
 import com.keel.kernel.plugin.buildRequestContext
 import com.keel.kernel.plugin.decodeRequestBody
 import com.keel.kernel.plugin.encodeResponseBody
@@ -16,6 +15,7 @@ import com.keel.kernel.plugin.registerPluginStaticOperation
 import com.keel.kernel.plugin.respondPluginResult
 import com.keel.kernel.plugin.runtimeJson
 import com.keel.kernel.plugin.serializer
+import com.keel.openapi.runtime.OpenApiRegistry
 import com.keel.kernel.di.PluginPrivateScopeHandle
 import com.keel.kernel.di.PluginScopeManager
 import com.keel.kernel.isolation.PluginProcessSupervisor
@@ -673,6 +673,7 @@ class UnifiedPluginManager(
         if (duplicateSse.isNotEmpty()) {
             error("Duplicate plugin SSE registration for pluginId=$pluginId: ${duplicateSse.joinToString()}")
         }
+        val staticOperationKeys = staticRoutes.map { operationKey(HttpMethod.Get, fullPluginPath(pluginId, it.path)) }
         val staticKeys = staticRoutes.map { fullPluginPath(pluginId, it.path) }
         val duplicateStatic = staticKeys.groupingBy { it }.eachCount().filterValues { it > 1 }.keys
         if (duplicateStatic.isNotEmpty()) {
@@ -690,17 +691,6 @@ class UnifiedPluginManager(
         if (staticConflicts.isNotEmpty()) {
             error("Plugin static resource path conflict for pluginId=$pluginId: ${staticConflicts.joinToString { it.path }}")
         }
-        val declaredKeys = PluginDocumentationLookup.declaredOperationsForPlugin(pluginId)
-            .map { operationKey(it.method, it.path) }
-            .toSet()
-        val routeKeySet = endpointKeys.toMutableSet().apply {
-            addAll(sseKeys)
-            addAll(staticRoutes.map { operationKey(HttpMethod.Get, fullPluginPath(pluginId, it.path)) })
-        }
-        val missing = declaredKeys - routeKeySet
-        if (missing.isNotEmpty()) {
-            error("OpenAPI declared operations for pluginId=$pluginId are not backed by KeelPlugin.endpoints(): ${missing.sorted().joinToString()}")
-        }
         routing.route("/api/plugins/$pluginId") {
             entry.serviceRouteInstallers.forEach { installer ->
                 installer(this)
@@ -708,23 +698,51 @@ class UnifiedPluginManager(
             for (endpoint in endpoints) {
                 registerPluginOperation(pluginId, endpoint)
                 val fullPath = endpoint.path.ifBlank { "" }
-                val responseEnvelope = PluginDocumentationLookup.find(endpoint.method, fullPluginPath(pluginId, endpoint.path))?.responseEnvelope ?: false
                 when (endpoint.method) {
-                    HttpMethod.Get -> mountGet(fullPath, pluginId, endpoint.endpointId, responseEnvelope)
-                    HttpMethod.Post -> mountPost(fullPath, pluginId, endpoint.endpointId, responseEnvelope)
-                    HttpMethod.Put -> mountPut(fullPath, pluginId, endpoint.endpointId, responseEnvelope)
-                    HttpMethod.Delete -> mountDelete(fullPath, pluginId, endpoint.endpointId, responseEnvelope)
+                    HttpMethod.Get -> mountGet(fullPath, pluginId, endpoint.endpointId, endpoint.doc.responseEnvelope)
+                    HttpMethod.Post -> mountPost(fullPath, pluginId, endpoint.endpointId, endpoint.doc.responseEnvelope)
+                    HttpMethod.Put -> mountPut(fullPath, pluginId, endpoint.endpointId, endpoint.doc.responseEnvelope)
+                    HttpMethod.Delete -> mountDelete(fullPath, pluginId, endpoint.endpointId, endpoint.doc.responseEnvelope)
                     else -> error("Unsupported method: ${endpoint.method}")
                 }
             }
             for (definition in sseRoutes) {
-                registerPluginSseOperation(pluginId, definition.path)
+                registerPluginSseOperation(pluginId, definition.path, definition.doc)
                 mountSse(definition.path, pluginId, definition.path)
             }
             for (definition in staticRoutes) {
-                registerPluginStaticOperation(pluginId, definition.path, definition.index != null)
+                registerPluginStaticOperation(pluginId, definition.path, definition.index != null, definition.doc)
                 staticResources(definition.path, definition.basePackage, definition.index)
             }
+        }
+        validateOpenApiTopologyRegistration(
+            pluginId = pluginId,
+            expectedKeys = buildSet {
+                addAll(endpointKeys)
+                addAll(sseKeys)
+                addAll(staticOperationKeys)
+            }
+        )
+    }
+
+    private fun validateOpenApiTopologyRegistration(pluginId: String, expectedKeys: Set<String>) {
+        if (expectedKeys.isEmpty()) {
+            return
+        }
+        val pluginPrefix = "/api/plugins/$pluginId"
+        val actualKeys = OpenApiRegistry.operations()
+            .asSequence()
+            .filter { operation ->
+                operation.path == pluginPrefix || operation.path.startsWith("$pluginPrefix/")
+            }
+            .map { operationKey(it.method, it.path) }
+            .toSet()
+        val missingKeys = expectedKeys - actualKeys
+        if (missingKeys.isNotEmpty()) {
+            error(
+                "OpenAPI registered operations for pluginId=$pluginId are missing " +
+                    "route topology keys: ${missingKeys.sorted().joinToString()}"
+            )
         }
     }
 
