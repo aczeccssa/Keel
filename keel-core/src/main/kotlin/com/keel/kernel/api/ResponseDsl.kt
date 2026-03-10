@@ -4,8 +4,7 @@ import io.ktor.http.HttpStatusCode
 
 /**
  * DSL marker class holding OpenAPI response metadata for a route handler.
- * These functions are no-ops at runtime — they exist solely as markers
- * for the OpenAPI spec generator to read via static analysis.
+ * These functions are no-ops at runtime and only serve route-documentation metadata.
  */
 object ResponseDsl {
 

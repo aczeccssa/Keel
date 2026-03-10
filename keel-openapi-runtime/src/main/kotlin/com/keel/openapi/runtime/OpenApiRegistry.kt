@@ -5,6 +5,15 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.reflect.KType
 
+data class OpenApiDoc(
+    val summary: String = "",
+    val description: String = "",
+    val tags: List<String> = emptyList(),
+    val successStatus: Int = 200,
+    val errorStatuses: Set<Int> = emptySet(),
+    val responseEnvelope: Boolean = false
+)
+
 data class OpenApiOperation(
     val method: HttpMethod,
     val path: String,

@@ -55,12 +55,10 @@ class OpenApiAggregatorTest {
     }
 
     @Test
-    fun `buildSpec includes declared operations when registry is empty`() {
+    fun `buildSpec is minimal when registry is empty`() {
         val spec = json.parseToJsonElement(OpenApiAggregator.buildSpec()).jsonObject
         val paths = spec["paths"]?.jsonObject
-        assertTrue(paths != null && paths.isNotEmpty())
-        assertTrue("/api/plugins/helloworld" in paths)
-        assertTrue("/api/_system/plugins" in paths)
+        assertTrue(paths != null && paths.isEmpty())
     }
 
     @Test
@@ -71,45 +69,47 @@ class OpenApiAggregatorTest {
     }
 
     @Test
-    fun `declared operations preserve nested plugin route prefixes`() {
-        val operation = OpenApiAggregator.discoverDeclaredOperations()
-            .first { it.path == "/api/plugins/dbdemo/notes/{id}/delete" && it.method == HttpMethod.Post }
-
-        assertEquals("Soft-delete a note", operation.summary)
-        assertEquals(listOf("notes"), operation.tags)
-    }
-
-    @Test
-    fun `annotation metadata merges with typed route schema metadata`() {
+    fun `runtime doc metadata merges with typed route schema metadata`() {
         OpenApiRegistry.register(
             OpenApiOperation(
                 method = HttpMethod.Get,
-                path = "/api/plugins/helloworld",
+                path = "/api/plugins/runtime-doc",
                 responseBodyType = typeOf<TestPayload>(),
-                typeBound = true
+                typeBound = true,
+                summary = "Runtime doc",
+                tags = listOf("runtime")
             )
         )
 
         val spec = json.parseToJsonElement(OpenApiAggregator.buildSpec()).jsonObject
         val getOperation = spec["paths"]!!
-            .jsonObject["/api/plugins/helloworld"]!!
+            .jsonObject["/api/plugins/runtime-doc"]!!
             .jsonObject["get"]!!
             .jsonObject
 
-        assertEquals("Hello World greeting", getOperation["summary"]?.jsonPrimitive?.content)
-        assertEquals(listOf("helloworld"), getOperation["tags"]?.jsonArray?.map { it.jsonPrimitive.content })
+        assertEquals("Runtime doc", getOperation["summary"]?.jsonPrimitive?.content)
+        assertEquals(listOf("runtime"), getOperation["tags"]?.jsonArray?.map { it.jsonPrimitive.content })
 
         val schemas = spec["components"]!!.jsonObject["schemas"]!!.jsonObject
         assertTrue("TestPayload" in schemas)
     }
 
     @Test
-    fun `annotation metadata controls success status and envelope`() {
-        val declared = OpenApiAggregator.discoverDeclaredOperations()
-            .first { it.path == "/api/_system/plugins" && it.method == HttpMethod.Get }
-
-        assertEquals(200, declared.successStatus)
-        assertTrue(declared.responseEnvelope)
+    fun `runtime doc metadata controls success status and envelope`() {
+        OpenApiRegistry.register(
+            OpenApiOperation(
+                method = HttpMethod.Get,
+                path = "/api/_system/custom",
+                responseBodyType = typeOf<TestPayload>(),
+                typeBound = true,
+                successStatus = 202,
+                responseEnvelope = true
+            )
+        )
+        val spec = json.parseToJsonElement(OpenApiAggregator.buildSpec()).jsonObject
+        val operation = spec["paths"]!!.jsonObject["/api/_system/custom"]!!.jsonObject["get"]!!.jsonObject
+        val responses = operation["responses"]!!.jsonObject
+        assertTrue("202" in responses)
     }
 
     @Test

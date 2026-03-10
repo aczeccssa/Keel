@@ -1,6 +1,5 @@
 package com.keel.samples.observability
 
-import com.keel.kernel.api.KeelApi
 import com.keel.kernel.logging.KeelLoggerService
 import com.keel.kernel.observability.KeelObservability
 import com.keel.kernel.plugin.KeelPlugin
@@ -11,6 +10,7 @@ import com.keel.kernel.plugin.PluginInitContext
 import com.keel.kernel.plugin.PluginResult
 import com.keel.kernel.plugin.PluginRuntimeContext
 import com.keel.openapi.annotations.KeelApiPlugin
+import com.keel.openapi.runtime.OpenApiDoc
 import io.ktor.http.HttpHeaders
 import io.ktor.util.cio.ChannelWriteException
 import io.ktor.utils.io.ClosedWriteChannelException
@@ -45,8 +45,7 @@ class ObservabilityPlugin : KeelPlugin {
     }
 
     override fun endpoints() = pluginEndpoints(descriptor.pluginId) {
-        @KeelApi("Open the observability UI", tags = ["observability"])
-        get<RedirectMessage> {
+        get<RedirectMessage>(doc = OpenApiDoc(summary = "Open the observability UI", tags = listOf("observability"))) {
             PluginResult(
                 status = 302,
                 headers = mapOf(HttpHeaders.Location to listOf("/api/plugins/observability/ui/index.html")),
@@ -54,31 +53,26 @@ class ObservabilityPlugin : KeelPlugin {
             )
         }
 
-        @KeelApi("Get current JVM topology", tags = ["observability"], responseEnvelope = true)
-        get<ObservabilityTopologyData>("/topology") {
+        get<ObservabilityTopologyData>("/topology", doc = OpenApiDoc(summary = "Get current JVM topology", tags = listOf("observability"), responseEnvelope = true)) {
             PluginResult(body = ObservabilityTopologyData(nodes = observability.jvmSnapshot()))
         }
 
-        @KeelApi("Get recent trace spans", tags = ["observability"], responseEnvelope = true)
-        get<ObservabilityTraceData>("/traces") {
+        get<ObservabilityTraceData>("/traces", doc = OpenApiDoc(summary = "Get recent trace spans", tags = listOf("observability"), responseEnvelope = true)) {
             val limit = queryParameters["limit"]?.firstOrNull()?.toIntOrNull() ?: 100
             val since = queryParameters["since"]?.firstOrNull()?.toLongOrNull()
             PluginResult(body = ObservabilityTraceData(spans = observability.traceSnapshot(limit, since)))
         }
 
-        @KeelApi("Get recent flow edges", tags = ["observability"], responseEnvelope = true)
-        get<ObservabilityFlowData>("/flows") {
+        get<ObservabilityFlowData>("/flows", doc = OpenApiDoc(summary = "Get recent flow edges", tags = listOf("observability"), responseEnvelope = true)) {
             val limit = queryParameters["limit"]?.firstOrNull()?.toIntOrNull() ?: 100
             PluginResult(body = ObservabilityFlowData(flows = observability.flowSnapshot(limit)))
         }
 
-        @KeelApi("Get registered observability panels", tags = ["observability"], responseEnvelope = true)
-        get<ObservabilityPanelData>("/panels") {
+        get<ObservabilityPanelData>("/panels", doc = OpenApiDoc(summary = "Get registered observability panels", tags = listOf("observability"), responseEnvelope = true)) {
             PluginResult(body = ObservabilityPanelData(panels = observability.panels()))
         }
 
-        @KeelApi("Subscribe to live observability events", tags = ["observability"])
-        sse("/stream") {
+        sse("/stream", doc = OpenApiDoc(summary = "Subscribe to live observability events", tags = listOf("observability"))) {
             send(ServerSentEvent(data = """{"type":"connected"}""", event = "system"))
             try {
                 observability.events().collect { event ->
@@ -93,10 +87,10 @@ class ObservabilityPlugin : KeelPlugin {
             }
         }
 
-        @KeelApi("Open the observability static UI", tags = ["observability"])
         staticResources(
             path = "/ui",
             basePackage = "observability-ui",
+            doc = OpenApiDoc(summary = "Open the observability static UI", tags = listOf("observability")),
             index = "index.html"
         )
     }

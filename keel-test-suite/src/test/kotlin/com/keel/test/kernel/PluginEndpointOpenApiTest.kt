@@ -1,6 +1,5 @@
 package com.keel.test.kernel
 
-import com.keel.kernel.api.KeelApi
 import com.keel.kernel.plugin.KeelPlugin
 import com.keel.kernel.plugin.PluginDescriptor
 import com.keel.kernel.plugin.PluginEndpointBuilders
@@ -9,6 +8,7 @@ import com.keel.kernel.plugin.PluginResult
 import com.keel.kernel.plugin.PluginRuntimeContext
 import com.keel.kernel.plugin.UnifiedPluginManager
 import com.keel.openapi.runtime.OpenApiAggregator
+import com.keel.openapi.runtime.OpenApiDoc
 import com.keel.openapi.runtime.OpenApiRegistry
 import io.ktor.client.request.get
 import io.ktor.http.HttpHeaders
@@ -91,8 +91,7 @@ class PluginEndpointOpenApiTest {
         override suspend fun onStop(context: PluginRuntimeContext) = Unit
 
         override fun endpoints() = PluginEndpointBuilders.pluginEndpoints(descriptor.pluginId) {
-            @KeelApi("Open UI")
-            get<RedirectMessage> {
+            get<RedirectMessage>(doc = OpenApiDoc(summary = "Open UI")) {
                 PluginResult(
                     status = 302,
                     headers = mapOf(HttpHeaders.Location to listOf("/api/plugins/route-test/ui/index.html")),
@@ -100,8 +99,7 @@ class PluginEndpointOpenApiTest {
                 )
             }
 
-            @KeelApi("Stream events")
-            sse("/stream") {
+            sse("/stream", doc = OpenApiDoc(summary = "Stream events")) {
                 try {
                     events.collect { payload ->
                         send(ServerSentEvent(data = payload, event = "event"))
@@ -111,10 +109,10 @@ class PluginEndpointOpenApiTest {
                 }
             }
 
-            @KeelApi("Static UI")
             staticResources(
                 path = "/ui",
                 basePackage = "observability-ui",
+                doc = OpenApiDoc(summary = "Static UI"),
                 index = "index.html"
             )
         }

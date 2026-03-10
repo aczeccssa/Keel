@@ -4,7 +4,6 @@ import com.keel.contract.dto.KeelResponse
 import com.keel.kernel.config.FrameworkVersion
 import com.keel.kernel.hotreload.DevHotReloadEngine
 import com.keel.kernel.hotreload.DevReloadEvent
-import com.keel.kernel.api.KeelApi
 import com.keel.kernel.loader.DefaultPluginLoader
 import com.keel.kernel.loader.DiscoveredPlugin
 import com.keel.kernel.plugin.PluginChannelHealth
@@ -15,6 +14,7 @@ import com.keel.kernel.plugin.PluginProcessState
 import com.keel.kernel.plugin.PluginRuntimeMode
 import com.keel.kernel.plugin.PluginRuntimeSnapshot
 import com.keel.kernel.plugin.UnifiedPluginManager
+import com.keel.openapi.runtime.OpenApiDoc
 import io.ktor.server.application.call
 import io.ktor.server.response.respond
 import io.ktor.server.routing.Route
@@ -35,15 +35,13 @@ object UnifiedSystemRouteInstaller {
         with(route) {
             systemApi {
                 typedRoute("/plugins") {
-                    @KeelApi("List all plugins", tags = ["system", "plugins"], responseEnvelope = true)
-                    typedGet<PluginListData> {
+                    typedGet<PluginListData>(doc = OpenApiDoc(summary = "List all plugins", tags = listOf("system", "plugins"), responseEnvelope = true)) {
                         val plugins = pluginManager.getRuntimeSnapshots().map { it.toPluginInfo() }
                         call.respond(KeelResponse.success(PluginListData(plugins = plugins, total = plugins.size)))
                     }
 
                     typedRoute("/{pluginId}") {
-                        @KeelApi("Get plugin details", tags = ["system", "plugins"], errorStatuses = [404], responseEnvelope = true)
-                        typedGet<PluginInfo> {
+                        typedGet<PluginInfo>(doc = OpenApiDoc(summary = "Get plugin details", tags = listOf("system", "plugins"), errorStatuses = setOf(404), responseEnvelope = true)) {
                             val pluginId = call.parameters["pluginId"]
                             val snapshot = pluginId?.let(pluginManager::getRuntimeSnapshot)
                             if (snapshot == null) {
@@ -53,8 +51,7 @@ object UnifiedSystemRouteInstaller {
                             call.respond(KeelResponse.success(snapshot.toPluginInfo()))
                         }
 
-                        @KeelApi("Get plugin health", tags = ["system", "plugins"], errorStatuses = [404], responseEnvelope = true)
-                        typedGet<PluginInfo>("/health") {
+                        typedGet<PluginInfo>("/health", doc = OpenApiDoc(summary = "Get plugin health", tags = listOf("system", "plugins"), errorStatuses = setOf(404), responseEnvelope = true)) {
                             val pluginId = call.parameters["pluginId"]
                             val snapshot = pluginId?.let(pluginManager::getRuntimeSnapshot)
                             if (snapshot == null) {
@@ -64,44 +61,38 @@ object UnifiedSystemRouteInstaller {
                             call.respond(KeelResponse.success(snapshot.toPluginInfo()))
                         }
 
-                        @KeelApi("Start a plugin", tags = ["system", "plugins"], errorStatuses = [400, 500], responseEnvelope = true)
-                        typedPost<PluginActionResult>("/start") {
+                        typedPost<PluginActionResult>("/start", doc = OpenApiDoc(summary = "Start a plugin", tags = listOf("system", "plugins"), errorStatuses = setOf(400, 500), responseEnvelope = true)) {
                             handleLifecycleAction(pluginManager, "start") { pluginId ->
                                 pluginManager.startPlugin(pluginId)
                             }
                         }
 
-                        @KeelApi("Stop a plugin", tags = ["system", "plugins"], errorStatuses = [400, 500], responseEnvelope = true)
-                        typedPost<PluginActionResult>("/stop") {
+                        typedPost<PluginActionResult>("/stop", doc = OpenApiDoc(summary = "Stop a plugin", tags = listOf("system", "plugins"), errorStatuses = setOf(400, 500), responseEnvelope = true)) {
                             handleLifecycleAction(pluginManager, "stop") { pluginId ->
                                 pluginManager.stopPlugin(pluginId)
                             }
                         }
 
-                        @KeelApi("Dispose a plugin", tags = ["system", "plugins"], errorStatuses = [400, 500], responseEnvelope = true)
-                        typedPost<PluginActionResult>("/dispose") {
+                        typedPost<PluginActionResult>("/dispose", doc = OpenApiDoc(summary = "Dispose a plugin", tags = listOf("system", "plugins"), errorStatuses = setOf(400, 500), responseEnvelope = true)) {
                             handleLifecycleAction(pluginManager, "dispose") { pluginId ->
                                 pluginManager.disposePlugin(pluginId)
                             }
                         }
 
-                        @KeelApi("Reload a plugin", tags = ["system", "plugins"], errorStatuses = [400, 500], responseEnvelope = true)
-                        typedPost<PluginActionResult>("/reload") {
+                        typedPost<PluginActionResult>("/reload", doc = OpenApiDoc(summary = "Reload a plugin", tags = listOf("system", "plugins"), errorStatuses = setOf(400, 500), responseEnvelope = true)) {
                             handleLifecycleAction(pluginManager, "reload") { pluginId ->
                                 pluginManager.reloadPlugin(pluginId)
                             }
                         }
 
-                        @KeelApi("Replace a plugin artifact", tags = ["system", "plugins"], errorStatuses = [400, 500], responseEnvelope = true)
-                        typedPost<PluginActionResult>("/replace") {
+                        typedPost<PluginActionResult>("/replace", doc = OpenApiDoc(summary = "Replace a plugin artifact", tags = listOf("system", "plugins"), errorStatuses = setOf(400, 500), responseEnvelope = true)) {
                             handleLifecycleAction(pluginManager, "replace") { pluginId ->
                                 pluginManager.replacePlugin(pluginId)
                             }
                         }
                     }
 
-                    @KeelApi("Discover plugins in directory", tags = ["system", "plugins"], responseEnvelope = true)
-                    typedPost<PluginDiscoverData>("/discover") {
+                    typedPost<PluginDiscoverData>("/discover", doc = OpenApiDoc(summary = "Discover plugins in directory", tags = listOf("system", "plugins"), responseEnvelope = true)) {
                         val discovered = pluginLoader?.discoverPlugins(com.keel.kernel.config.KeelConstants.PLUGINS_DIR).orEmpty()
                         call.respond(
                             KeelResponse.success(
@@ -115,8 +106,7 @@ object UnifiedSystemRouteInstaller {
                 }
 
                 typedRoute("/hotreload") {
-                    @KeelApi("Get dev hot reload status", tags = ["system", "hotreload"], responseEnvelope = true)
-                    typedGet<HotReloadStatusData>("/status") {
+                    typedGet<HotReloadStatusData>("/status", doc = OpenApiDoc(summary = "Get dev hot reload status", tags = listOf("system", "hotreload"), responseEnvelope = true)) {
                         val status = hotReloadEngine?.status()
                         call.respond(
                             KeelResponse.success(
@@ -130,8 +120,7 @@ object UnifiedSystemRouteInstaller {
                         )
                     }
 
-                    @KeelApi("Trigger manual dev hot reload", tags = ["system", "hotreload"], responseEnvelope = true)
-                    typedPost<PluginActionResult>("/reload/{pluginId}") {
+                    typedPost<PluginActionResult>("/reload/{pluginId}", doc = OpenApiDoc(summary = "Trigger manual dev hot reload", tags = listOf("system", "hotreload"), responseEnvelope = true)) {
                         val pluginId = call.parameters["pluginId"]
                         if (hotReloadEngine == null || pluginId.isNullOrBlank()) {
                             call.respond(KeelResponse.failure<Unit>(400, "Hot reload engine unavailable or missing pluginId"))
@@ -171,13 +160,11 @@ object UnifiedSystemRouteInstaller {
                     }
                 }
 
-                @KeelApi("Health check", tags = ["system"], responseEnvelope = true)
-                typedGet<HealthData>("/health") {
+                typedGet<HealthData>("/health", doc = OpenApiDoc(summary = "Health check", tags = listOf("system"), responseEnvelope = true)) {
                     call.respond(KeelResponse.success(HealthData("ok", Clock.System.now().toEpochMilliseconds())))
                 }
 
-                @KeelApi("Framework version", tags = ["system"], responseEnvelope = true)
-                typedGet<FrameworkVersionData>("/version") {
+                typedGet<FrameworkVersionData>("/version", doc = OpenApiDoc(summary = "Framework version", tags = listOf("system"), responseEnvelope = true)) {
                     call.respond(
                         KeelResponse.success(
                             FrameworkVersionData(

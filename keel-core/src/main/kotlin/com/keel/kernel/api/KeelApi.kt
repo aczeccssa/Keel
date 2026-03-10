@@ -15,6 +15,10 @@ package com.keel.kernel.api
  */
 @Target(AnnotationTarget.EXPRESSION, AnnotationTarget.LOCAL_VARIABLE)
 @Retention(AnnotationRetention.SOURCE)
+@Deprecated(
+    message = "Use DSL doc = OpenApiDoc(...) instead of @KeelApi.",
+    level = DeprecationLevel.ERROR
+)
 annotation class KeelApi(
     val summary: String = "",
     val description: String = "",
