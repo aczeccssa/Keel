@@ -26,7 +26,10 @@ import com.keel.jvm.runtime.PluginEndpointInventoryItem
 import com.keel.jvm.runtime.PluginEventQueueOverflowEvent
 import com.keel.jvm.runtime.PluginFailureEvent
 import com.keel.jvm.runtime.PluginLogEvent
+import com.keel.jvm.runtime.PluginRouteInventoryItem
 import com.keel.jvm.runtime.PluginReadyEvent
+import com.keel.jvm.runtime.PluginSseClosedEvent
+import com.keel.jvm.runtime.PluginSseDataEvent
 import com.keel.jvm.runtime.PluginTraceEvent
 import com.keel.jvm.runtime.PluginRuntimeEvent
 import com.keel.jvm.runtime.PluginStoppingEvent
@@ -34,6 +37,12 @@ import com.keel.jvm.runtime.PluginJvmFrameCodec
 import com.keel.jvm.runtime.PluginJvmJson
 import com.keel.jvm.runtime.ReloadPrepareRequest
 import com.keel.jvm.runtime.ReloadPrepareResponse
+import com.keel.jvm.runtime.SseCloseRequest
+import com.keel.jvm.runtime.SseCloseResponse
+import com.keel.jvm.runtime.SseOpenRequest
+import com.keel.jvm.runtime.SseOpenResponse
+import com.keel.jvm.runtime.StaticFetchRequest
+import com.keel.jvm.runtime.StaticFetchResponse
 import com.keel.jvm.runtime.ShutdownRequest
 import com.keel.jvm.runtime.ShutdownResponse
 import java.io.File
@@ -44,10 +53,13 @@ import java.nio.channels.SocketChannel
 import java.nio.file.Files
 import java.nio.file.Path
 import java.util.ArrayDeque
+import java.util.Base64
 import java.util.concurrent.Executors
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
+import kotlin.io.encoding.ExperimentalEncodingApi
 import kotlin.io.path.deleteIfExists
 import kotlin.time.Duration.Companion.milliseconds
 import kotlinx.coroutines.CoroutineScope
@@ -59,6 +71,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.jsonObject
@@ -124,9 +137,16 @@ object ExternalPluginHostMain {
         private val endpoints = plugin.endpoints()
             .filterIsInstance<com.keel.kernel.plugin.PluginEndpointDefinition<*, *>>()
             .associateBy { it.endpointId }
+        private val sseRoutes = plugin.endpoints()
+            .filterIsInstance<com.keel.kernel.plugin.PluginSseDefinition>()
+            .associateBy { it.path }
+        private val staticRoutes = plugin.endpoints()
+            .filterIsInstance<com.keel.kernel.plugin.PluginStaticResourceDefinition>()
+            .associateBy { it.path }
         private val running = AtomicBoolean(true)
         private val inFlightInvokes = AtomicInteger(0)
         private val lifecycleState = AtomicReferenceState("STARTING")
+        private val sseStreams = ConcurrentHashMap<String, Job>()
 
         private val koin = startKoin {}.koin
         private val pluginScopeManager = PluginScopeManager(koin)
@@ -280,6 +300,9 @@ object ExternalPluginHostMain {
                                             lifecycleState = lifecycleState,
                                             running = running,
                                             inFlightInvokes = inFlightInvokes,
+                                            sseRoutes = sseRoutes,
+                                            staticRoutes = staticRoutes,
+                                            sseStreams = sseStreams,
                                             adminServer = adminServer,
                                             invokeServer = invokeServer,
                                             eventEmitter = eventEmitter
@@ -305,6 +328,7 @@ object ExternalPluginHostMain {
                                             authToken = hostArgs.authToken,
                                             generation = hostArgs.generation,
                                             endpoints = endpoints,
+                                            staticRoutes = staticRoutes,
                                             inFlightInvokes = inFlightInvokes,
                                             eventEmitter = eventEmitter,
                                             tracer = tracing.tracer
@@ -358,6 +382,8 @@ object ExternalPluginHostMain {
             lifecycleState.set("STOPPED")
             adminJob.cancel()
             invokeJob.cancel()
+            sseStreams.values.forEach { it.cancel() }
+            sseStreams.clear()
         }
 
         private fun recordFailure(error: Throwable) {
@@ -404,6 +430,9 @@ object ExternalPluginHostMain {
         lifecycleState: AtomicReferenceState,
         running: AtomicBoolean,
         inFlightInvokes: AtomicInteger,
+        sseRoutes: Map<String, com.keel.kernel.plugin.PluginSseDefinition>,
+        staticRoutes: Map<String, com.keel.kernel.plugin.PluginStaticResourceDefinition>,
+        sseStreams: ConcurrentHashMap<String, Job>,
         adminServer: ServerSocketChannel,
         invokeServer: ServerSocketChannel,
         eventEmitter: PluginEventEmitter
@@ -419,6 +448,9 @@ object ExternalPluginHostMain {
                 lifecycleState = lifecycleState,
                 running = running,
                 inFlightInvokes = inFlightInvokes,
+                sseRoutes = sseRoutes,
+                staticRoutes = staticRoutes,
+                sseStreams = sseStreams,
                 adminServer = adminServer,
                 invokeServer = invokeServer,
                 eventEmitter = eventEmitter
@@ -446,6 +478,7 @@ object ExternalPluginHostMain {
         authToken: String,
         generation: Long,
         endpoints: Map<String, com.keel.kernel.plugin.PluginEndpointDefinition<*, *>>,
+        staticRoutes: Map<String, com.keel.kernel.plugin.PluginStaticResourceDefinition>,
         inFlightInvokes: AtomicInteger,
         eventEmitter: PluginEventEmitter,
         tracer: io.opentelemetry.api.trace.Tracer
@@ -458,6 +491,7 @@ object ExternalPluginHostMain {
                 authToken = authToken,
                 generation = generation,
                 endpoints = endpoints,
+                staticRoutes = staticRoutes,
                 inFlightInvokes = inFlightInvokes,
                 eventEmitter = eventEmitter,
                 tracer = tracer
@@ -488,6 +522,9 @@ object ExternalPluginHostMain {
         lifecycleState: AtomicReferenceState,
         running: AtomicBoolean,
         inFlightInvokes: AtomicInteger,
+        sseRoutes: Map<String, com.keel.kernel.plugin.PluginSseDefinition>,
+        staticRoutes: Map<String, com.keel.kernel.plugin.PluginStaticResourceDefinition>,
+        sseStreams: ConcurrentHashMap<String, Job>,
         adminServer: ServerSocketChannel,
         invokeServer: ServerSocketChannel,
         eventEmitter: PluginEventEmitter
@@ -509,10 +546,29 @@ object ExternalPluginHostMain {
                         correlationId = request.messageId,
                         descriptorVersion = plugin.descriptor.version,
                         runtimeMode = PluginRuntimeMode.EXTERNAL_JVM.name,
+                        supportedServices = plugin.descriptor.supportedServices.map { it.name },
                         endpointInventory = plugin.endpoints()
                             .filterIsInstance<com.keel.kernel.plugin.PluginEndpointDefinition<*, *>>()
                             .map {
                             PluginEndpointInventoryItem(it.endpointId, it.method.value, it.path)
+                        },
+                        routeInventory = plugin.endpoints().mapNotNull { route ->
+                            when (route) {
+                                is com.keel.kernel.plugin.PluginEndpointDefinition<*, *> -> PluginRouteInventoryItem(
+                                    routeType = "ENDPOINT",
+                                    path = route.path,
+                                    method = route.method.value,
+                                    endpointId = route.endpointId
+                                )
+                                is com.keel.kernel.plugin.PluginSseDefinition -> PluginRouteInventoryItem(
+                                    routeType = "SSE",
+                                    path = route.path
+                                )
+                                is com.keel.kernel.plugin.PluginStaticResourceDefinition -> PluginRouteInventoryItem(
+                                    routeType = "STATIC_RESOURCE",
+                                    path = route.path
+                                )
+                            }
                         },
                         accepted = accepted,
                         reason = if (accepted) null else "Handshake rejected"
@@ -588,6 +644,100 @@ object ExternalPluginHostMain {
                     )
                 )
             }
+            "sse-open-request" -> {
+                val request = PluginJvmJson.instance.decodeFromString(SseOpenRequest.serializer(), payload)
+                val accepted = validateControlRequest(request.pluginId, request.generation, request.authToken, plugin.descriptor.pluginId, generation, authToken)
+                val definition = sseRoutes[request.routePath]
+                if (accepted && definition != null) {
+                    val context = object : PluginRequestContext {
+                        override val pluginId: String = request.pluginId
+                        override val method: String = "GET"
+                        override val rawPath: String = request.rawPath
+                        override val pathParameters: Map<String, String> = request.pathParameters
+                        override val queryParameters: Map<String, List<String>> = request.queryParameters
+                        override val requestHeaders: Map<String, List<String>> = request.headers
+                        override val requestId: String = request.requestId
+                    }
+                    val job = CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
+                        runCatching {
+                            definition.handler.invoke(
+                                com.keel.kernel.plugin.PluginSseSession(
+                                    request = context,
+                                    sender = { event ->
+                                        eventEmitter.emitCritical(
+                                            PluginSseDataEvent(
+                                                pluginId = plugin.descriptor.pluginId,
+                                                generation = generation,
+                                                timestamp = System.currentTimeMillis(),
+                                                messageId = eventEmitter.newMessageId(),
+                                                authToken = authToken,
+                                                streamId = request.streamId,
+                                                event = event.event,
+                                                data = event.data,
+                                                id = event.id,
+                                                retry = event.retry
+                                            )
+                                        )
+                                    }
+                                )
+                            )
+                        }.onFailure { error ->
+                            logger.warn("SSE stream failed streamId=${request.streamId}: ${error.message}")
+                        }
+                        eventEmitter.emitCritical(
+                            PluginSseClosedEvent(
+                                pluginId = plugin.descriptor.pluginId,
+                                generation = generation,
+                                timestamp = System.currentTimeMillis(),
+                                messageId = eventEmitter.newMessageId(),
+                                authToken = authToken,
+                                streamId = request.streamId
+                            )
+                        )
+                    }
+                    sseStreams[request.streamId] = job
+                }
+                PluginJvmJson.instance.encodeToString(
+                    SseOpenResponse.serializer(),
+                    SseOpenResponse(
+                        pluginId = plugin.descriptor.pluginId,
+                        generation = generation,
+                        timestamp = System.currentTimeMillis(),
+                        messageId = eventEmitter.newMessageId(),
+                        correlationId = request.messageId,
+                        accepted = accepted && definition != null,
+                        errorMessage = if (accepted && definition != null) null else "SSE route unavailable"
+                    )
+                )
+            }
+            "sse-close-request" -> {
+                val request = PluginJvmJson.instance.decodeFromString(SseCloseRequest.serializer(), payload)
+                val accepted = validateControlRequest(request.pluginId, request.generation, request.authToken, plugin.descriptor.pluginId, generation, authToken)
+                if (accepted) {
+                    sseStreams.remove(request.streamId)?.cancel()
+                    eventEmitter.emitCritical(
+                        PluginSseClosedEvent(
+                            pluginId = plugin.descriptor.pluginId,
+                            generation = generation,
+                            timestamp = System.currentTimeMillis(),
+                            messageId = eventEmitter.newMessageId(),
+                            authToken = authToken,
+                            streamId = request.streamId
+                        )
+                    )
+                }
+                PluginJvmJson.instance.encodeToString(
+                    SseCloseResponse.serializer(),
+                    SseCloseResponse(
+                        pluginId = plugin.descriptor.pluginId,
+                        generation = generation,
+                        timestamp = System.currentTimeMillis(),
+                        messageId = eventEmitter.newMessageId(),
+                        correlationId = request.messageId,
+                        accepted = accepted
+                    )
+                )
+            }
             else -> error("Unsupported admin message kind: $kind")
         }
         PluginJvmFrameCodec.write(channel, response)
@@ -600,11 +750,26 @@ object ExternalPluginHostMain {
         authToken: String,
         generation: Long,
         endpoints: Map<String, com.keel.kernel.plugin.PluginEndpointDefinition<*, *>>,
+        staticRoutes: Map<String, com.keel.kernel.plugin.PluginStaticResourceDefinition>,
         inFlightInvokes: AtomicInteger,
         eventEmitter: PluginEventEmitter,
         tracer: io.opentelemetry.api.trace.Tracer
     ) {
         val payload = PluginJvmFrameCodec.read(channel)
+        val json = PluginJvmJson.instance.parseToJsonElement(payload).jsonObject
+        val kind = json["kind"]?.jsonPrimitive?.content.orEmpty()
+        if (kind == "static-fetch-request") {
+            handleStaticFetchConnection(
+                channel = channel,
+                payload = payload,
+                plugin = plugin,
+                authToken = authToken,
+                generation = generation,
+                staticRoutes = staticRoutes,
+                eventEmitter = eventEmitter
+            )
+            return
+        }
         val request = PluginJvmJson.instance.decodeFromString(InvokeRequest.serializer(), payload)
         if (!validateControlRequest(request.pluginId, request.generation, request.authToken, plugin.descriptor.pluginId, generation, authToken)) {
             PluginJvmFrameCodec.write(
@@ -805,6 +970,127 @@ object ExternalPluginHostMain {
             span?.end()
             inFlightInvokes.decrementAndGet()
         }
+    }
+
+    private fun normalizeStaticResourcePath(raw: String, index: String?): String? {
+        val trimmed = raw.trim().replace('\\', '/').trimStart('/')
+        val candidate = if (trimmed.isBlank()) {
+            index?.trim()?.replace('\\', '/')?.trimStart('/').orEmpty()
+        } else {
+            trimmed
+        }
+        if (candidate.isBlank()) return ""
+        val parts = candidate.split('/')
+            .filter { it.isNotBlank() && it != "." }
+        if (parts.any { it == ".." }) {
+            return null
+        }
+        return parts.joinToString("/")
+    }
+
+    private suspend fun handleStaticFetchConnection(
+        channel: SocketChannel,
+        payload: String,
+        plugin: KeelPlugin,
+        authToken: String,
+        generation: Long,
+        staticRoutes: Map<String, com.keel.kernel.plugin.PluginStaticResourceDefinition>,
+        eventEmitter: PluginEventEmitter
+    ) {
+        val request = PluginJvmJson.instance.decodeFromString(StaticFetchRequest.serializer(), payload)
+        if (!validateControlRequest(request.pluginId, request.generation, request.authToken, plugin.descriptor.pluginId, generation, authToken)) {
+            PluginJvmFrameCodec.write(
+                channel,
+                PluginJvmJson.instance.encodeToString(
+                    StaticFetchResponse.serializer(),
+                    StaticFetchResponse(
+                        pluginId = plugin.descriptor.pluginId,
+                        generation = generation,
+                        timestamp = System.currentTimeMillis(),
+                        messageId = eventEmitter.newMessageId(),
+                        correlationId = request.messageId,
+                        status = 403,
+                        errorMessage = "Invalid auth token"
+                    )
+                )
+            )
+            return
+        }
+        val definition = staticRoutes[request.routePath]
+        if (definition == null) {
+            PluginJvmFrameCodec.write(
+                channel,
+                PluginJvmJson.instance.encodeToString(
+                    StaticFetchResponse.serializer(),
+                    StaticFetchResponse(
+                        pluginId = plugin.descriptor.pluginId,
+                        generation = generation,
+                        timestamp = System.currentTimeMillis(),
+                        messageId = eventEmitter.newMessageId(),
+                        correlationId = request.messageId,
+                        status = 404,
+                        errorMessage = "Static route not found"
+                    )
+                )
+            )
+            return
+        }
+        val relativePath = normalizeStaticResourcePath(request.resourcePath, definition.index)
+        if (relativePath.isNullOrBlank()) {
+            PluginJvmFrameCodec.write(
+                channel,
+                PluginJvmJson.instance.encodeToString(
+                    StaticFetchResponse.serializer(),
+                    StaticFetchResponse(
+                        pluginId = plugin.descriptor.pluginId,
+                        generation = generation,
+                        timestamp = System.currentTimeMillis(),
+                        messageId = eventEmitter.newMessageId(),
+                        correlationId = request.messageId,
+                        status = 404,
+                        errorMessage = "Static resource not found"
+                    )
+                )
+            )
+            return
+        }
+        val resourceName = "${definition.basePackage.replace('.', '/')}/$relativePath"
+        val bytes = plugin.javaClass.classLoader.getResourceAsStream(resourceName)?.use { it.readAllBytes() }
+        if (bytes == null) {
+            PluginJvmFrameCodec.write(
+                channel,
+                PluginJvmJson.instance.encodeToString(
+                    StaticFetchResponse.serializer(),
+                    StaticFetchResponse(
+                        pluginId = plugin.descriptor.pluginId,
+                        generation = generation,
+                        timestamp = System.currentTimeMillis(),
+                        messageId = eventEmitter.newMessageId(),
+                        correlationId = request.messageId,
+                        status = 404,
+                        errorMessage = "Static resource not found"
+                    )
+                )
+            )
+            return
+        }
+        val contentType = java.net.URLConnection.guessContentTypeFromName(relativePath) ?: "application/octet-stream"
+        PluginJvmFrameCodec.write(
+            channel,
+            PluginJvmJson.instance.encodeToString(
+                StaticFetchResponse.serializer(),
+                StaticFetchResponse(
+                    pluginId = plugin.descriptor.pluginId,
+                    generation = generation,
+                    timestamp = System.currentTimeMillis(),
+                    messageId = eventEmitter.newMessageId(),
+                    correlationId = request.messageId,
+                    status = 200,
+                    headers = mapOf("Content-Type" to listOf(contentType)),
+                    bodyBase64 = Base64.getEncoder().encodeToString(bytes)
+                )
+            )
+        )
     }
 
     private suspend fun waitForDrain(inFlightInvokes: AtomicInteger, timeoutMs: Long) {

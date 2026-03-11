@@ -1,7 +1,6 @@
 package com.keel.kernel.plugin
 
 import io.ktor.http.HttpMethod
-import io.ktor.server.sse.ServerSSESession
 import io.ktor.sse.ServerSentEvent
 import com.keel.openapi.runtime.OpenApiDoc
 import kotlin.reflect.KType
@@ -27,6 +26,26 @@ enum class PluginRuntimeMode {
 enum class JvmCommunicationMode {
     UDS,
     TCP
+}
+
+enum class PluginServiceType {
+    ENDPOINT,
+    SSE,
+    STATIC_RESOURCE
+}
+
+data class PluginRecoveryPolicy(
+    val maxRestarts: Int = 5,
+    val baseBackoffMs: Long = 250,
+    val maxBackoffMs: Long = 5000,
+    val resetWindowMs: Long = 60000
+) {
+    init {
+        require(maxRestarts >= 0) { "maxRestarts must be >= 0" }
+        require(baseBackoffMs > 0) { "baseBackoffMs must be > 0" }
+        require(maxBackoffMs >= baseBackoffMs) { "maxBackoffMs must be >= baseBackoffMs" }
+        require(resetWindowMs > 0) { "resetWindowMs must be > 0" }
+    }
 }
 
 data class JvmCommunicationStrategy(
@@ -83,6 +102,12 @@ data class PluginDescriptor(
         PluginRuntimeMode.IN_PROCESS,
         PluginRuntimeMode.EXTERNAL_JVM
     ),
+    val supportedServices: Set<PluginServiceType> = setOf(
+        PluginServiceType.ENDPOINT,
+        PluginServiceType.SSE,
+        PluginServiceType.STATIC_RESOURCE
+    ),
+    val recoveryPolicy: PluginRecoveryPolicy = PluginRecoveryPolicy(),
     // Technical knobs moved from PluginConfig to be code-driven
     val startupTimeoutMs: Long = 5000,
     val callTimeoutMs: Long = 3000,
@@ -97,6 +122,7 @@ data class PluginDescriptor(
         require(version.isNotBlank()) { "version must not be blank" }
         require(displayName.isNotBlank()) { "displayName must not be blank" }
         require(supportedRuntimeModes.isNotEmpty()) { "supportedRuntimeModes must not be empty" }
+        require(supportedServices.isNotEmpty()) { "supportedServices must not be empty" }
         require(defaultRuntimeMode in supportedRuntimeModes) {
             "defaultRuntimeMode $defaultRuntimeMode must be included in supportedRuntimeModes"
         }
@@ -188,10 +214,10 @@ data class PluginStaticResourceDefinition(
 
 class PluginSseSession internal constructor(
     val request: PluginRequestContext,
-    private val session: ServerSSESession
+    private val sender: suspend (ServerSentEvent) -> Unit
 ) {
     suspend fun send(event: ServerSentEvent) {
-        session.send(event)
+        sender(event)
     }
 }
 

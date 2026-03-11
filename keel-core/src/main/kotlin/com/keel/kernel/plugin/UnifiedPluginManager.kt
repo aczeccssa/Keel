@@ -25,12 +25,15 @@ import com.keel.kernel.isolation.PluginJvmTcpConnectionInfo
 import com.keel.kernel.logging.KeelLoggerService
 import com.keel.kernel.observability.ObservabilityHub
 import com.keel.kernel.observability.ObservabilityTracing
+import com.keel.jvm.runtime.PluginSseDataEvent
 import io.opentelemetry.context.Context
 import io.ktor.http.HttpMethod
 import io.ktor.http.HttpStatusCode
+import io.ktor.http.ContentType
 import io.ktor.server.request.path
 import io.ktor.server.http.content.staticResources
 import io.ktor.server.response.respond
+import io.ktor.server.response.respondBytes
 import io.ktor.server.routing.Route
 import io.ktor.server.routing.Routing
 import io.ktor.server.routing.delete
@@ -40,7 +43,11 @@ import io.ktor.server.routing.put
 import io.ktor.server.routing.route
 import io.ktor.server.sse.sse
 import io.ktor.sse.ServerSentEvent
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.concurrent.atomic.AtomicInteger
 import java.net.URLClassLoader
@@ -51,7 +58,9 @@ import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withTimeout
 import java.io.File
+import java.util.Base64
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.io.path.createDirectories
 import kotlin.math.absoluteValue
 import kotlin.uuid.ExperimentalUuidApi
@@ -69,6 +78,7 @@ class UnifiedPluginManager(
     private val entries = ConcurrentHashMap<String, ManagedPlugin>()
     private val developmentSources = ConcurrentHashMap<String, PluginDevelopmentSource>()
     private val pluginScopeManager = PluginScopeManager(kernelKoin)
+    private val managerScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var routing: Routing? = null
 
     @OptIn(ExperimentalUuidApi::class)
@@ -83,6 +93,7 @@ class UnifiedPluginManager(
         val descriptor = plugin.descriptor
         val config = descriptor.toConfig(enabled = enabledOverride ?: true)
         val routeDefinitions = plugin.endpoints()
+        validateServiceDeclaration(descriptor, routeDefinitions)
         val endpointDefinitions = routeDefinitions.filterIsInstance<PluginEndpointDefinition<*, *>>()
         val endpointById = endpointDefinitions.associateBy { it.endpointId }.toMutableMap()
         val endpointTopology = endpointDefinitions.map { operationKey(it.method, fullPluginPath(descriptor.pluginId, it.path)) }.toSet()
@@ -93,6 +104,7 @@ class UnifiedPluginManager(
             endpointById = endpointById,
             endpointTopology = endpointTopology,
             sseByPath = sseByPath,
+            routeDefinitions = routeDefinitions,
             config = config,
             lifecycleState = PluginLifecycleState.REGISTERED,
             healthState = PluginHealthState.UNKNOWN,
@@ -147,6 +159,7 @@ class UnifiedPluginManager(
     private data class EntrySnapshot(
         val plugin: KeelPlugin,
         val pluginClassName: String,
+        val routeDefinitions: List<PluginRouteDefinition>,
         val endpointById: Map<String, PluginEndpointDefinition<*, *>>,
         val topology: Set<String>,
         val sseByPath: Map<String, PluginSseDefinition>,
@@ -158,6 +171,7 @@ class UnifiedPluginManager(
     private data class NewGeneration(
         val plugin: KeelPlugin,
         val classLoader: URLClassLoader,
+        val routeDefinitions: List<PluginRouteDefinition>,
         val endpointById: Map<String, PluginEndpointDefinition<*, *>>,
         val topology: Set<String>,
         val sseByPath: Map<String, PluginSseDefinition>
@@ -172,6 +186,7 @@ class UnifiedPluginManager(
         return EntrySnapshot(
             plugin = entry.plugin,
             pluginClassName = entry.pluginClassName,
+            routeDefinitions = entry.routeDefinitions,
             endpointById = entry.endpointById.toMap(),
             topology = entry.endpointTopology.toSet(),
             sseByPath = entry.sseByPath.toMap(),
@@ -198,6 +213,7 @@ class UnifiedPluginManager(
         }
 
         val endpoints = plugin.endpoints()
+        validateServiceDeclaration(plugin.descriptor, endpoints)
         val endpointById = endpoints.filterIsInstance<PluginEndpointDefinition<*, *>>()
             .associateBy { it.endpointId }
         val topology = endpoints.filterIsInstance<PluginEndpointDefinition<*, *>>()
@@ -210,6 +226,7 @@ class UnifiedPluginManager(
             generation = NewGeneration(
                 plugin = plugin,
                 classLoader = classLoader,
+                routeDefinitions = endpoints,
                 endpointById = endpointById,
                 topology = topology,
                 sseByPath = sseByPath
@@ -250,6 +267,7 @@ class UnifiedPluginManager(
         disposePluginLocked(entry)
         entry.plugin = newGeneration.plugin
         entry.pluginClassName = source.implementationClassName
+        entry.routeDefinitions = newGeneration.routeDefinitions
         entry.endpointById = newGeneration.endpointById.toMutableMap()
         entry.endpointTopology = newGeneration.topology
         entry.sseByPath = newGeneration.sseByPath.toMutableMap()
@@ -273,6 +291,7 @@ class UnifiedPluginManager(
         runCatching {
             entry.plugin = snapshot.plugin
             entry.pluginClassName = snapshot.pluginClassName
+            entry.routeDefinitions = snapshot.routeDefinitions
             entry.endpointById = snapshot.endpointById.toMutableMap()
             entry.endpointTopology = snapshot.topology
             entry.sseByPath = snapshot.sseByPath.toMutableMap()
@@ -438,7 +457,7 @@ class UnifiedPluginManager(
             descriptor = entry.plugin.descriptor,
             pluginClassName = entry.pluginClassName,
             config = entry.config,
-            expectedEndpoints = entry.plugin.endpoints().filterIsInstance<PluginEndpointDefinition<*, *>>(),
+            expectedRoutes = entry.routeDefinitions,
             classpath = currentClasspath,
             runtimeDir = kernelRuntimeDir.toPath(),
             generation = entry.generation,
@@ -456,6 +475,12 @@ class UnifiedPluginManager(
             onFailure = { failure ->
                 entry.lastFailure = failure
             },
+            onTerminalFailure = { reason, suggestTcpFallback ->
+                managerScope.launch {
+                    attemptProcessRecovery(entry.plugin.descriptor.pluginId, reason, suggestTcpFallback)
+                }
+            },
+            forcedCommunicationMode = entry.stickyCommunicationMode,
             observabilityHub = observabilityHub
         )
         supervisor.start()
@@ -465,7 +490,7 @@ class UnifiedPluginManager(
         entry.processState = PluginProcessState.RUNNING
     }
 
-    private suspend fun startPluginLocked(entry: ManagedPlugin) {
+    private suspend fun startPluginLocked(entry: ManagedPlugin, resetRecoveryBudget: Boolean = true) {
         if (entry.lifecycleState == PluginLifecycleState.RUNNING) {
             return
         }
@@ -478,8 +503,62 @@ class UnifiedPluginManager(
         }
         entry.lifecycleState = PluginLifecycleState.RUNNING
         entry.lastFailure = null
+        if (resetRecoveryBudget) {
+            entry.recoveryAttempts = 0
+            entry.lastRecoveryAtEpochMs = null
+        }
         if (entry.config.runtimeMode == PluginRuntimeMode.IN_PROCESS) {
             entry.healthState = PluginHealthState.HEALTHY
+        }
+    }
+
+    private suspend fun attemptProcessRecovery(
+        pluginId: String,
+        reason: String,
+        suggestTcpFallback: Boolean
+    ) {
+        withPluginLock(pluginId) { entry ->
+            if (entry.config.runtimeMode != PluginRuntimeMode.EXTERNAL_JVM) return@withPluginLock
+            if (!entry.recoveryInProgress.compareAndSet(false, true)) return@withPluginLock
+            try {
+                if (entry.lifecycleState == PluginLifecycleState.STOPPING || entry.lifecycleState == PluginLifecycleState.DISPOSING || entry.lifecycleState == PluginLifecycleState.DISPOSED) {
+                    return@withPluginLock
+                }
+                val policy = entry.config.recoveryPolicy
+                val now = System.currentTimeMillis()
+                val last = entry.lastRecoveryAtEpochMs
+                if (last == null || now - last > policy.resetWindowMs) {
+                    entry.recoveryAttempts = 0
+                }
+                if (entry.recoveryAttempts >= policy.maxRestarts) {
+                    entry.lifecycleState = PluginLifecycleState.FAILED
+                    entry.processState = PluginProcessState.FAILED
+                    entry.healthState = PluginHealthState.UNREACHABLE
+                    recordFailure(entry, "recovery", "Recovery budget exhausted: $reason")
+                    return@withPluginLock
+                }
+
+                entry.recoveryAttempts += 1
+                entry.lastRecoveryAtEpochMs = now
+                val exponential = 1L shl (entry.recoveryAttempts - 1).coerceAtLeast(0)
+                val backoffMs = (policy.baseBackoffMs * exponential).coerceAtMost(policy.maxBackoffMs)
+                delay(backoffMs)
+
+                if (suggestTcpFallback) {
+                    entry.stickyCommunicationMode = JvmCommunicationMode.TCP
+                }
+                runCatching {
+                    stopPluginLocked(entry)
+                    startPluginLocked(entry, resetRecoveryBudget = false)
+                }.onFailure { error ->
+                    recordFailure(entry, "recovery", "Recovery attempt failed: ${error.message ?: reason}")
+                    entry.lifecycleState = PluginLifecycleState.FAILED
+                    entry.healthState = PluginHealthState.UNREACHABLE
+                    entry.processState = PluginProcessState.FAILED
+                }
+            } finally {
+                entry.recoveryInProgress.set(false)
+            }
         }
     }
 
@@ -564,6 +643,7 @@ class UnifiedPluginManager(
         stopPluginLocked(entry)
         disposePluginLocked(entry)
         entry.config = loadConfig()
+        entry.stickyCommunicationMode = null
         entry.generation = entry.generation.next()
         normalizeProcessState(entry)
         entry.lastFailure = null
@@ -657,6 +737,21 @@ class UnifiedPluginManager(
         return "$prefix-$suffix"
     }
 
+    private fun validateServiceDeclaration(
+        descriptor: PluginDescriptor,
+        routeDefinitions: List<PluginRouteDefinition>
+    ) {
+        val requiredServices = buildSet {
+            if (routeDefinitions.any { it is PluginEndpointDefinition<*, *> }) add(PluginServiceType.ENDPOINT)
+            if (routeDefinitions.any { it is PluginSseDefinition }) add(PluginServiceType.SSE)
+            if (routeDefinitions.any { it is PluginStaticResourceDefinition }) add(PluginServiceType.STATIC_RESOURCE)
+        }
+        val missing = requiredServices - descriptor.supportedServices
+        require(missing.isEmpty()) {
+            "Plugin ${descriptor.pluginId} is missing service declarations: ${missing.joinToString()}"
+        }
+    }
+
     private fun mountPluginRoutes(routing: Routing, entry: ManagedPlugin) {
         val pluginId = entry.plugin.descriptor.pluginId
         val routes = entry.plugin.endpoints()
@@ -708,11 +803,14 @@ class UnifiedPluginManager(
             }
             for (definition in sseRoutes) {
                 registerPluginSseOperation(pluginId, definition.path, definition.doc)
-                mountSse(definition.path, pluginId, definition.path)
+                mountSse(entry, definition.path, pluginId, definition.path)
             }
             for (definition in staticRoutes) {
                 registerPluginStaticOperation(pluginId, definition.path, definition.index != null, definition.doc)
-                staticResources(definition.path, definition.basePackage, definition.index)
+                when (entry.config.runtimeMode) {
+                    PluginRuntimeMode.IN_PROCESS -> staticResources(definition.path, definition.basePackage, definition.index)
+                    PluginRuntimeMode.EXTERNAL_JVM -> mountExternalStatic(definition.path, pluginId, definition.path)
+                }
             }
         }
         validateOpenApiTopologyRegistration(
@@ -778,7 +876,7 @@ class UnifiedPluginManager(
         }
     }
 
-    private fun Route.mountSse(path: String, pluginId: String, ssePath: String) {
+    private fun Route.mountSse(entry: ManagedPlugin, path: String, pluginId: String, ssePath: String) {
         val handler: suspend io.ktor.server.sse.ServerSSESession.() -> Unit = {
             when (resolveDispatchDisposition(pluginId)) {
                 PluginDispatchDisposition.NOT_FOUND -> {
@@ -790,13 +888,25 @@ class UnifiedPluginManager(
                 }
                 PluginDispatchDisposition.PASS_THROUGH,
                 PluginDispatchDisposition.AVAILABLE -> {
-                    val definition = resolveSseDefinition(pluginId, ssePath)
-                    if (definition == null) {
-                        send(ServerSentEvent(data = """{"error":"plugin route unavailable"}""", event = "error"))
-                        close()
-                    } else {
-                        val context = buildRequestContext(call, pluginId, HttpMethod.Get, call.request.path())
-                        definition.handler.invoke(PluginSseSession(context, this))
+                    when (entry.config.runtimeMode) {
+                        PluginRuntimeMode.IN_PROCESS -> {
+                            val definition = resolveSseDefinition(pluginId, ssePath)
+                            if (definition == null) {
+                                send(ServerSentEvent(data = """{"error":"plugin route unavailable"}""", event = "error"))
+                                close()
+                            } else {
+                                val context = buildRequestContext(call, pluginId, HttpMethod.Get, call.request.path())
+                                definition.handler.invoke(
+                                    PluginSseSession(
+                                        request = context,
+                                        sender = { event -> send(event) }
+                                    )
+                                )
+                            }
+                        }
+                        PluginRuntimeMode.EXTERNAL_JVM -> {
+                            streamSseFromExternal(entry, ssePath)
+                        }
                     }
                 }
             }
@@ -805,6 +915,108 @@ class UnifiedPluginManager(
             sse(handler)
         } else {
             sse(path, handler)
+        }
+    }
+
+    private fun Route.mountExternalStatic(path: String, pluginId: String, staticPath: String) {
+        if (path.isBlank()) {
+            get("{...}") { proxyExternalStatic(pluginId, staticPath) }
+        } else {
+            get("$path/{...}") { proxyExternalStatic(pluginId, staticPath) }
+        }
+    }
+
+    private suspend fun io.ktor.server.routing.RoutingContext.proxyExternalStatic(
+        pluginId: String,
+        staticPath: String
+    ) {
+        val entry = entries[pluginId] ?: run {
+            call.respond(HttpStatusCode.NotFound, "Plugin not found")
+            return
+        }
+        val supervisor = entry.supervisor ?: run {
+            call.respond(HttpStatusCode.ServiceUnavailable, "Plugin supervisor unavailable")
+            return
+        }
+        val tail = call.parameters.getAll("...")?.joinToString("/") ?: ""
+        val resourcePath = if (tail.isBlank()) "/" else "/$tail"
+        val response = runCatching {
+            supervisor.fetchStaticResource(
+                routePath = staticPath,
+                resourcePath = resourcePath,
+                requestHeaders = call.request.headers.entries().associate { it.key to it.value }
+            )
+        }.getOrElse { error ->
+            call.respond(HttpStatusCode.ServiceUnavailable, "Static proxy failed: ${error.message}")
+            return
+        }
+        response.headers.forEach { (key, values) ->
+            values.forEach { call.response.headers.append(key, it, safeOnly = false) }
+        }
+        val status = HttpStatusCode.fromValue(response.status)
+        val body = response.bodyBase64?.let { Base64.getDecoder().decode(it) }
+        if (body == null) {
+            call.respond(status, response.errorMessage ?: "")
+            return
+        }
+        val contentType = response.headers["Content-Type"]?.firstOrNull()?.let { ContentType.parse(it) }
+            ?: ContentType.Application.OctetStream
+        call.respondBytes(body, contentType = contentType, status = status)
+    }
+
+    @OptIn(ExperimentalUuidApi::class)
+    private suspend fun io.ktor.server.sse.ServerSSESession.streamSseFromExternal(
+        entry: ManagedPlugin,
+        routePath: String
+    ) {
+        val supervisor = entry.supervisor ?: run {
+            send(ServerSentEvent(data = """{"error":"plugin supervisor unavailable"}""", event = "error"))
+            close()
+            return
+        }
+        val streamId = Uuid.random().toString()
+        val eventChannel = Channel<PluginSseDataEvent>(capacity = Channel.BUFFERED)
+        supervisor.registerSseStreamListener(
+            streamId = streamId,
+            onData = { event ->
+                eventChannel.trySend(event)
+            },
+            onClosed = {
+                eventChannel.close()
+            }
+        )
+        try {
+            val call = call
+            val requestId = call.request.headers["X-Request-Id"] ?: streamId
+            val open = supervisor.openSseStream(
+                streamId = streamId,
+                routePath = routePath,
+                requestId = requestId,
+                rawPath = call.request.path(),
+                pathParameters = call.parameters.entries().associate { it.key to it.value.first() },
+                queryParameters = call.request.queryParameters.entries().associate { it.key to it.value },
+                headers = call.request.headers.entries().associate { it.key to it.value }
+            )
+            if (!open.accepted) {
+                send(ServerSentEvent(data = open.errorMessage ?: "SSE open rejected", event = "error"))
+                close()
+                return
+            }
+            while (true) {
+                val event = eventChannel.receiveCatching().getOrNull() ?: break
+                send(
+                    ServerSentEvent(
+                        data = event.data,
+                        event = event.event,
+                        id = event.id,
+                        retry = event.retry
+                    )
+                )
+            }
+        } finally {
+            runCatching { supervisor.closeSseStream(streamId) }
+            supervisor.unregisterSseStreamListener(streamId)
+            eventChannel.close()
         }
     }
 
@@ -1104,6 +1316,7 @@ class UnifiedPluginManager(
         var endpointById: MutableMap<String, PluginEndpointDefinition<*, *>>,
         var endpointTopology: Set<String>,
         var sseByPath: MutableMap<String, PluginSseDefinition>,
+        var routeDefinitions: List<PluginRouteDefinition>,
         var config: PluginConfig,
         var lifecycleState: PluginLifecycleState,
         var healthState: PluginHealthState,
@@ -1120,6 +1333,10 @@ class UnifiedPluginManager(
         var lastFailure: PluginFailureRecord? = null,
         var runtimeContext: BasicPluginRuntimeContext? = null,
         var sourceClassLoader: URLClassLoader? = null,
+        var stickyCommunicationMode: JvmCommunicationMode? = null,
+        var recoveryAttempts: Int = 0,
+        var lastRecoveryAtEpochMs: Long? = null,
+        val recoveryInProgress: AtomicBoolean = AtomicBoolean(false),
         val serviceRouteInstallers: List<Route.() -> Unit> = emptyList()
     )
 

@@ -30,13 +30,22 @@ import com.keel.jvm.runtime.PluginFailureEvent
 import com.keel.jvm.runtime.PluginLogEvent
 import com.keel.jvm.runtime.PluginTraceEvent
 import com.keel.jvm.runtime.PluginDisposedEvent
+import com.keel.jvm.runtime.PluginRouteInventoryItem
 import com.keel.jvm.runtime.PluginReadyEvent
 import com.keel.jvm.runtime.PluginRuntimeEvent
+import com.keel.jvm.runtime.PluginSseClosedEvent
+import com.keel.jvm.runtime.PluginSseDataEvent
 import com.keel.jvm.runtime.PluginStoppingEvent
 import com.keel.jvm.runtime.PluginJvmFrameCodec
 import com.keel.jvm.runtime.PluginJvmJson
 import com.keel.jvm.runtime.ReloadPrepareRequest
 import com.keel.jvm.runtime.ReloadPrepareResponse
+import com.keel.jvm.runtime.SseCloseRequest
+import com.keel.jvm.runtime.SseCloseResponse
+import com.keel.jvm.runtime.SseOpenRequest
+import com.keel.jvm.runtime.SseOpenResponse
+import com.keel.jvm.runtime.StaticFetchRequest
+import com.keel.jvm.runtime.StaticFetchResponse
 import com.keel.jvm.runtime.ShutdownRequest
 import com.keel.jvm.runtime.ShutdownResponse
 import io.ktor.server.application.ApplicationCall
@@ -51,6 +60,7 @@ import java.nio.channels.ServerSocketChannel
 import java.nio.channels.SocketChannel
 import java.nio.file.Path
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.ConcurrentHashMap
 import kotlin.io.path.deleteIfExists
 import kotlin.io.path.exists
 import kotlin.io.path.pathString
@@ -96,13 +106,15 @@ class PluginProcessSupervisor(
     private val descriptor: PluginDescriptor,
     private val pluginClassName: String,
     private val config: PluginConfig,
-    private val expectedEndpoints: List<PluginEndpointDefinition<*, *>>,
+    private val expectedRoutes: List<com.keel.kernel.plugin.PluginRouteDefinition>,
     private val classpath: String,
     private val runtimeDir: Path,
     private val generation: PluginGeneration,
     private val onStateChange: (PluginProcessState) -> Unit,
     private val onHealthChange: (PluginHealthState) -> Unit,
     private val onFailure: (PluginFailureRecord) -> Unit = {},
+    private val onTerminalFailure: (reason: String, suggestTcpFallback: Boolean) -> Unit = { _, _ -> },
+    private val forcedCommunicationMode: JvmCommunicationMode? = null,
     private val observabilityHub: ObservabilityHub? = null
 ) {
     private val logger = KeelLoggerService.getLogger("PluginProcessSupervisor")
@@ -124,14 +136,32 @@ class PluginProcessSupervisor(
     private var droppedLogCount: Long = 0
     private var eventOverflowed: Boolean = false
     private var eventQueueDepth: Int = 0
+    private var activeCommunicationMode: JvmCommunicationMode? = null
+    private var fallbackActivated: Boolean = false
+    private var lastFallbackReason: String? = null
+    private var stopping: Boolean = false
+    private var terminalFailureReported: Boolean = false
+    private val sseListeners = ConcurrentHashMap<String, SseStreamListener>()
+
+    private data class SseStreamListener(
+        val onData: (PluginSseDataEvent) -> Unit,
+        val onClosed: () -> Unit
+    )
 
     suspend fun start() {
+        stopping = false
+        terminalFailureReported = false
         var lastError: Throwable? = null
         val strategy = descriptor.communicationStrategy
         repeat(strategy.maxAttempts) { attempt ->
             try {
-                val mode = if (attempt == 0) strategy.preferredMode else strategy.fallbackMode
+                val mode = forcedCommunicationMode ?: if (attempt == 0) strategy.preferredMode else strategy.fallbackMode
                 currentConnectionInfo = createConnectionInfo(mode)
+                activeCommunicationMode = mode
+                fallbackActivated = mode != strategy.preferredMode
+                if (fallbackActivated) {
+                    lastFallbackReason = "startup-attempt-${attempt + 1}"
+                }
                 
                 prepareEventServer()
                 launchProcess()
@@ -173,6 +203,7 @@ class PluginProcessSupervisor(
     }
 
     suspend fun stop() {
+        stopping = true
         onStateChange(PluginProcessState.STOPPING)
         healthJob?.cancel()
         runCatching {
@@ -204,12 +235,83 @@ class PluginProcessSupervisor(
         return true
     }
 
+    fun registerSseStreamListener(
+        streamId: String,
+        onData: (PluginSseDataEvent) -> Unit,
+        onClosed: () -> Unit
+    ) {
+        sseListeners[streamId] = SseStreamListener(onData = onData, onClosed = onClosed)
+    }
+
+    fun unregisterSseStreamListener(streamId: String) {
+        sseListeners.remove(streamId)
+    }
+
+    suspend fun fetchStaticResource(
+        routePath: String,
+        resourcePath: String,
+        requestHeaders: Map<String, List<String>>
+    ): StaticFetchResponse {
+        val request = StaticFetchRequest(
+            pluginId = descriptor.pluginId,
+            generation = generation.value,
+            timestamp = System.currentTimeMillis(),
+            messageId = newMessageId(),
+            authToken = authToken,
+            routePath = routePath,
+            resourcePath = resourcePath,
+            requestHeaders = requestHeaders
+        )
+        return sendInvokeMessage(request, StaticFetchResponse.serializer(), config.callTimeoutMs)
+    }
+
+    suspend fun openSseStream(
+        streamId: String,
+        routePath: String,
+        requestId: String,
+        rawPath: String,
+        pathParameters: Map<String, String>,
+        queryParameters: Map<String, List<String>>,
+        headers: Map<String, List<String>>
+    ): SseOpenResponse {
+        val request = SseOpenRequest(
+            pluginId = descriptor.pluginId,
+            generation = generation.value,
+            timestamp = System.currentTimeMillis(),
+            messageId = newMessageId(),
+            authToken = authToken,
+            streamId = streamId,
+            routePath = routePath,
+            requestId = requestId,
+            rawPath = rawPath,
+            pathParameters = pathParameters,
+            queryParameters = queryParameters,
+            headers = headers
+        )
+        return sendAdminMessage(request, SseOpenResponse.serializer(), config.callTimeoutMs)
+    }
+
+    suspend fun closeSseStream(streamId: String): SseCloseResponse {
+        val request = SseCloseRequest(
+            pluginId = descriptor.pluginId,
+            generation = generation.value,
+            timestamp = System.currentTimeMillis(),
+            messageId = newMessageId(),
+            authToken = authToken,
+            streamId = streamId
+        )
+        return sendAdminMessage(request, SseCloseResponse.serializer(), config.callTimeoutMs)
+    }
+
     fun diagnosticsSnapshot(): PluginRuntimeDiagnostics {
         val processAlive = process?.isAlive
         return PluginRuntimeDiagnostics(
             processAlive = processAlive,
             adminChannelHealth = adminChannelHealth(processAlive),
             eventChannelHealth = eventChannelHealth(processAlive),
+            activeCommunicationMode = activeCommunicationMode,
+            fallbackActivated = fallbackActivated,
+            lastFallbackReason = lastFallbackReason,
             droppedLogCount = droppedLogCount,
             eventQueueDepth = eventQueueDepth,
             eventOverflowed = eventOverflowed,
@@ -263,6 +365,10 @@ class PluginProcessSupervisor(
             sendInvokeMessage(request, InvokeResponse.serializer(), timeoutMs)
         }.getOrElse { error ->
             logger.warn("Invoke channel failed pluginId=${descriptor.pluginId} endpoint=${endpoint.endpointId}: ${error.message}")
+            reportTerminalFailure(
+                reason = "invoke-lane-unavailable:${error.message}",
+                suggestTcpFallback = activeCommunicationMode == JvmCommunicationMode.UDS
+            )
             return unavailableResponse(call, "Plugin '${descriptor.pluginId}' invoke channel is unavailable")
         }
 
@@ -425,6 +531,12 @@ class PluginProcessSupervisor(
 
                 if (response == null) {
                     controlFailureCount += 1
+                    if (controlFailureCount > 1) {
+                        reportTerminalFailure(
+                            reason = "admin-lane-unavailable",
+                            suggestTcpFallback = activeCommunicationMode == JvmCommunicationMode.UDS
+                        )
+                    }
                 } else {
                     controlFailureCount = 0
                     lastHealthLatencyMs = System.currentTimeMillis() - startedAt
@@ -449,11 +561,20 @@ class PluginProcessSupervisor(
                     onStateChange(PluginProcessState.FAILED)
                 }
                 onHealthChange(PluginHealthState.UNREACHABLE)
+                if (!stopping) {
+                    reportTerminalFailure(
+                        reason = "process-exit:$exitCode",
+                        suggestTcpFallback = activeCommunicationMode == JvmCommunicationMode.UDS
+                    )
+                }
             }
         }
     }
 
     private fun stopProcess(force: Boolean) {
+        if (!force) {
+            stopping = true
+        }
         healthJob?.cancel()
         processExitJob?.cancel()
         eventServerJob?.cancel()
@@ -557,6 +678,9 @@ class PluginProcessSupervisor(
         is ShutdownRequest -> PluginJvmJson.instance.encodeToString(ShutdownRequest.serializer(), message)
         is ReloadPrepareRequest -> PluginJvmJson.instance.encodeToString(ReloadPrepareRequest.serializer(), message)
         is InvokeRequest -> PluginJvmJson.instance.encodeToString(InvokeRequest.serializer(), message)
+        is StaticFetchRequest -> PluginJvmJson.instance.encodeToString(StaticFetchRequest.serializer(), message)
+        is SseOpenRequest -> PluginJvmJson.instance.encodeToString(SseOpenRequest.serializer(), message)
+        is SseCloseRequest -> PluginJvmJson.instance.encodeToString(SseCloseRequest.serializer(), message)
         else -> error("Unsupported JVM protocol message type: ${message::class.qualifiedName}")
     }
 
@@ -647,6 +771,18 @@ class PluginProcessSupervisor(
                     onHealthChange(PluginHealthState.UNREACHABLE)
                 }
             }
+            "plugin-sse-data-event" -> {
+                val event = PluginJvmJson.instance.decodeFromString(PluginSseDataEvent.serializer(), payload)
+                if (validateEvent(event)) {
+                    sseListeners[event.streamId]?.onData?.invoke(event)
+                }
+            }
+            "plugin-sse-closed-event" -> {
+                val event = PluginJvmJson.instance.decodeFromString(PluginSseClosedEvent.serializer(), payload)
+                if (validateEvent(event)) {
+                    sseListeners.remove(event.streamId)?.onClosed?.invoke()
+                }
+            }
             else -> {
                 logger.warn("Ignoring unknown event kind '$kind' for pluginId=${descriptor.pluginId}")
             }
@@ -676,14 +812,38 @@ class PluginProcessSupervisor(
         if (response.generation != generation.value) return false
         if (response.runtimeMode != PluginRuntimeMode.EXTERNAL_JVM.name) return false
         if (response.descriptorVersion != descriptor.version) return false
+        if (response.supportedServices.toSet() != descriptor.supportedServices.map { it.name }.toSet()) return false
 
-        val expectedInventory = expectedEndpoints.map {
+        val expectedEndpointInventory = expectedRoutes
+            .filterIsInstance<PluginEndpointDefinition<*, *>>()
+            .map {
             Triple(it.endpointId, it.method.value, it.path)
         }.toSet()
-        val actualInventory = response.endpointInventory.map {
+        val actualEndpointInventory = response.endpointInventory.map {
             Triple(it.endpointId, it.method, it.path)
         }.toSet()
-        return expectedInventory == actualInventory
+        if (expectedEndpointInventory != actualEndpointInventory) return false
+
+        val expectedRouteInventory = expectedRoutes.mapNotNull { route ->
+            when (route) {
+                is PluginEndpointDefinition<*, *> -> PluginRouteInventoryItem(
+                    routeType = "ENDPOINT",
+                    path = route.path,
+                    method = route.method.value,
+                    endpointId = route.endpointId
+                )
+                is com.keel.kernel.plugin.PluginSseDefinition -> PluginRouteInventoryItem(
+                    routeType = "SSE",
+                    path = route.path
+                )
+                is com.keel.kernel.plugin.PluginStaticResourceDefinition -> PluginRouteInventoryItem(
+                    routeType = "STATIC_RESOURCE",
+                    path = route.path
+                )
+            }
+        }.toSet()
+        val actualRouteInventory = response.routeInventory.toSet()
+        return expectedRouteInventory == actualRouteInventory
     }
 
     private fun recomputeHealth() {
@@ -710,6 +870,16 @@ class PluginProcessSupervisor(
         eventOverflowed -> PluginChannelHealth.UNREACHABLE
         !eventChannelConnected -> PluginChannelHealth.DEGRADED
         else -> PluginChannelHealth.HEALTHY
+    }
+
+    private fun reportTerminalFailure(reason: String, suggestTcpFallback: Boolean) {
+        if (stopping || terminalFailureReported) return
+        terminalFailureReported = true
+        if (suggestTcpFallback) {
+            fallbackActivated = true
+            lastFallbackReason = reason
+        }
+        onTerminalFailure(reason, suggestTcpFallback)
     }
 
     private fun recordFailure(source: String, message: String) {
