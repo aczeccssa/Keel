@@ -3,7 +3,7 @@ package com.keel.jvm.runtime
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
-const val PLUGIN_JVM_PROTOCOL_VERSION: Int = 1
+const val PLUGIN_JVM_PROTOCOL_VERSION: Int = 2
 
 object PluginJvmLimits {
     const val NORMAL_FRAME_BYTES: Int = 256 * 1024
@@ -34,6 +34,14 @@ data class PluginEndpointInventoryItem(
 )
 
 @Serializable
+data class PluginRouteInventoryItem(
+    val routeType: String,
+    val path: String,
+    val method: String? = null,
+    val endpointId: String? = null
+)
+
+@Serializable
 data class HandshakeRequest(
     val kind: String = "handshake-request",
     override val protocolVersion: Int = PLUGIN_JVM_PROTOCOL_VERSION,
@@ -56,7 +64,9 @@ data class HandshakeResponse(
     override val correlationId: String,
     val descriptorVersion: String,
     val runtimeMode: String,
+    val supportedServices: List<String> = emptyList(),
     val endpointInventory: List<PluginEndpointInventoryItem>,
+    val routeInventory: List<PluginRouteInventoryItem> = emptyList(),
     val accepted: Boolean,
     val reason: String? = null
 ) : PluginJvmControlResponse
@@ -166,6 +176,90 @@ data class ReloadPrepareRequest(
 @Serializable
 data class ReloadPrepareResponse(
     val kind: String = "reload-prepare-response",
+    override val protocolVersion: Int = PLUGIN_JVM_PROTOCOL_VERSION,
+    override val pluginId: String,
+    override val generation: Long,
+    override val timestamp: Long,
+    override val messageId: String,
+    override val correlationId: String,
+    val accepted: Boolean
+) : PluginJvmControlResponse
+
+@Serializable
+data class StaticFetchRequest(
+    val kind: String = "static-fetch-request",
+    override val protocolVersion: Int = PLUGIN_JVM_PROTOCOL_VERSION,
+    override val pluginId: String,
+    override val generation: Long,
+    override val timestamp: Long,
+    override val messageId: String,
+    val authToken: String,
+    val routePath: String,
+    val resourcePath: String,
+    val requestHeaders: Map<String, List<String>> = emptyMap()
+) : PluginJvmMessage
+
+@Serializable
+data class StaticFetchResponse(
+    val kind: String = "static-fetch-response",
+    override val protocolVersion: Int = PLUGIN_JVM_PROTOCOL_VERSION,
+    override val pluginId: String,
+    override val generation: Long,
+    override val timestamp: Long,
+    override val messageId: String,
+    override val correlationId: String,
+    val status: Int,
+    val headers: Map<String, List<String>> = emptyMap(),
+    val bodyBase64: String? = null,
+    val errorMessage: String? = null
+) : PluginJvmControlResponse
+
+@Serializable
+data class SseOpenRequest(
+    val kind: String = "sse-open-request",
+    override val protocolVersion: Int = PLUGIN_JVM_PROTOCOL_VERSION,
+    override val pluginId: String,
+    override val generation: Long,
+    override val timestamp: Long,
+    override val messageId: String,
+    val authToken: String,
+    val streamId: String,
+    val routePath: String,
+    val requestId: String,
+    val rawPath: String,
+    val pathParameters: Map<String, String>,
+    val queryParameters: Map<String, List<String>>,
+    val headers: Map<String, List<String>>
+) : PluginJvmMessage
+
+@Serializable
+data class SseOpenResponse(
+    val kind: String = "sse-open-response",
+    override val protocolVersion: Int = PLUGIN_JVM_PROTOCOL_VERSION,
+    override val pluginId: String,
+    override val generation: Long,
+    override val timestamp: Long,
+    override val messageId: String,
+    override val correlationId: String,
+    val accepted: Boolean,
+    val errorMessage: String? = null
+) : PluginJvmControlResponse
+
+@Serializable
+data class SseCloseRequest(
+    val kind: String = "sse-close-request",
+    override val protocolVersion: Int = PLUGIN_JVM_PROTOCOL_VERSION,
+    override val pluginId: String,
+    override val generation: Long,
+    override val timestamp: Long,
+    override val messageId: String,
+    val authToken: String,
+    val streamId: String
+) : PluginJvmMessage
+
+@Serializable
+data class SseCloseResponse(
+    val kind: String = "sse-close-response",
     override val protocolVersion: Int = PLUGIN_JVM_PROTOCOL_VERSION,
     override val pluginId: String,
     override val generation: Long,
@@ -305,6 +399,34 @@ data class PluginEventQueueOverflowEvent(
     override val authToken: String,
     val queueType: String,
     val capacity: Int
+) : PluginRuntimeEvent
+
+@Serializable
+data class PluginSseDataEvent(
+    val kind: String = "plugin-sse-data-event",
+    override val protocolVersion: Int = PLUGIN_JVM_PROTOCOL_VERSION,
+    override val pluginId: String,
+    override val generation: Long,
+    override val timestamp: Long,
+    override val messageId: String,
+    override val authToken: String,
+    val streamId: String,
+    val event: String? = null,
+    val data: String? = null,
+    val id: String? = null,
+    val retry: Long? = null
+) : PluginRuntimeEvent
+
+@Serializable
+data class PluginSseClosedEvent(
+    val kind: String = "plugin-sse-closed-event",
+    override val protocolVersion: Int = PLUGIN_JVM_PROTOCOL_VERSION,
+    override val pluginId: String,
+    override val generation: Long,
+    override val timestamp: Long,
+    override val messageId: String,
+    override val authToken: String,
+    val streamId: String
 ) : PluginRuntimeEvent
 
 object PluginJvmJson {

@@ -13,6 +13,7 @@ import com.keel.kernel.plugin.PluginLifecycleState
 import com.keel.kernel.plugin.PluginProcessState
 import com.keel.kernel.plugin.PluginRuntimeMode
 import com.keel.kernel.plugin.PluginRuntimeSnapshot
+import com.keel.kernel.plugin.JvmCommunicationMode
 import com.keel.kernel.plugin.UnifiedPluginManager
 import com.keel.openapi.runtime.OpenApiDoc
 import io.ktor.server.application.call
@@ -231,6 +232,9 @@ private fun PluginRuntimeSnapshot.toPluginInfo(): PluginInfo {
         processState = processState,
         processId = processId,
         processAlive = diagnostics.processAlive ?: processHandleAlive,
+        activeCommunicationMode = diagnostics.activeCommunicationMode,
+        fallbackActivated = diagnostics.fallbackActivated,
+        lastFallbackReason = diagnostics.lastFallbackReason,
         adminChannelHealth = diagnostics.adminChannelHealth,
         eventChannelHealth = diagnostics.eventChannelHealth,
         socketHealthy = socketHealthy,
@@ -276,6 +280,9 @@ data class PluginInfo(
     val processState: PluginProcessState? = null,
     val processId: Long? = null,
     val processAlive: Boolean? = null,
+    val activeCommunicationMode: JvmCommunicationMode? = null,
+    val fallbackActivated: Boolean = false,
+    val lastFallbackReason: String? = null,
     val adminChannelHealth: PluginChannelHealth = PluginChannelHealth.UNKNOWN,
     val eventChannelHealth: PluginChannelHealth = PluginChannelHealth.UNKNOWN,
     val socketHealthy: Boolean = false,
