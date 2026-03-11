@@ -531,6 +531,11 @@ class UnifiedPluginManager(
                     entry.recoveryAttempts = 0
                 }
                 if (entry.recoveryAttempts >= policy.maxRestarts) {
+                    runCatching {
+                        stopPluginLocked(entry)
+                    }.onFailure { stopError ->
+                        logger.warn("Failed to stop plugin while exhausting recovery budget pluginId=$pluginId: ${stopError.message}")
+                    }
                     entry.lifecycleState = PluginLifecycleState.FAILED
                     entry.processState = PluginProcessState.FAILED
                     entry.healthState = PluginHealthState.UNREACHABLE
@@ -975,11 +980,13 @@ class UnifiedPluginManager(
             return
         }
         val streamId = Uuid.random().toString()
-        val eventChannel = Channel<PluginSseDataEvent>(capacity = Channel.BUFFERED)
+        val eventChannel = Channel<PluginSseDataEvent>(capacity = Channel.UNLIMITED)
         supervisor.registerSseStreamListener(
             streamId = streamId,
             onData = { event ->
-                eventChannel.trySend(event)
+                if (eventChannel.trySend(event).isFailure) {
+                    logger.warn("Dropped SSE event for pluginId=${entry.plugin.descriptor.pluginId} streamId=$streamId because the stream is closed")
+                }
             },
             onClosed = {
                 eventChannel.close()

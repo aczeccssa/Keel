@@ -998,7 +998,7 @@ object ExternalPluginHostMain {
         eventEmitter: PluginEventEmitter
     ) {
         val request = PluginJvmJson.instance.decodeFromString(StaticFetchRequest.serializer(), payload)
-        if (!validateControlRequest(request.pluginId, request.generation, request.authToken, plugin.descriptor.pluginId, generation, authToken)) {
+        suspend fun sendErrorResponse(status: Int, errorMessage: String) {
             PluginJvmFrameCodec.write(
                 channel,
                 PluginJvmJson.instance.encodeToString(
@@ -1009,69 +1009,31 @@ object ExternalPluginHostMain {
                         timestamp = System.currentTimeMillis(),
                         messageId = eventEmitter.newMessageId(),
                         correlationId = request.messageId,
-                        status = 403,
-                        errorMessage = "Invalid auth token"
+                        status = status,
+                        errorMessage = errorMessage
                     )
                 )
             )
+        }
+
+        if (!validateControlRequest(request.pluginId, request.generation, request.authToken, plugin.descriptor.pluginId, generation, authToken)) {
+            sendErrorResponse(status = 403, errorMessage = "Invalid auth token")
             return
         }
         val definition = staticRoutes[request.routePath]
         if (definition == null) {
-            PluginJvmFrameCodec.write(
-                channel,
-                PluginJvmJson.instance.encodeToString(
-                    StaticFetchResponse.serializer(),
-                    StaticFetchResponse(
-                        pluginId = plugin.descriptor.pluginId,
-                        generation = generation,
-                        timestamp = System.currentTimeMillis(),
-                        messageId = eventEmitter.newMessageId(),
-                        correlationId = request.messageId,
-                        status = 404,
-                        errorMessage = "Static route not found"
-                    )
-                )
-            )
+            sendErrorResponse(status = 404, errorMessage = "Static route not found")
             return
         }
         val relativePath = normalizeStaticResourcePath(request.resourcePath, definition.index)
         if (relativePath.isNullOrBlank()) {
-            PluginJvmFrameCodec.write(
-                channel,
-                PluginJvmJson.instance.encodeToString(
-                    StaticFetchResponse.serializer(),
-                    StaticFetchResponse(
-                        pluginId = plugin.descriptor.pluginId,
-                        generation = generation,
-                        timestamp = System.currentTimeMillis(),
-                        messageId = eventEmitter.newMessageId(),
-                        correlationId = request.messageId,
-                        status = 404,
-                        errorMessage = "Static resource not found"
-                    )
-                )
-            )
+            sendErrorResponse(status = 404, errorMessage = "Static resource not found")
             return
         }
         val resourceName = "${definition.basePackage.replace('.', '/')}/$relativePath"
         val bytes = plugin.javaClass.classLoader.getResourceAsStream(resourceName)?.use { it.readAllBytes() }
         if (bytes == null) {
-            PluginJvmFrameCodec.write(
-                channel,
-                PluginJvmJson.instance.encodeToString(
-                    StaticFetchResponse.serializer(),
-                    StaticFetchResponse(
-                        pluginId = plugin.descriptor.pluginId,
-                        generation = generation,
-                        timestamp = System.currentTimeMillis(),
-                        messageId = eventEmitter.newMessageId(),
-                        correlationId = request.messageId,
-                        status = 404,
-                        errorMessage = "Static resource not found"
-                    )
-                )
-            )
+            sendErrorResponse(status = 404, errorMessage = "Static resource not found")
             return
         }
         val contentType = java.net.URLConnection.guessContentTypeFromName(relativePath) ?: "application/octet-stream"
