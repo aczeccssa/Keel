@@ -256,6 +256,7 @@ Notes:
 - Default watch scope is caller module + recursive Gradle `project(...)` dependencies.
 - Calling `watchDirectories(...)` overrides the default watch scope.
 - Endpoint topology changes (method/path set changes) are not hot-swapped and are treated as restart-required.
+- Changes to plugin `ktorPlugins()` scope declarations are treated as restart-required during dev hot reload.
 - Manual dev reload API: `POST /api/_system/hotreload/reload/{pluginId}`.
 - Legacy `pluginSource(...)` remains available for compatibility but is deprecated.
 
@@ -350,6 +351,11 @@ fun main() {
     }
 }
 ```
+
+Migration note:
+- Host-side `plugin(...) { install(...) }` scope configuration is removed.
+- Declare Ktor installs inside each plugin via `override fun ktorPlugins()`.
+- Dev hot reload returns restart-required when `ktorPlugins()` scope signatures change.
 
 ## System APIs
 

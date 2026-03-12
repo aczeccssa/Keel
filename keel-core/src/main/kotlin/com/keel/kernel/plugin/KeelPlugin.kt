@@ -189,9 +189,14 @@ data class ApplicationKtorInstaller(
     val installer: Application.() -> Unit
 )
 
+data class ServiceKtorInstaller(
+    val pluginKey: String,
+    val installer: Route.() -> Unit
+)
+
 class PluginKtorConfig {
     private val applicationInstallers = mutableListOf<ApplicationKtorInstaller>()
-    private val serviceInstallers = mutableListOf<Route.() -> Unit>()
+    private val serviceInstallers = mutableListOf<ServiceKtorInstaller>()
 
     fun application(configure: ApplicationKtorPluginConfig.() -> Unit) {
         val config = ApplicationKtorPluginConfig().apply(configure)
@@ -205,7 +210,7 @@ class PluginKtorConfig {
 
     internal fun configuredApplicationInstallers(): List<ApplicationKtorInstaller> = applicationInstallers.toList()
 
-    internal fun configuredServiceInstallers(): List<Route.() -> Unit> = serviceInstallers.toList()
+    internal fun configuredServiceInstallers(): List<ServiceKtorInstaller> = serviceInstallers.toList()
 }
 
 class ApplicationKtorPluginConfig {
@@ -224,18 +229,18 @@ class ApplicationKtorPluginConfig {
 }
 
 class ServiceKtorPluginConfig {
-    private val installers = mutableListOf<Route.() -> Unit>()
+    private val installers = mutableListOf<ServiceKtorInstaller>()
 
     fun <B : Any, F : Any> install(
         plugin: BaseRouteScopedPlugin<B, F>,
         configure: B.() -> Unit = {}
     ) {
-        installers += {
+        installers += ServiceKtorInstaller(pluginKey = plugin.key.name) {
             install(plugin, configure)
         }
     }
 
-    internal fun toInstallers(): List<Route.() -> Unit> = installers.toList()
+    internal fun toInstallers(): List<ServiceKtorInstaller> = installers.toList()
 }
 
 sealed interface PluginRouteDefinition {

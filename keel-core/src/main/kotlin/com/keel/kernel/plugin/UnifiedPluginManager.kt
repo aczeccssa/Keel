@@ -78,6 +78,47 @@ class UnifiedPluginManager(
     private val logger = KeelLoggerService.getLogger("UnifiedPluginManager")
     private val entries = ConcurrentHashMap<String, ManagedPlugin>()
     private val developmentSources = ConcurrentHashMap<String, PluginDevelopmentSource>()
+
+    data class KtorScopeSignature(
+        val applicationPluginKeys: List<String>,
+        val servicePluginKeys: List<String>
+    )
+
+    data class ReloadCompatibilityDecision(
+        val outcome: DevReloadOutcome,
+        val message: String
+    )
+
+    companion object {
+        fun hasKtorScopeDrift(previous: KtorScopeSignature, current: KtorScopeSignature): Boolean {
+            return previous.applicationPluginKeys != current.applicationPluginKeys ||
+                previous.servicePluginKeys != current.servicePluginKeys
+        }
+
+        fun decideReloadCompatibility(
+            previousTopology: Set<String>,
+            newTopology: Set<String>,
+            previousKtorScope: KtorScopeSignature,
+            newKtorScope: KtorScopeSignature
+        ): ReloadCompatibilityDecision {
+            if (newTopology != previousTopology) {
+                return ReloadCompatibilityDecision(
+                    outcome = DevReloadOutcome.RESTART_REQUIRED,
+                    message = "Endpoint topology changed and requires restart"
+                )
+            }
+            if (hasKtorScopeDrift(previousKtorScope, newKtorScope)) {
+                return ReloadCompatibilityDecision(
+                    outcome = DevReloadOutcome.RESTART_REQUIRED,
+                    message = "Ktor scope configuration changed and requires restart"
+                )
+            }
+            return ReloadCompatibilityDecision(
+                outcome = DevReloadOutcome.RELOADED,
+                message = "Reload-compatible generation shape"
+            )
+        }
+    }
     private val pluginScopeManager = PluginScopeManager(kernelKoin)
     private val managerScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var routing: Routing? = null
@@ -195,7 +236,7 @@ class UnifiedPluginManager(
         val topology: Set<String>,
         val sseByPath: Map<String, PluginSseDefinition>,
         val pluginApplicationInstallers: List<ApplicationKtorInstaller>,
-        val pluginServiceRouteInstallers: List<Route.() -> Unit>,
+        val pluginServiceRouteInstallers: List<ServiceKtorInstaller>,
         val sourceClassLoader: URLClassLoader?,
         val config: PluginConfig,
         val generation: PluginGeneration
@@ -209,7 +250,7 @@ class UnifiedPluginManager(
         val topology: Set<String>,
         val sseByPath: Map<String, PluginSseDefinition>,
         val pluginApplicationInstallers: List<ApplicationKtorInstaller>,
-        val pluginServiceRouteInstallers: List<Route.() -> Unit>
+        val pluginServiceRouteInstallers: List<ServiceKtorInstaller>
     )
 
     private data class LoadResult(
@@ -286,11 +327,25 @@ class UnifiedPluginManager(
                 message = "Descriptor pluginId mismatch: expected ${source.pluginId}, actual ${newGeneration.plugin.descriptor.pluginId}"
             )
         }
-        if (newGeneration.topology != snapshot.topology) {
+        val previousKtorScope = KtorScopeSignature(
+            applicationPluginKeys = snapshot.pluginApplicationInstallers.map { it.pluginKey },
+            servicePluginKeys = snapshot.pluginServiceRouteInstallers.map { it.pluginKey }
+        )
+        val newKtorScope = KtorScopeSignature(
+            applicationPluginKeys = newGeneration.pluginApplicationInstallers.map { it.pluginKey },
+            servicePluginKeys = newGeneration.pluginServiceRouteInstallers.map { it.pluginKey }
+        )
+        val decision = decideReloadCompatibility(
+            previousTopology = snapshot.topology,
+            newTopology = newGeneration.topology,
+            previousKtorScope = previousKtorScope,
+            newKtorScope = newKtorScope
+        )
+        if (decision.outcome != DevReloadOutcome.RELOADED) {
             return ReloadAttemptResult(
                 pluginId = source.pluginId,
-                outcome = DevReloadOutcome.RESTART_REQUIRED,
-                message = "Endpoint topology changed and requires restart"
+                outcome = decision.outcome,
+                message = decision.message
             )
         }
         return null
@@ -837,7 +892,7 @@ class UnifiedPluginManager(
         }
         routing.route("/api/plugins/$pluginId") {
             entry.pluginServiceRouteInstallers.forEach { installer ->
-                installer(this)
+                installer.installer(this)
             }
             for (endpoint in endpoints) {
                 registerPluginOperation(pluginId, endpoint)
@@ -1389,7 +1444,7 @@ class UnifiedPluginManager(
         var lastRecoveryAtEpochMs: Long? = null,
         val recoveryInProgress: AtomicBoolean = AtomicBoolean(false),
         var pluginApplicationInstallers: List<ApplicationKtorInstaller> = emptyList(),
-        var pluginServiceRouteInstallers: List<Route.() -> Unit> = emptyList()
+        var pluginServiceRouteInstallers: List<ServiceKtorInstaller> = emptyList()
     )
 
     private data class BasicPluginInitContext(
