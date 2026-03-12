@@ -1,7 +1,7 @@
 package com.keel.test.kernel
 
 import com.keel.contract.dto.KeelResponse
-import com.keel.kernel.plugin.KeelPlugin
+import com.keel.kernel.plugin.StandardKeelPlugin
 import com.keel.kernel.plugin.PluginDescriptor
 import com.keel.kernel.plugin.PluginEndpointBuilders
 import com.keel.kernel.plugin.PluginResult
@@ -112,7 +112,7 @@ class GatewayInterceptorTest {
         assertEquals(HttpStatusCode.NotFound, response.status)
     }
 
-    private class NoopPlugin(id: String) : KeelPlugin {
+    private class NoopPlugin(id: String) : StandardKeelPlugin {
         override val descriptor: PluginDescriptor = PluginDescriptor(
             pluginId = id,
             version = "1.0.0",

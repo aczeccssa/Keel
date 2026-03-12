@@ -169,6 +169,7 @@ class PluginApiException(
 interface KeelPlugin {
     val descriptor: PluginDescriptor
 
+    // Backward-compatible defaults so plugins compiled against older KeelPlugin APIs keep behavior.
     suspend fun onInit(context: PluginInitContext) {}
 
     suspend fun onStart(context: PluginRuntimeContext) {}
@@ -181,8 +182,23 @@ interface KeelPlugin {
 
     fun ktorPlugins(): PluginKtorConfig = PluginKtorConfig()
 
-    fun endpoints(): List<PluginRouteDefinition>
+    fun endpoints(): List<PluginRouteDefinition> = emptyList()
 }
+
+interface LifecyclePlugin
+
+interface ModulePlugin
+
+interface KtorScopedPlugin
+
+interface EndpointPlugin
+
+interface StandardKeelPlugin :
+    KeelPlugin,
+    LifecyclePlugin,
+    EndpointPlugin,
+    ModulePlugin,
+    KtorScopedPlugin
 
 data class ApplicationKtorInstaller(
     val pluginKey: String,

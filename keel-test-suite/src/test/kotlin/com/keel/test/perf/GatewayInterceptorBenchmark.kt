@@ -4,7 +4,6 @@ import com.keel.kernel.plugin.KeelPlugin
 import com.keel.kernel.plugin.PluginDescriptor
 import com.keel.kernel.plugin.PluginDispatchDisposition
 import com.keel.kernel.plugin.PluginLifecycleState
-import com.keel.kernel.plugin.PluginRouteDefinition
 import com.keel.kernel.plugin.UnifiedPluginManager
 import com.keel.kernel.routing.GatewayInterceptor
 import kotlinx.coroutines.test.runTest
@@ -181,6 +180,5 @@ class GatewayInterceptorBenchmark {
             version = "1.0.0",
             displayName = pluginId
         )
-        override fun endpoints(): List<PluginRouteDefinition> = emptyList()
     }
 }

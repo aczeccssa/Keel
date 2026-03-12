@@ -2,9 +2,8 @@ package com.keel.test.kernel
 
 import com.keel.kernel.loader.DefaultPluginLoader
 import com.keel.kernel.plugin.KeelPlugin
+import com.keel.kernel.plugin.LifecyclePlugin
 import com.keel.kernel.plugin.PluginDescriptor
-import com.keel.kernel.plugin.PluginEndpointDefinition
-import com.keel.kernel.plugin.PluginRouteDefinition
 import com.keel.kernel.plugin.PluginRuntimeContext
 import com.keel.kernel.plugin.UnifiedPluginManager
 import com.keel.kernel.routing.unifiedSystemRoutes
@@ -160,7 +159,7 @@ class UnifiedSystemRoutesTest {
         return data["generation"]!!.jsonPrimitive.content.toLong()
     }
 
-    private class NoopPlugin(id: String) : KeelPlugin {
+    private class NoopPlugin(id: String) : KeelPlugin, LifecyclePlugin {
         override val descriptor: PluginDescriptor = PluginDescriptor(
             pluginId = id,
             version = "1.0.0",
@@ -168,7 +167,5 @@ class UnifiedSystemRoutesTest {
         )
 
         override suspend fun onStop(context: PluginRuntimeContext) = Unit
-
-        override fun endpoints(): List<PluginRouteDefinition> = emptyList()
     }
 }

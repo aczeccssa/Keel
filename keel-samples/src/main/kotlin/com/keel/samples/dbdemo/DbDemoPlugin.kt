@@ -3,7 +3,7 @@ package com.keel.samples.dbdemo
 import com.keel.db.database.DatabaseFactory
 import com.keel.db.database.KeelDatabase
 import com.keel.kernel.logging.KeelLoggerService
-import com.keel.kernel.plugin.KeelPlugin
+import com.keel.kernel.plugin.StandardKeelPlugin
 import com.keel.kernel.plugin.PluginApiException
 import com.keel.kernel.plugin.PluginDescriptor
 import com.keel.kernel.plugin.PluginEndpointBuilders
@@ -21,7 +21,7 @@ import com.keel.openapi.runtime.OpenApiDoc
     description = "CRUD operations for notes with soft-delete support using H2 in-memory database",
     version = "1.0.0"
 )
-class DbDemoPlugin : KeelPlugin {
+class DbDemoPlugin : StandardKeelPlugin {
     private val logger = KeelLoggerService.getLogger("DbDemoPlugin")
 
     override val descriptor: PluginDescriptor = PluginDescriptor(

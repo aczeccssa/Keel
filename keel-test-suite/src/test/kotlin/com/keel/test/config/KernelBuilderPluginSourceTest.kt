@@ -3,7 +3,6 @@ package com.keel.test.config
 import com.keel.kernel.config.buildKeel
 import com.keel.kernel.plugin.KeelPlugin
 import com.keel.kernel.plugin.PluginDescriptor
-import com.keel.kernel.plugin.PluginRouteDefinition
 import org.koin.core.context.stopKoin
 import kotlin.test.AfterTest
 import kotlin.test.Test
@@ -38,7 +37,5 @@ class KernelBuilderPluginSourceTest {
             version = "1.0.0",
             displayName = "Source Only Plugin"
         )
-
-        override fun endpoints(): List<PluginRouteDefinition> = emptyList()
     }
 }

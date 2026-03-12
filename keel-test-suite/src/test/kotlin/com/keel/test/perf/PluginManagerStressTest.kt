@@ -1,10 +1,10 @@
 package com.keel.test.perf
 
 import com.keel.kernel.plugin.KeelPlugin
+import com.keel.kernel.plugin.LifecyclePlugin
 import com.keel.kernel.plugin.PluginDescriptor
 import com.keel.kernel.plugin.PluginInitContext
 import com.keel.kernel.plugin.PluginLifecycleState
-import com.keel.kernel.plugin.PluginRouteDefinition
 import com.keel.kernel.plugin.UnifiedPluginManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -256,11 +256,9 @@ class PluginManagerStressTest {
             version = "1.0.0",
             displayName = pluginId
         )
-
-        override fun endpoints(): List<PluginRouteDefinition> = emptyList()
     }
 
-    private class CountingPlugin(pluginId: String) : KeelPlugin {
+    private class CountingPlugin(pluginId: String) : KeelPlugin, LifecyclePlugin {
         override val descriptor = PluginDescriptor(
             pluginId = pluginId,
             version = "1.0.0",
@@ -282,7 +280,5 @@ class PluginManagerStressTest {
         override suspend fun onStop(context: com.keel.kernel.plugin.PluginRuntimeContext) {
             stopCount.incrementAndGet()
         }
-
-        override fun endpoints(): List<PluginRouteDefinition> = emptyList()
     }
 }

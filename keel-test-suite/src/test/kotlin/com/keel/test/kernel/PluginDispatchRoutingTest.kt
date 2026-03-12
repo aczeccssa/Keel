@@ -1,7 +1,7 @@
 package com.keel.test.kernel
 
 import com.keel.kernel.plugin.EndpointExecutionPolicy
-import com.keel.kernel.plugin.KeelPlugin
+import com.keel.kernel.plugin.StandardKeelPlugin
 import com.keel.kernel.plugin.PluginDescriptor
 import com.keel.kernel.plugin.PluginEndpointBuilders
 import com.keel.kernel.plugin.PluginResult
@@ -84,7 +84,7 @@ class PluginDispatchRoutingTest {
         assertEquals(HttpStatusCode.PayloadTooLarge, response.status)
     }
 
-    private class TimeoutPlugin : KeelPlugin {
+    private class TimeoutPlugin : StandardKeelPlugin {
         override val descriptor: PluginDescriptor = PluginDescriptor(
             pluginId = "timeout-plugin",
             version = "1.0.0",
@@ -101,7 +101,7 @@ class PluginDispatchRoutingTest {
         }
     }
 
-    private class PayloadPlugin : KeelPlugin {
+    private class PayloadPlugin : StandardKeelPlugin {
         override val descriptor: PluginDescriptor = PluginDescriptor(
             pluginId = "payload-plugin",
             version = "1.0.0",

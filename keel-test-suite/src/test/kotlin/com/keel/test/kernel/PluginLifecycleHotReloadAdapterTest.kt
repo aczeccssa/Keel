@@ -7,7 +7,7 @@ import com.keel.kernel.hotreload.DevReloadOutcome
 import com.keel.kernel.hotreload.DevReloadEvent
 import com.keel.kernel.hotreload.PluginDevelopmentSource
 import com.keel.kernel.hotreload.ReloadAttemptResult
-import com.keel.kernel.plugin.KeelPlugin
+import com.keel.kernel.plugin.StandardKeelPlugin
 import com.keel.kernel.plugin.PluginDescriptor
 import com.keel.kernel.plugin.PluginEndpointBuilders
 import com.keel.kernel.plugin.PluginResult
@@ -111,7 +111,7 @@ class PluginLifecycleHotReloadAdapterTest {
 
     private class LifecycleProbePlugin(
         pluginId: String
-    ) : KeelPlugin {
+    ) : StandardKeelPlugin {
         override val descriptor: PluginDescriptor = PluginDescriptor(
             pluginId = pluginId,
             version = "1.0.0",

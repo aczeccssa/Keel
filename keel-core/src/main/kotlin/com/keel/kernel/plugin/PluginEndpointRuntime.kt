@@ -17,9 +17,8 @@ import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.serializer
+import java.util.UUID
 import kotlin.reflect.KType
-import kotlin.uuid.ExperimentalUuidApi
-import kotlin.uuid.Uuid
 
 internal val runtimeJson = Json {
     ignoreUnknownKeys = true
@@ -136,7 +135,6 @@ internal fun encodeResponseBody(body: Any?, responseType: KType): String? {
 @Suppress("UNCHECKED_CAST")
 internal fun serializer(type: KType): KSerializer<Any> = runtimeJson.serializersModule.serializer(type) as KSerializer<Any>
 
-@OptIn(ExperimentalUuidApi::class)
 internal fun buildRequestContext(call: ApplicationCall, pluginId: String, method: HttpMethod, rawPath: String): PluginRequestContext {
     return object : PluginRequestContext {
         override val pluginId: String = pluginId
@@ -145,7 +143,7 @@ internal fun buildRequestContext(call: ApplicationCall, pluginId: String, method
         override val pathParameters: Map<String, String> = call.parameters.entries().associate { it.key to it.value.first() }
         override val queryParameters: Map<String, List<String>> = call.request.queryParameters.entries().associate { it.key to it.value }
         override val requestHeaders: Map<String, List<String>> = call.request.headers.entries().associate { it.key to it.value }
-        override val requestId: String = call.request.headers["X-Request-Id"] ?: Uuid.random().toString()
+        override val requestId: String = call.request.headers["X-Request-Id"] ?: UUID.randomUUID().toString()
     }
 }
 

@@ -1,7 +1,7 @@
 package com.keel.samples.helloworld
 
 import com.keel.kernel.logging.KeelLoggerService
-import com.keel.kernel.plugin.KeelPlugin
+import com.keel.kernel.plugin.StandardKeelPlugin
 import com.keel.kernel.plugin.PluginDescriptor
 import com.keel.kernel.plugin.PluginEndpointBuilders
 import com.keel.kernel.plugin.PluginEndpointBuilders.pluginEndpoints
@@ -15,7 +15,7 @@ import io.ktor.server.application.call
 import io.ktor.server.application.createRouteScopedPlugin
 
 @KeelApiPlugin("helloworld", "Hello World Plugin")
-class HelloWorldPlugin : KeelPlugin {
+class HelloWorldPlugin : StandardKeelPlugin {
     private val logger = KeelLoggerService.getLogger("HelloWorldPlugin")
 
     override val descriptor: PluginDescriptor = PluginDescriptor("helloworld", "1.0.0", "Hello World Plugin")

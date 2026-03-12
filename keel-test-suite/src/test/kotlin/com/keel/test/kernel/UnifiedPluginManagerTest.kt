@@ -1,14 +1,17 @@
 package com.keel.test.kernel
 
 import com.keel.kernel.hotreload.DevReloadOutcome
+import com.keel.kernel.plugin.EndpointPlugin
 import com.keel.kernel.plugin.KeelPlugin
+import com.keel.kernel.plugin.LifecyclePlugin
+import com.keel.kernel.plugin.ModulePlugin
+import com.keel.kernel.plugin.PluginEndpointBuilders.pluginEndpoints
 import com.keel.kernel.plugin.PluginDescriptor
 import com.keel.kernel.plugin.PluginDispatchDisposition
-import com.keel.kernel.plugin.PluginEndpointDefinition
 import com.keel.kernel.plugin.PluginGeneration
 import com.keel.kernel.plugin.PluginInitContext
 import com.keel.kernel.plugin.PluginLifecycleState
-import com.keel.kernel.plugin.PluginRouteDefinition
+import com.keel.kernel.plugin.PluginResult
 import com.keel.kernel.plugin.PluginRuntimeContext
 import com.keel.kernel.plugin.UnifiedPluginManager
 import java.lang.ref.WeakReference
@@ -334,10 +337,47 @@ class UnifiedPluginManagerTest {
         assertNull(leakedRef.get(), "Expected old private scope objects to be collectable after disable")
     }
 
+    @Test
+    fun lifecycleOnlyPluginRunsWithoutEndpointCapability() = runTest {
+        val koin = startKoin {}.also { koinStarted = true }.koin
+        val manager = UnifiedPluginManager(koin)
+        val plugin = LifecycleOnlyPlugin("lifecycle-only")
+
+        manager.registerPlugin(plugin)
+        manager.startPlugin("lifecycle-only")
+        manager.stopPlugin("lifecycle-only")
+
+        assertEquals(1, plugin.startedCount.get())
+        assertEquals(1, plugin.stoppedCount.get())
+    }
+
+    @Test
+    fun endpointOnlyPluginRunsWithoutLifecycleCapability() = runTest {
+        val koin = startKoin {}.also { koinStarted = true }.koin
+        val manager = UnifiedPluginManager(koin)
+
+        manager.registerPlugin(EndpointOnlyPlugin("endpoint-only"))
+        manager.startPlugin("endpoint-only")
+
+        assertEquals(PluginLifecycleState.RUNNING, manager.getLifecycleState("endpoint-only"))
+        assertEquals(PluginDispatchDisposition.AVAILABLE, manager.resolveDispatchDisposition("endpoint-only"))
+    }
+
+    @Test
+    fun moduleOnlyPluginRunsWithoutEndpointAndLifecycleCapabilities() = runTest {
+        val koin = startKoin {}.also { koinStarted = true }.koin
+        val manager = UnifiedPluginManager(koin)
+
+        manager.registerPlugin(ModuleOnlyPlugin("module-only"))
+        manager.startPlugin("module-only")
+
+        assertEquals(PluginLifecycleState.RUNNING, manager.getLifecycleState("module-only"))
+    }
+
     private class DelayedPlugin(
         pluginId: String,
         private val initDelayMs: Long
-    ) : KeelPlugin {
+    ) : KeelPlugin, LifecyclePlugin {
         override val descriptor: PluginDescriptor = PluginDescriptor(
             pluginId = pluginId,
             version = "1.0.0",
@@ -347,13 +387,11 @@ class UnifiedPluginManagerTest {
         override suspend fun onInit(context: PluginInitContext) {
             delay(initDelayMs)
         }
-
-        override fun endpoints(): List<PluginRouteDefinition> = emptyList()
     }
 
     private class RecordingScopePlugin(
         pluginId: String
-    ) : KeelPlugin {
+    ) : KeelPlugin, LifecyclePlugin, ModulePlugin {
         override val descriptor: PluginDescriptor = PluginDescriptor(
             pluginId = pluginId,
             version = "1.0.0",
@@ -378,11 +416,47 @@ class UnifiedPluginManagerTest {
                 single { PrivateScopedDependency(UUID.randomUUID().toString()) }
             }
         )
-
-        override fun endpoints(): List<PluginRouteDefinition> = emptyList()
     }
 
     private class SharedKernelDependency
 
     private data class PrivateScopedDependency(val id: String)
+
+    private class LifecycleOnlyPlugin(
+        pluginId: String
+    ) : KeelPlugin, LifecyclePlugin {
+        override val descriptor: PluginDescriptor = PluginDescriptor(pluginId, "1.0.0", pluginId)
+        val startedCount = AtomicInteger(0)
+        val stoppedCount = AtomicInteger(0)
+
+        override suspend fun onStart(context: PluginRuntimeContext) {
+            startedCount.incrementAndGet()
+        }
+
+        override suspend fun onStop(context: PluginRuntimeContext) {
+            stoppedCount.incrementAndGet()
+        }
+    }
+
+    private class EndpointOnlyPlugin(
+        pluginId: String
+    ) : KeelPlugin, EndpointPlugin {
+        override val descriptor: PluginDescriptor = PluginDescriptor(pluginId, "1.0.0", pluginId)
+
+        override fun endpoints() = pluginEndpoints(descriptor.pluginId) {
+            get<String>("/ping") { PluginResult(body = "pong") }
+        }
+    }
+
+    private class ModuleOnlyPlugin(
+        pluginId: String
+    ) : KeelPlugin, ModulePlugin {
+        override val descriptor: PluginDescriptor = PluginDescriptor(pluginId, "1.0.0", pluginId)
+
+        override fun modules() = listOf(
+            module {
+                single { "module-only" }
+            }
+        )
+    }
 }

@@ -59,13 +59,12 @@ import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withTimeout
 import java.io.File
+import java.util.UUID
 import java.util.Base64
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.io.path.createDirectories
 import kotlin.math.absoluteValue
-import kotlin.uuid.ExperimentalUuidApi
-import kotlin.uuid.Uuid
 import org.koin.core.Koin
 import org.koin.core.scope.Scope
 
@@ -123,8 +122,7 @@ class UnifiedPluginManager(
     private val managerScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var routing: Routing? = null
 
-    @OptIn(ExperimentalUuidApi::class)
-    private val kernelInstanceId = Uuid.random().toString()
+    private val kernelInstanceId = UUID.randomUUID().toString()
     private val kernelRuntimeDir = runtimeRoot.toPath().resolve(kernelInstanceId.take(8)).createDirectories().toFile()
 
     fun registerPlugin(
@@ -133,27 +131,21 @@ class UnifiedPluginManager(
     ) {
         val descriptor = plugin.descriptor
         val config = descriptor.toConfig(enabled = enabledOverride ?: true)
-        val ktorConfig = plugin.ktorPlugins()
-        val routeDefinitions = plugin.endpoints()
-        validateServiceDeclaration(descriptor, routeDefinitions)
-        val endpointDefinitions = routeDefinitions.filterIsInstance<PluginEndpointDefinition<*, *>>()
-        val endpointById = endpointDefinitions.associateBy { it.endpointId }.toMutableMap()
-        val endpointTopology = endpointDefinitions.map { operationKey(it.method, fullPluginPath(descriptor.pluginId, it.path)) }.toSet()
-        val sseByPath = routeDefinitions.filterIsInstance<PluginSseDefinition>().associateBy { it.path }.toMutableMap()
+        val capabilities = extractCapabilities(plugin, descriptor.pluginId)
         entries[descriptor.pluginId] = ManagedPlugin(
             plugin = plugin,
             pluginClassName = plugin.javaClass.name,
-            endpointById = endpointById,
-            endpointTopology = endpointTopology,
-            sseByPath = sseByPath,
-            routeDefinitions = routeDefinitions,
+            endpointById = capabilities.endpointById.toMutableMap(),
+            endpointTopology = capabilities.topology,
+            sseByPath = capabilities.sseByPath.toMutableMap(),
+            routeDefinitions = capabilities.routeDefinitions,
             config = config,
             lifecycleState = PluginLifecycleState.REGISTERED,
             healthState = PluginHealthState.UNKNOWN,
             generation = PluginGeneration.INITIAL,
             processState = if (config.runtimeMode == PluginRuntimeMode.EXTERNAL_JVM) PluginProcessState.STOPPED else null,
-            pluginApplicationInstallers = ktorConfig.configuredApplicationInstallers(),
-            pluginServiceRouteInstallers = ktorConfig.configuredServiceInstallers()
+            pluginApplicationInstallers = capabilities.applicationInstallers,
+            pluginServiceRouteInstallers = capabilities.serviceInstallers
         )
         logger.info("Registered unified plugin ${descriptor.pluginId} mode=${config.runtimeMode}")
     }
@@ -258,6 +250,35 @@ class UnifiedPluginManager(
         val error: String? = null
     )
 
+    private data class PluginCapabilities(
+        val routeDefinitions: List<PluginRouteDefinition>,
+        val endpointById: Map<String, PluginEndpointDefinition<*, *>>,
+        val topology: Set<String>,
+        val sseByPath: Map<String, PluginSseDefinition>,
+        val applicationInstallers: List<ApplicationKtorInstaller>,
+        val serviceInstallers: List<ServiceKtorInstaller>
+    )
+
+    private fun extractCapabilities(plugin: KeelPlugin, topologyPluginId: String): PluginCapabilities {
+        val routeDefinitions = plugin.endpoints()
+        validateServiceDeclaration(plugin.descriptor, routeDefinitions)
+        val endpointDefinitions = routeDefinitions.filterIsInstance<PluginEndpointDefinition<*, *>>()
+        val endpointById = endpointDefinitions.associateBy { it.endpointId }
+        val topology = endpointDefinitions
+            .map { operationKey(it.method, fullPluginPath(topologyPluginId, it.path)) }
+            .toSet()
+        val sseByPath = routeDefinitions.filterIsInstance<PluginSseDefinition>().associateBy { it.path }
+        val ktorConfig = plugin.ktorPlugins()
+        return PluginCapabilities(
+            routeDefinitions = routeDefinitions,
+            endpointById = endpointById,
+            topology = topology,
+            sseByPath = sseByPath,
+            applicationInstallers = ktorConfig.configuredApplicationInstallers(),
+            serviceInstallers = ktorConfig.configuredServiceInstallers()
+        )
+    }
+
     private fun snapshotEntry(entry: ManagedPlugin): EntrySnapshot {
         return EntrySnapshot(
             plugin = entry.plugin,
@@ -289,28 +310,18 @@ class UnifiedPluginManager(
             runCatching { classLoader.close() }
             return LoadResult(error = error.message)
         }
-        val ktorConfig = plugin.ktorPlugins()
-
-        val endpoints = plugin.endpoints()
-        validateServiceDeclaration(plugin.descriptor, endpoints)
-        val endpointById = endpoints.filterIsInstance<PluginEndpointDefinition<*, *>>()
-            .associateBy { it.endpointId }
-        val topology = endpoints.filterIsInstance<PluginEndpointDefinition<*, *>>()
-            .map { operationKey(it.method, fullPluginPath(source.pluginId, it.path)) }
-            .toSet()
-        val sseByPath = endpoints.filterIsInstance<PluginSseDefinition>()
-            .associateBy { it.path }
+        val capabilities = extractCapabilities(plugin, source.pluginId)
 
         return LoadResult(
             generation = NewGeneration(
                 plugin = plugin,
                 classLoader = classLoader,
-                routeDefinitions = endpoints,
-                endpointById = endpointById,
-                topology = topology,
-                sseByPath = sseByPath,
-                pluginApplicationInstallers = ktorConfig.configuredApplicationInstallers(),
-                pluginServiceRouteInstallers = ktorConfig.configuredServiceInstallers()
+                routeDefinitions = capabilities.routeDefinitions,
+                endpointById = capabilities.endpointById,
+                topology = capabilities.topology,
+                sseByPath = capabilities.sseByPath,
+                pluginApplicationInstallers = capabilities.applicationInstallers,
+                pluginServiceRouteInstallers = capabilities.serviceInstallers
             )
         )
     }
@@ -521,7 +532,9 @@ class UnifiedPluginManager(
     private suspend fun startInProcess(entry: ManagedPlugin) {
         if (!entry.initialized) {
             entry.lifecycleState = PluginLifecycleState.INITIALIZING
-            entry.plugin.onInit(BasicPluginInitContext(entry.plugin.descriptor.pluginId, entry.plugin.descriptor, kernelKoin))
+            entry.plugin.onInit(
+                BasicPluginInitContext(entry.plugin.descriptor.pluginId, entry.plugin.descriptor, kernelKoin)
+            )
             entry.initialized = true
             entry.lifecycleState = PluginLifecycleState.STOPPED
         }
@@ -858,7 +871,7 @@ class UnifiedPluginManager(
 
     private fun mountPluginRoutes(routing: Routing, entry: ManagedPlugin) {
         val pluginId = entry.plugin.descriptor.pluginId
-        val routes = entry.plugin.endpoints()
+        val routes = entry.routeDefinitions
         val endpoints = routes.filterIsInstance<PluginEndpointDefinition<*, *>>()
         val sseRoutes = routes.filterIsInstance<PluginSseDefinition>()
         val staticRoutes = routes.filterIsInstance<PluginStaticResourceDefinition>()
@@ -1068,7 +1081,6 @@ class UnifiedPluginManager(
         call.respondBytes(body, contentType = contentType, status = status)
     }
 
-    @OptIn(ExperimentalUuidApi::class)
     private suspend fun io.ktor.server.sse.ServerSSESession.streamSseFromExternal(
         entry: ManagedPlugin,
         routePath: String
@@ -1078,7 +1090,7 @@ class UnifiedPluginManager(
             close()
             return
         }
-        val streamId = Uuid.random().toString()
+        val streamId = UUID.randomUUID().toString()
         val eventChannel = Channel<PluginSseDataEvent>(capacity = Channel.UNLIMITED)
         supervisor.registerSseStreamListener(
             streamId = streamId,

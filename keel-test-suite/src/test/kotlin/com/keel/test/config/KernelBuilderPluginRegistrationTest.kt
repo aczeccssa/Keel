@@ -3,7 +3,6 @@ package com.keel.test.config
 import com.keel.kernel.config.buildKeel
 import com.keel.kernel.plugin.KeelPlugin
 import com.keel.kernel.plugin.PluginDescriptor
-import com.keel.kernel.plugin.PluginRouteDefinition
 import java.nio.file.Files
 import org.koin.core.context.stopKoin
 import kotlin.test.AfterTest
@@ -59,8 +58,6 @@ class KernelBuilderPluginRegistrationTest {
             version = "1.0.0",
             displayName = "HotReload On"
         )
-
-        override fun endpoints(): List<PluginRouteDefinition> = emptyList()
     }
 
     class HotReloadOffPlugin : KeelPlugin {
@@ -69,7 +66,5 @@ class KernelBuilderPluginRegistrationTest {
             version = "1.0.0",
             displayName = "HotReload Off"
         )
-
-        override fun endpoints(): List<PluginRouteDefinition> = emptyList()
     }
 }

@@ -59,6 +59,7 @@ import java.net.UnixDomainSocketAddress
 import java.nio.channels.ServerSocketChannel
 import java.nio.channels.SocketChannel
 import java.nio.file.Path
+import java.util.UUID
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.io.path.deleteIfExists
@@ -66,8 +67,6 @@ import kotlin.io.path.exists
 import kotlin.io.path.pathString
 import kotlin.math.absoluteValue
 import kotlin.time.Duration.Companion.milliseconds
-import kotlin.uuid.ExperimentalUuidApi
-import kotlin.uuid.Uuid
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -101,7 +100,6 @@ data class PluginJvmTcpConnectionInfo(
     override val mode = JvmCommunicationMode.TCP
 }
 
-@OptIn(ExperimentalUuidApi::class)
 class PluginProcessSupervisor(
     private val descriptor: PluginDescriptor,
     private val pluginClassName: String,
@@ -119,7 +117,7 @@ class PluginProcessSupervisor(
 ) {
     private val logger = KeelLoggerService.getLogger("PluginProcessSupervisor")
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private val authToken: String = Uuid.random().toString()
+    private val authToken: String = UUID.randomUUID().toString()
 
     private var currentConnectionInfo: PluginJvmConnectionInfo? = null
     private var process: Process? = null
@@ -918,5 +916,5 @@ class PluginProcessSupervisor(
         )
     }
 
-    private fun newMessageId(): String = Uuid.random().toString()
+    private fun newMessageId(): String = UUID.randomUUID().toString()
 }
