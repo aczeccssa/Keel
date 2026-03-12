@@ -2,7 +2,7 @@ package com.keel.test.kernel
 
 import com.keel.kernel.plugin.JvmCommunicationMode
 import com.keel.kernel.plugin.JvmCommunicationStrategy
-import com.keel.kernel.plugin.KeelPlugin
+import com.keel.kernel.plugin.StandardKeelPlugin
 import com.keel.kernel.plugin.PluginDescriptor
 import com.keel.kernel.plugin.PluginEndpointBuilders
 import com.keel.kernel.plugin.PluginRecoveryPolicy
@@ -177,7 +177,7 @@ class ExternalJvmE2EIntegrationTest {
         error("Condition was not satisfied within ${timeoutMs}ms")
     }
 
-    class ExternalE2EPlugin : KeelPlugin {
+    class ExternalE2EPlugin : StandardKeelPlugin {
         override val descriptor: PluginDescriptor = PluginDescriptor(
             pluginId = "external-e2e",
             version = "1.0.0",
@@ -215,7 +215,7 @@ class ExternalJvmE2EIntegrationTest {
         }
     }
 
-    private class InvalidServiceDeclarationPlugin : KeelPlugin {
+    private class InvalidServiceDeclarationPlugin : StandardKeelPlugin {
         override val descriptor: PluginDescriptor = PluginDescriptor(
             pluginId = "invalid-service-declaration",
             version = "1.0.0",

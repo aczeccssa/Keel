@@ -11,7 +11,7 @@ import io.ktor.server.http.content.*
  * Sample application demonstrating the Keel framework.
  *
  * This minimal example shows how to:
- * 1. Implement plugins via KeelPlugin
+ * 1. Implement plugins via StandardKeelPlugin (or capability interfaces)
  * 2. Register plugins with per-plugin enable + hot reload switches
  * 3. Let the framework handle:
  *    - Plugin lifecycle (onInit, onStart, onStop, onDispose)

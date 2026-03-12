@@ -134,13 +134,14 @@ object ExternalPluginHostMain {
     ) {
         private val plugin = instantiatePlugin(hostArgs.pluginClass)
         private val startedAt = System.currentTimeMillis()
-        private val endpoints = plugin.endpoints()
+        private val routeDefinitions = plugin.endpoints()
+        private val endpoints = routeDefinitions
             .filterIsInstance<com.keel.kernel.plugin.PluginEndpointDefinition<*, *>>()
             .associateBy { it.endpointId }
-        private val sseRoutes = plugin.endpoints()
+        private val sseRoutes = routeDefinitions
             .filterIsInstance<com.keel.kernel.plugin.PluginSseDefinition>()
             .associateBy { it.path }
-        private val staticRoutes = plugin.endpoints()
+        private val staticRoutes = routeDefinitions
             .filterIsInstance<com.keel.kernel.plugin.PluginStaticResourceDefinition>()
             .associateBy { it.path }
         private val running = AtomicBoolean(true)
@@ -300,6 +301,7 @@ object ExternalPluginHostMain {
                                             lifecycleState = lifecycleState,
                                             running = running,
                                             inFlightInvokes = inFlightInvokes,
+                                            endpoints = endpoints,
                                             sseRoutes = sseRoutes,
                                             staticRoutes = staticRoutes,
                                             sseStreams = sseStreams,
@@ -430,6 +432,7 @@ object ExternalPluginHostMain {
         lifecycleState: AtomicReferenceState,
         running: AtomicBoolean,
         inFlightInvokes: AtomicInteger,
+        endpoints: Map<String, com.keel.kernel.plugin.PluginEndpointDefinition<*, *>>,
         sseRoutes: Map<String, com.keel.kernel.plugin.PluginSseDefinition>,
         staticRoutes: Map<String, com.keel.kernel.plugin.PluginStaticResourceDefinition>,
         sseStreams: ConcurrentHashMap<String, Job>,
@@ -448,6 +451,7 @@ object ExternalPluginHostMain {
                 lifecycleState = lifecycleState,
                 running = running,
                 inFlightInvokes = inFlightInvokes,
+                endpoints = endpoints,
                 sseRoutes = sseRoutes,
                 staticRoutes = staticRoutes,
                 sseStreams = sseStreams,
@@ -522,6 +526,7 @@ object ExternalPluginHostMain {
         lifecycleState: AtomicReferenceState,
         running: AtomicBoolean,
         inFlightInvokes: AtomicInteger,
+        endpoints: Map<String, com.keel.kernel.plugin.PluginEndpointDefinition<*, *>>,
         sseRoutes: Map<String, com.keel.kernel.plugin.PluginSseDefinition>,
         staticRoutes: Map<String, com.keel.kernel.plugin.PluginStaticResourceDefinition>,
         sseStreams: ConcurrentHashMap<String, Job>,
@@ -547,26 +552,35 @@ object ExternalPluginHostMain {
                         descriptorVersion = plugin.descriptor.version,
                         runtimeMode = PluginRuntimeMode.EXTERNAL_JVM.name,
                         supportedServices = plugin.descriptor.supportedServices.map { it.name },
-                        endpointInventory = plugin.endpoints()
-                            .filterIsInstance<com.keel.kernel.plugin.PluginEndpointDefinition<*, *>>()
+                        endpointInventory = endpoints.values
                             .map {
                             PluginEndpointInventoryItem(it.endpointId, it.method.value, it.path)
                         },
-                        routeInventory = plugin.endpoints().map { route ->
-                            when (route) {
-                                is com.keel.kernel.plugin.PluginEndpointDefinition<*, *> -> PluginRouteInventoryItem(
-                                    routeType = "ENDPOINT",
-                                    path = route.path,
-                                    method = route.method.value,
-                                    endpointId = route.endpointId
+                        routeInventory = buildList {
+                            endpoints.values.forEach { endpoint ->
+                                add(
+                                    PluginRouteInventoryItem(
+                                        routeType = "ENDPOINT",
+                                        path = endpoint.path,
+                                        method = endpoint.method.value,
+                                        endpointId = endpoint.endpointId
+                                    )
                                 )
-                                is com.keel.kernel.plugin.PluginSseDefinition -> PluginRouteInventoryItem(
-                                    routeType = "SSE",
-                                    path = route.path
+                            }
+                            sseRoutes.values.forEach { definition ->
+                                add(
+                                    PluginRouteInventoryItem(
+                                        routeType = "SSE",
+                                        path = definition.path
+                                    )
                                 )
-                                is com.keel.kernel.plugin.PluginStaticResourceDefinition -> PluginRouteInventoryItem(
-                                    routeType = "STATIC_RESOURCE",
-                                    path = route.path
+                            }
+                            staticRoutes.values.forEach { definition ->
+                                add(
+                                    PluginRouteInventoryItem(
+                                        routeType = "STATIC_RESOURCE",
+                                        path = definition.path
+                                    )
                                 )
                             }
                         },

@@ -204,7 +204,7 @@ Plugin scope example (declared inside plugin, service scope only affects that pl
 
 ```kotlin
 import io.ktor.server.application.createRouteScopedPlugin
-import com.keel.kernel.plugin.KeelPlugin
+import com.keel.kernel.plugin.StandardKeelPlugin
 import com.keel.kernel.plugin.PluginKtorConfig
 
 val ServiceOnlyHeader = createRouteScopedPlugin("service-only-header") {
@@ -213,7 +213,7 @@ val ServiceOnlyHeader = createRouteScopedPlugin("service-only-header") {
     }
 }
 
-class MyPlugin : KeelPlugin {
+class MyPlugin : StandardKeelPlugin {
     // ...
     override fun ktorPlugins(): PluginKtorConfig = PluginKtorConfig().apply {
         service {
@@ -265,14 +265,13 @@ Notes:
 Keel is designed around a typed plugin API instead of raw route wiring. A plugin provides:
 
 - A `PluginDescriptor`
-- Lifecycle hooks such as `onInit`, `onStart`, `onStop`, `onDispose`
-- Optional Koin modules
-- Typed endpoint definitions
+- Optional capability interfaces (`LifecyclePlugin`, `EndpointPlugin`, `ModulePlugin`, `KtorScopedPlugin`)
+- Or one convenience composite interface: `StandardKeelPlugin`
 
 Minimal example:
 
 ```kotlin
-class MyPlugin : KeelPlugin {
+class MyPlugin : StandardKeelPlugin {
     override val descriptor = PluginDescriptor(
         pluginId = "myplugin",
         version = "1.0.0",
@@ -336,7 +335,7 @@ val ServiceMetricTag = createRouteScopedPlugin("service-metric-tag") {
     }
 }
 
-class MyPlugin : KeelPlugin {
+class MyPlugin : StandardKeelPlugin {
     // ...
     override fun ktorPlugins(): PluginKtorConfig = PluginKtorConfig().apply {
         service {

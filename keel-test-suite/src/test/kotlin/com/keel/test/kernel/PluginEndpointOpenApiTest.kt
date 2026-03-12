@@ -1,6 +1,6 @@
 package com.keel.test.kernel
 
-import com.keel.kernel.plugin.KeelPlugin
+import com.keel.kernel.plugin.StandardKeelPlugin
 import com.keel.kernel.plugin.PluginDescriptor
 import com.keel.kernel.plugin.PluginEndpointBuilders
 import com.keel.kernel.plugin.PluginInitContext
@@ -75,7 +75,7 @@ class PluginEndpointOpenApiTest {
         }
     }
 
-    private class TestPlugin : KeelPlugin {
+    private class TestPlugin : StandardKeelPlugin {
         private val events = MutableSharedFlow<String>(extraBufferCapacity = 1)
 
         override val descriptor: PluginDescriptor = PluginDescriptor(

@@ -1,6 +1,6 @@
 package com.keel.test.perf
 
-import com.keel.kernel.plugin.KeelPlugin
+import com.keel.kernel.plugin.StandardKeelPlugin
 import com.keel.kernel.plugin.PluginDescriptor
 import com.keel.kernel.plugin.PluginEndpointBuilders
 import com.keel.kernel.plugin.PluginKtorConfig
@@ -100,7 +100,7 @@ class KtorPluginScopePerformanceTest {
     private class PingPlugin(
         pluginId: String,
         private val scoped: Boolean = false
-    ) : KeelPlugin {
+    ) : StandardKeelPlugin {
         override val descriptor: PluginDescriptor = PluginDescriptor(
             pluginId = pluginId,
             version = "1.0.0",

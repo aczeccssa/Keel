@@ -5,7 +5,6 @@ import com.keel.kernel.loader.DefaultPluginLoader
 import com.keel.kernel.plugin.KeelPlugin
 import com.keel.kernel.plugin.PluginDescriptor
 import com.keel.kernel.plugin.PluginEndpointDefinition
-import com.keel.kernel.plugin.PluginRouteDefinition
 import java.io.FileOutputStream
 import java.nio.file.Files
 import java.util.jar.Attributes
@@ -115,8 +114,6 @@ class TestPlugin : KeelPlugin {
         version = "1.0.0",
         displayName = "test-plugin"
     )
-
-    override fun endpoints(): List<PluginRouteDefinition> = emptyList()
 }
 
 class LegacyTestPlugin

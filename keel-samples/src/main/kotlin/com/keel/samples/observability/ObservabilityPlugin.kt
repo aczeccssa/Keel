@@ -2,7 +2,7 @@ package com.keel.samples.observability
 
 import com.keel.kernel.logging.KeelLoggerService
 import com.keel.kernel.observability.KeelObservability
-import com.keel.kernel.plugin.KeelPlugin
+import com.keel.kernel.plugin.StandardKeelPlugin
 import com.keel.kernel.plugin.PluginDescriptor
 import com.keel.kernel.plugin.PluginEndpointBuilders
 import com.keel.kernel.plugin.PluginEndpointBuilders.pluginEndpoints
@@ -24,7 +24,7 @@ import java.io.IOException
     description = "Example plugin that visualizes multi-JVM topology and flow tracing",
     version = "1.0.0"
 )
-class ObservabilityPlugin : KeelPlugin {
+class ObservabilityPlugin : StandardKeelPlugin {
     private val logger = KeelLoggerService.getLogger("ObservabilityPlugin")
     private lateinit var observability: KeelObservability
 

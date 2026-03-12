@@ -4,6 +4,8 @@ import com.keel.kernel.config.KeelServerConfig
 import com.keel.kernel.config.buildKeel
 import com.keel.kernel.loader.DefaultPluginLoader
 import com.keel.kernel.plugin.KeelPlugin
+import com.keel.kernel.plugin.KtorScopedPlugin
+import com.keel.kernel.plugin.StandardKeelPlugin
 import com.keel.kernel.plugin.PluginDescriptor
 import com.keel.kernel.plugin.PluginEndpointBuilders
 import com.keel.kernel.plugin.PluginKtorConfig
@@ -273,6 +275,27 @@ class KtorPluginScopeConfigTest {
     }
 
     @Test
+    fun ktorOnlyPluginAppliesApplicationScopeWithoutEndpointOrLifecycleCapabilities() = testApplication {
+        val koin = startKoin {}.koin
+        val manager = UnifiedPluginManager(koin)
+        manager.registerPlugin(KtorOnlyPlugin("plug-ktor-only", "ktor-only"))
+
+        application {
+            install(ContentNegotiation) {
+                json()
+            }
+            install(SSE)
+            manager.installConfiguredPluginApplicationKtorPlugins(this)
+            routing {
+                UnifiedSystemRouteInstaller.install(this, manager, DefaultPluginLoader(), null)
+            }
+        }
+
+        val systemResponse = client.get("/api/_system/health")
+        assertEquals("ktor-only", systemResponse.headers["X-Plugin-App-Scope"])
+    }
+
+    @Test
     fun duplicatePluginApplicationInstallFailsFastWithPluginIdContext() = testApplication {
         val koin = startKoin {}.koin
         val manager = UnifiedPluginManager(koin)
@@ -302,7 +325,7 @@ class KtorPluginScopeConfigTest {
         private val applicationScopeHeader: String? = null,
         private val serviceScopeHeader: String? = null,
         runtimeMode: PluginRuntimeMode = PluginRuntimeMode.IN_PROCESS
-    ) : KeelPlugin {
+    ) : StandardKeelPlugin {
         override val descriptor: PluginDescriptor = PluginDescriptor(
             pluginId = pluginId,
             version = "1.0.0",
@@ -334,7 +357,7 @@ class KtorPluginScopeConfigTest {
 
     private class DuplicateAppScopePlugin(
         pluginId: String
-    ) : KeelPlugin {
+    ) : StandardKeelPlugin {
         override val descriptor: PluginDescriptor = PluginDescriptor(
             pluginId = pluginId,
             version = "1.0.0",
@@ -350,6 +373,23 @@ class KtorPluginScopeConfigTest {
         override fun endpoints() = PluginEndpointBuilders.pluginEndpoints(descriptor.pluginId) {
             get<String>("/ping") {
                 PluginResult(body = "pong")
+            }
+        }
+    }
+
+    private class KtorOnlyPlugin(
+        pluginId: String,
+        private val headerValue: String
+    ) : KeelPlugin, KtorScopedPlugin {
+        override val descriptor: PluginDescriptor = PluginDescriptor(
+            pluginId = pluginId,
+            version = "1.0.0",
+            displayName = pluginId
+        )
+
+        override fun ktorPlugins(): PluginKtorConfig = PluginKtorConfig().apply {
+            application {
+                install(pluginApplicationHeaderPlugin(headerValue))
             }
         }
     }
