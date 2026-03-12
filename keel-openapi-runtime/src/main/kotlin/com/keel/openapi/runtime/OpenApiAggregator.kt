@@ -223,20 +223,11 @@ object OpenApiAggregator {
         val discovered = linkedMapOf<String, T>()
 
         val serviceLoader = ServiceLoader.load(interfaceClass, classLoader)
-        val iterator = serviceLoader.iterator()
-        while (true) {
-            val hasNext = try {
-                iterator.hasNext()
-            } catch (_: ServiceConfigurationError) {
-                continue
-            }
-            if (!hasNext) {
-                break
-            }
+        serviceLoader.stream().forEach { provider ->
             val implementation = try {
-                iterator.next()
+                provider.get()
             } catch (_: ServiceConfigurationError) {
-                continue
+                return@forEach
             }
             discovered[implementation.javaClass.name] = implementation
         }

@@ -59,13 +59,12 @@ import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withTimeout
 import java.io.File
+import java.util.UUID
 import java.util.Base64
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.io.path.createDirectories
 import kotlin.math.absoluteValue
-import kotlin.uuid.ExperimentalUuidApi
-import kotlin.uuid.Uuid
 import org.koin.core.Koin
 import org.koin.core.scope.Scope
 
@@ -123,8 +122,7 @@ class UnifiedPluginManager(
     private val managerScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var routing: Routing? = null
 
-    @OptIn(ExperimentalUuidApi::class)
-    private val kernelInstanceId = Uuid.random().toString()
+    private val kernelInstanceId = UUID.randomUUID().toString()
     private val kernelRuntimeDir = runtimeRoot.toPath().resolve(kernelInstanceId.take(8)).createDirectories().toFile()
 
     fun registerPlugin(
@@ -1083,7 +1081,6 @@ class UnifiedPluginManager(
         call.respondBytes(body, contentType = contentType, status = status)
     }
 
-    @OptIn(ExperimentalUuidApi::class)
     private suspend fun io.ktor.server.sse.ServerSSESession.streamSseFromExternal(
         entry: ManagedPlugin,
         routePath: String
@@ -1093,7 +1090,7 @@ class UnifiedPluginManager(
             close()
             return
         }
-        val streamId = Uuid.random().toString()
+        val streamId = UUID.randomUUID().toString()
         val eventChannel = Channel<PluginSseDataEvent>(capacity = Channel.UNLIMITED)
         supervisor.registerSseStreamListener(
             streamId = streamId,
