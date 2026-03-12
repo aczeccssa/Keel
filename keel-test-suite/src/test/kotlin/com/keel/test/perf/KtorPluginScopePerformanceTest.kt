@@ -3,6 +3,7 @@ package com.keel.test.perf
 import com.keel.kernel.plugin.KeelPlugin
 import com.keel.kernel.plugin.PluginDescriptor
 import com.keel.kernel.plugin.PluginEndpointBuilders
+import com.keel.kernel.plugin.PluginKtorConfig
 import com.keel.kernel.plugin.PluginResult
 import com.keel.kernel.plugin.PluginRuntimeContext
 import com.keel.kernel.plugin.UnifiedPluginManager
@@ -44,18 +45,14 @@ class KtorPluginScopePerformanceTest {
         val koin = startKoin {}.also { koinStarted = true }.koin
         val manager = UnifiedPluginManager(koin)
         manager.registerPlugin(PingPlugin("plain"))
-        manager.registerPlugin(
-            plugin = PingPlugin("scoped"),
-            serviceRouteInstallers = listOf({
-                install(scopedPerfMarkerPlugin)
-            })
-        )
+        manager.registerPlugin(PingPlugin("scoped", scoped = true))
 
         application {
             install(ContentNegotiation) {
                 json()
             }
             install(SSE)
+            manager.installConfiguredPluginApplicationKtorPlugins(this)
             routing {
                 manager.mountRoutes(this)
             }
@@ -101,7 +98,8 @@ class KtorPluginScopePerformanceTest {
     }
 
     private class PingPlugin(
-        pluginId: String
+        pluginId: String,
+        private val scoped: Boolean = false
     ) : KeelPlugin {
         override val descriptor: PluginDescriptor = PluginDescriptor(
             pluginId = pluginId,
@@ -110,6 +108,14 @@ class KtorPluginScopePerformanceTest {
         )
 
         override suspend fun onStop(context: PluginRuntimeContext) = Unit
+
+        override fun ktorPlugins(): PluginKtorConfig = PluginKtorConfig().apply {
+            if (scoped) {
+                service {
+                    install(scopedPerfMarkerPlugin)
+                }
+            }
+        }
 
         override fun endpoints() = PluginEndpointBuilders.pluginEndpoints(descriptor.pluginId) {
             get<String>("/ping") {

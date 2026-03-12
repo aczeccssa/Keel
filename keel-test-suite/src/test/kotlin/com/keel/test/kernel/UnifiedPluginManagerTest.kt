@@ -1,5 +1,6 @@
 package com.keel.test.kernel
 
+import com.keel.kernel.hotreload.DevReloadOutcome
 import com.keel.kernel.plugin.KeelPlugin
 import com.keel.kernel.plugin.PluginDescriptor
 import com.keel.kernel.plugin.PluginDispatchDisposition
@@ -40,6 +41,102 @@ class UnifiedPluginManagerTest {
             stopKoin()
             koinStarted = false
         }
+    }
+
+    @Test
+    fun ktorScopeDriftCheckReturnsFalseWhenSignaturesMatch() {
+        val before = UnifiedPluginManager.KtorScopeSignature(
+            applicationPluginKeys = listOf("app-a"),
+            servicePluginKeys = listOf("svc-a")
+        )
+        val after = UnifiedPluginManager.KtorScopeSignature(
+            applicationPluginKeys = listOf("app-a"),
+            servicePluginKeys = listOf("svc-a")
+        )
+
+        assertFalse(UnifiedPluginManager.hasKtorScopeDrift(before, after))
+    }
+
+    @Test
+    fun ktorScopeDriftCheckReturnsTrueWhenApplicationScopeChanges() {
+        val before = UnifiedPluginManager.KtorScopeSignature(
+            applicationPluginKeys = listOf("app-a"),
+            servicePluginKeys = listOf("svc-a")
+        )
+        val after = UnifiedPluginManager.KtorScopeSignature(
+            applicationPluginKeys = listOf("app-b"),
+            servicePluginKeys = listOf("svc-a")
+        )
+
+        assertTrue(UnifiedPluginManager.hasKtorScopeDrift(before, after))
+    }
+
+    @Test
+    fun ktorScopeDriftCheckReturnsTrueWhenServiceScopeChanges() {
+        val before = UnifiedPluginManager.KtorScopeSignature(
+            applicationPluginKeys = listOf("app-a"),
+            servicePluginKeys = listOf("svc-a")
+        )
+        val after = UnifiedPluginManager.KtorScopeSignature(
+            applicationPluginKeys = listOf("app-a"),
+            servicePluginKeys = listOf("svc-b")
+        )
+
+        assertTrue(UnifiedPluginManager.hasKtorScopeDrift(before, after))
+    }
+
+    @Test
+    fun reloadCompatibilityIsReloadedWhenTopologyAndScopeMatch() {
+        val decision = UnifiedPluginManager.decideReloadCompatibility(
+            previousTopology = setOf("GET /api/plugins/ping"),
+            newTopology = setOf("GET /api/plugins/ping"),
+            previousKtorScope = UnifiedPluginManager.KtorScopeSignature(
+                applicationPluginKeys = listOf("app-a"),
+                servicePluginKeys = listOf("svc-a")
+            ),
+            newKtorScope = UnifiedPluginManager.KtorScopeSignature(
+                applicationPluginKeys = listOf("app-a"),
+                servicePluginKeys = listOf("svc-a")
+            )
+        )
+
+        assertEquals(DevReloadOutcome.RELOADED, decision.outcome)
+    }
+
+    @Test
+    fun reloadCompatibilityRequiresRestartWhenApplicationScopeChanges() {
+        val decision = UnifiedPluginManager.decideReloadCompatibility(
+            previousTopology = setOf("GET /api/plugins/ping"),
+            newTopology = setOf("GET /api/plugins/ping"),
+            previousKtorScope = UnifiedPluginManager.KtorScopeSignature(
+                applicationPluginKeys = listOf("app-a"),
+                servicePluginKeys = listOf("svc-a")
+            ),
+            newKtorScope = UnifiedPluginManager.KtorScopeSignature(
+                applicationPluginKeys = listOf("app-b"),
+                servicePluginKeys = listOf("svc-a")
+            )
+        )
+
+        assertEquals(DevReloadOutcome.RESTART_REQUIRED, decision.outcome)
+    }
+
+    @Test
+    fun reloadCompatibilityRequiresRestartWhenServiceScopeChanges() {
+        val decision = UnifiedPluginManager.decideReloadCompatibility(
+            previousTopology = setOf("GET /api/plugins/ping"),
+            newTopology = setOf("GET /api/plugins/ping"),
+            previousKtorScope = UnifiedPluginManager.KtorScopeSignature(
+                applicationPluginKeys = listOf("app-a"),
+                servicePluginKeys = listOf("svc-a")
+            ),
+            newKtorScope = UnifiedPluginManager.KtorScopeSignature(
+                applicationPluginKeys = listOf("app-a"),
+                servicePluginKeys = listOf("svc-b")
+            )
+        )
+
+        assertEquals(DevReloadOutcome.RESTART_REQUIRED, decision.outcome)
     }
 
     @Test

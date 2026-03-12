@@ -1,6 +1,11 @@
 package com.keel.kernel.plugin
 
 import io.ktor.http.HttpMethod
+import io.ktor.server.application.Application
+import io.ktor.server.application.Plugin
+import io.ktor.server.application.install
+import io.ktor.server.application.BaseRouteScopedPlugin
+import io.ktor.server.routing.Route
 import io.ktor.sse.ServerSentEvent
 import com.keel.openapi.runtime.OpenApiDoc
 import kotlin.reflect.KType
@@ -174,7 +179,68 @@ interface KeelPlugin {
 
     fun modules(): List<Module> = emptyList()
 
+    fun ktorPlugins(): PluginKtorConfig = PluginKtorConfig()
+
     fun endpoints(): List<PluginRouteDefinition>
+}
+
+data class ApplicationKtorInstaller(
+    val pluginKey: String,
+    val installer: Application.() -> Unit
+)
+
+data class ServiceKtorInstaller(
+    val pluginKey: String,
+    val installer: Route.() -> Unit
+)
+
+class PluginKtorConfig {
+    private val applicationInstallers = mutableListOf<ApplicationKtorInstaller>()
+    private val serviceInstallers = mutableListOf<ServiceKtorInstaller>()
+
+    fun application(configure: ApplicationKtorPluginConfig.() -> Unit) {
+        val config = ApplicationKtorPluginConfig().apply(configure)
+        applicationInstallers += config.toInstallers()
+    }
+
+    fun service(configure: ServiceKtorPluginConfig.() -> Unit) {
+        val config = ServiceKtorPluginConfig().apply(configure)
+        serviceInstallers += config.toInstallers()
+    }
+
+    internal fun configuredApplicationInstallers(): List<ApplicationKtorInstaller> = applicationInstallers.toList()
+
+    internal fun configuredServiceInstallers(): List<ServiceKtorInstaller> = serviceInstallers.toList()
+}
+
+class ApplicationKtorPluginConfig {
+    private val installers = mutableListOf<ApplicationKtorInstaller>()
+
+    fun <B : Any, F : Any> install(
+        plugin: Plugin<Application, B, F>,
+        configure: B.() -> Unit = {}
+    ) {
+        installers += ApplicationKtorInstaller(pluginKey = plugin.key.name) {
+            install(plugin, configure)
+        }
+    }
+
+    internal fun toInstallers(): List<ApplicationKtorInstaller> = installers.toList()
+}
+
+class ServiceKtorPluginConfig {
+    private val installers = mutableListOf<ServiceKtorInstaller>()
+
+    fun <B : Any, F : Any> install(
+        plugin: BaseRouteScopedPlugin<B, F>,
+        configure: B.() -> Unit = {}
+    ) {
+        installers += ServiceKtorInstaller(pluginKey = plugin.key.name) {
+            install(plugin, configure)
+        }
+    }
+
+    internal fun toInstallers(): List<ServiceKtorInstaller> = installers.toList()
 }
 
 sealed interface PluginRouteDefinition {

@@ -169,13 +169,15 @@ Hot reload behavior:
 
 Keel supports two explicit Ktor plugin configuration scopes:
 
-1. Global scope (`server { globalKtorPlugin { ... } }`)
-2. Service scope (`plugin(...) { ... }`) for a single `/api/plugins/{pluginId}` route tree
+1. Global scope (`server { globalKtorPlugin { ... } }`) for host-wide application behavior
+2. Plugin scope (`override fun ktorPlugins()`) declared inside each plugin
 
 Both scopes are intentionally **install-only**.
 
 - Global scope only allows installing application-level plugins.
-- Service scope only allows installing route-scoped plugins.
+- Plugin scope allows:
+  - `application { install(...) }` for plugin-declared application-level requirements
+  - `service { install(...) }` for plugin route-tree scoped behavior
 - Direct arbitrary `Application`/`Route` mutation is not exposed in these blocks.
 
 Global scope example:
@@ -198,10 +200,12 @@ runKeel {
 }
 ```
 
-Service scope example (only affects the configured plugin route tree):
+Plugin scope example (declared inside plugin, service scope only affects that plugin route tree):
 
 ```kotlin
 import io.ktor.server.application.createRouteScopedPlugin
+import com.keel.kernel.plugin.KeelPlugin
+import com.keel.kernel.plugin.PluginKtorConfig
 
 val ServiceOnlyHeader = createRouteScopedPlugin("service-only-header") {
     onCall { call ->
@@ -209,9 +213,12 @@ val ServiceOnlyHeader = createRouteScopedPlugin("service-only-header") {
     }
 }
 
-runKeel {
-    plugin(MyPlugin()) {
-        install(ServiceOnlyHeader)
+class MyPlugin : KeelPlugin {
+    // ...
+    override fun ktorPlugins(): PluginKtorConfig = PluginKtorConfig().apply {
+        service {
+            install(ServiceOnlyHeader)
+        }
     }
 }
 ```
@@ -219,8 +226,10 @@ runKeel {
 Scope boundary summary:
 
 - Global scope applies to both `/api/plugins/**` and `/api/_system/**`.
-- Service scope applies only to the configured plugin's route subtree.
-- Service scope does not affect other plugins or system routes.
+- Plugin `service` scope applies only to that plugin route subtree.
+- Plugin `application` scope and global scope both apply to plugin + system routes.
+- Plugin scope does not affect other plugin-specific `service` scopes.
+- Duplicate plugin-declared application-scope installs (same Ktor plugin key) fail fast at startup with conflicting `pluginId` details.
 
 ### Dev HotReload Trigger Rules
 
@@ -247,6 +256,7 @@ Notes:
 - Default watch scope is caller module + recursive Gradle `project(...)` dependencies.
 - Calling `watchDirectories(...)` overrides the default watch scope.
 - Endpoint topology changes (method/path set changes) are not hot-swapped and are treated as restart-required.
+- Changes to plugin `ktorPlugins()` scope declarations are treated as restart-required during dev hot reload.
 - Manual dev reload API: `POST /api/_system/hotreload/reload/{pluginId}`.
 - Legacy `pluginSource(...)` remains available for compatibility but is deprecated.
 
@@ -315,7 +325,7 @@ fun main() {
 }
 ```
 
-Register with service-scope Ktor plugin install:
+Register plugin with internal Ktor scope declaration:
 
 ```kotlin
 import io.ktor.server.application.createRouteScopedPlugin
@@ -326,14 +336,26 @@ val ServiceMetricTag = createRouteScopedPlugin("service-metric-tag") {
     }
 }
 
-fun main() {
-    runKeel {
-        plugin(MyPlugin()) {
+class MyPlugin : KeelPlugin {
+    // ...
+    override fun ktorPlugins(): PluginKtorConfig = PluginKtorConfig().apply {
+        service {
             install(ServiceMetricTag)
         }
     }
 }
+
+fun main() {
+    runKeel {
+        plugin(MyPlugin())
+    }
+}
 ```
+
+Migration note:
+- Host-side `plugin(...) { install(...) }` scope configuration is removed.
+- Declare Ktor installs inside each plugin via `override fun ktorPlugins()`.
+- Dev hot reload returns restart-required when `ktorPlugins()` scope signatures change.
 
 ## System APIs
 

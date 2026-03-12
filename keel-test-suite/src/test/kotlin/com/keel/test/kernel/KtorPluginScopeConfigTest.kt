@@ -6,11 +6,14 @@ import com.keel.kernel.loader.DefaultPluginLoader
 import com.keel.kernel.plugin.KeelPlugin
 import com.keel.kernel.plugin.PluginDescriptor
 import com.keel.kernel.plugin.PluginEndpointBuilders
+import com.keel.kernel.plugin.PluginKtorConfig
 import com.keel.kernel.plugin.PluginResult
 import com.keel.kernel.plugin.PluginRuntimeContext
+import com.keel.kernel.plugin.PluginRuntimeMode
 import com.keel.kernel.plugin.UnifiedPluginManager
 import com.keel.kernel.routing.UnifiedSystemRouteInstaller
 import io.ktor.client.request.get
+import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.call
 import io.ktor.server.application.createApplicationPlugin
 import io.ktor.server.application.createRouteScopedPlugin
@@ -25,7 +28,9 @@ import org.koin.core.context.stopKoin
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNotNull
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 class KtorPluginScopeConfigTest {
     @AfterTest
@@ -72,12 +77,7 @@ class KtorPluginScopeConfigTest {
     fun serviceScopedKtorPluginOnlyAppliesToConfiguredPluginRouteTree() = testApplication {
         val koin = startKoin {}.koin
         val manager = UnifiedPluginManager(koin)
-        manager.registerPlugin(
-            plugin = PingPlugin("plug-a"),
-            serviceRouteInstallers = listOf({
-                install(plugAServiceScopePlugin)
-            })
-        )
+        manager.registerPlugin(PingPlugin("plug-a", serviceScopeHeader = "plug-a"))
         manager.registerPlugin(PingPlugin("plug-b"))
 
         application {
@@ -85,6 +85,7 @@ class KtorPluginScopeConfigTest {
                 json()
             }
             install(SSE)
+            manager.installConfiguredPluginApplicationKtorPlugins(this)
             routing {
                 manager.mountRoutes(this)
                 UnifiedSystemRouteInstaller.install(this, manager, DefaultPluginLoader(), null)
@@ -108,12 +109,7 @@ class KtorPluginScopeConfigTest {
     fun scopeResponsibilitiesAreSeparatedBetweenGlobalAndServiceScopes() = testApplication {
         val koin = startKoin {}.koin
         val manager = UnifiedPluginManager(koin)
-        manager.registerPlugin(
-            plugin = PingPlugin("plug-a"),
-            serviceRouteInstallers = listOf({
-                install(plugAServiceScopePlugin)
-            })
-        )
+        manager.registerPlugin(PingPlugin("plug-a", serviceScopeHeader = "plug-a"))
         manager.registerPlugin(PingPlugin("plug-b"))
 
         val serverConfig = KeelServerConfig().apply {
@@ -128,6 +124,7 @@ class KtorPluginScopeConfigTest {
             }
             install(SSE)
             serverConfig.installConfiguredGlobalKtorPlugins(this)
+            manager.installConfiguredPluginApplicationKtorPlugins(this)
             routing {
                 manager.mountRoutes(this)
                 UnifiedSystemRouteInstaller.install(this, manager, DefaultPluginLoader(), null)
@@ -153,12 +150,42 @@ class KtorPluginScopeConfigTest {
     }
 
     @Test
-    fun kernelBuilderPluginSignatureRemainsCompatibleWithAndWithoutScopeConfig() {
+    fun pluginApplicationScopeAppliesToExternalJvmPluginRoutesAndSystemRoutes() = testApplication {
+        val koin = startKoin {}.koin
+        val manager = UnifiedPluginManager(koin)
+        manager.registerPlugin(
+            PingPlugin(
+                pluginId = "plug-external",
+                applicationScopeHeader = "external-scope",
+                runtimeMode = PluginRuntimeMode.EXTERNAL_JVM
+            )
+        )
+
+        application {
+            install(ContentNegotiation) {
+                json()
+            }
+            install(SSE)
+            manager.installConfiguredPluginApplicationKtorPlugins(this)
+            routing {
+                manager.mountRoutes(this)
+                UnifiedSystemRouteInstaller.install(this, manager, DefaultPluginLoader(), null)
+            }
+        }
+
+        val pluginResponse = client.get("/api/plugins/plug-external/ping")
+        val systemResponse = client.get("/api/_system/health")
+
+        assertEquals(HttpStatusCode.ServiceUnavailable, pluginResponse.status)
+        assertEquals("external-scope", pluginResponse.headers["X-Plugin-App-Scope"])
+        assertEquals("external-scope", systemResponse.headers["X-Plugin-App-Scope"])
+    }
+
+    @Test
+    fun kernelBuilderPluginSignatureSupportsPluginAutonomyWithoutHostScopeBlock() {
         val kernel = buildKeel {
             plugin(PingPlugin("plain"))
-            plugin(PingPlugin("scoped")) {
-                install(noopServiceScopePlugin)
-            }
+            plugin(PingPlugin("scoped", serviceScopeHeader = "scoped"))
             enablePluginHotReload(false)
         }
 
@@ -166,7 +193,146 @@ class KtorPluginScopeConfigTest {
         assertEquals(true, kernel.pluginManager().getRuntimeConfig("scoped")?.enabled)
     }
 
+    @Test
+    fun pluginApplicationInstallOrderIsDeterministicByPluginId() = testApplication {
+        val koin = startKoin {}.koin
+        val manager = UnifiedPluginManager(koin)
+        manager.registerPlugin(PingPlugin("plug-b", applicationScopeHeader = "plug-b"))
+        manager.registerPlugin(PingPlugin("plug-a", applicationScopeHeader = "plug-a"))
+
+        application {
+            install(ContentNegotiation) {
+                json()
+            }
+            install(SSE)
+            manager.installConfiguredPluginApplicationKtorPlugins(this)
+            routing {
+                manager.mountRoutes(this)
+                UnifiedSystemRouteInstaller.install(this, manager, DefaultPluginLoader(), null)
+            }
+            kotlinx.coroutines.runBlocking {
+                manager.startPlugin("plug-a")
+                manager.startPlugin("plug-b")
+            }
+        }
+
+        val systemResponse = client.get("/api/_system/health")
+        assertEquals(listOf("plug-a", "plug-b"), systemResponse.headers.getAll("X-Plugin-App-Scope"))
+    }
+
+    @Test
+    fun disabledPluginApplicationScopeIsNotInstalled() = testApplication {
+        val koin = startKoin {}.koin
+        val manager = UnifiedPluginManager(koin)
+        manager.registerPlugin(PingPlugin("plug-enabled", applicationScopeHeader = "enabled-header"))
+        manager.registerPlugin(
+            plugin = PingPlugin("plug-disabled", applicationScopeHeader = "disabled-header"),
+            enabledOverride = false
+        )
+
+        application {
+            install(ContentNegotiation) {
+                json()
+            }
+            install(SSE)
+            manager.installConfiguredPluginApplicationKtorPlugins(this)
+            routing {
+                manager.mountRoutes(this)
+                UnifiedSystemRouteInstaller.install(this, manager, DefaultPluginLoader(), null)
+            }
+            kotlinx.coroutines.runBlocking {
+                manager.startPlugin("plug-enabled")
+            }
+        }
+
+        val systemResponse = client.get("/api/_system/health")
+        assertEquals(listOf("enabled-header"), systemResponse.headers.getAll("X-Plugin-App-Scope"))
+    }
+
+    @Test
+    fun disabledPluginDoesNotCauseDuplicateApplicationInstallConflict() = testApplication {
+        val koin = startKoin {}.koin
+        val manager = UnifiedPluginManager(koin)
+        manager.registerPlugin(DuplicateAppScopePlugin("dup-enabled"))
+        manager.registerPlugin(plugin = DuplicateAppScopePlugin("dup-disabled"), enabledOverride = false)
+
+        application {
+            install(ContentNegotiation) {
+                json()
+            }
+            install(SSE)
+            manager.installConfiguredPluginApplicationKtorPlugins(this)
+            routing {
+                manager.mountRoutes(this)
+                UnifiedSystemRouteInstaller.install(this, manager, DefaultPluginLoader(), null)
+            }
+        }
+
+        val failure = runCatching { startApplication() }.exceptionOrNull()
+        assertNull(failure)
+    }
+
+    @Test
+    fun duplicatePluginApplicationInstallFailsFastWithPluginIdContext() = testApplication {
+        val koin = startKoin {}.koin
+        val manager = UnifiedPluginManager(koin)
+        manager.registerPlugin(DuplicateAppScopePlugin("dup-a"))
+        manager.registerPlugin(DuplicateAppScopePlugin("dup-b"))
+
+        application {
+            install(ContentNegotiation) {
+                json()
+            }
+            install(SSE)
+            manager.installConfiguredPluginApplicationKtorPlugins(this)
+            routing {
+                manager.mountRoutes(this)
+                UnifiedSystemRouteInstaller.install(this, manager, DefaultPluginLoader(), null)
+            }
+        }
+
+        val failure = runCatching { startApplication() }.exceptionOrNull()
+
+        assertNotNull(failure)
+        assertTrue(failure.message?.contains("pluginId=dup-b") == true)
+    }
+
     private class PingPlugin(
+        pluginId: String,
+        private val applicationScopeHeader: String? = null,
+        private val serviceScopeHeader: String? = null,
+        runtimeMode: PluginRuntimeMode = PluginRuntimeMode.IN_PROCESS
+    ) : KeelPlugin {
+        override val descriptor: PluginDescriptor = PluginDescriptor(
+            pluginId = pluginId,
+            version = "1.0.0",
+            displayName = pluginId,
+            defaultRuntimeMode = runtimeMode
+        )
+
+        override suspend fun onStop(context: PluginRuntimeContext) = Unit
+
+        override fun ktorPlugins(): PluginKtorConfig = PluginKtorConfig().apply {
+            if (applicationScopeHeader != null) {
+                application {
+                    install(pluginApplicationHeaderPlugin(applicationScopeHeader))
+                }
+            }
+            if (serviceScopeHeader != null) {
+                service {
+                    install(serviceHeaderPlugin(serviceScopeHeader))
+                }
+            }
+        }
+
+        override fun endpoints() = PluginEndpointBuilders.pluginEndpoints(descriptor.pluginId) {
+            get<String>("/ping") {
+                PluginResult(body = "pong")
+            }
+        }
+    }
+
+    private class DuplicateAppScopePlugin(
         pluginId: String
     ) : KeelPlugin {
         override val descriptor: PluginDescriptor = PluginDescriptor(
@@ -175,7 +341,11 @@ class KtorPluginScopeConfigTest {
             displayName = pluginId
         )
 
-        override suspend fun onStop(context: PluginRuntimeContext) = Unit
+        override fun ktorPlugins(): PluginKtorConfig = PluginKtorConfig().apply {
+            application {
+                install(duplicatedApplicationPlugin)
+            }
+        }
 
         override fun endpoints() = PluginEndpointBuilders.pluginEndpoints(descriptor.pluginId) {
             get<String>("/ping") {
@@ -191,12 +361,18 @@ class KtorPluginScopeConfigTest {
             }
         }
 
-        private val plugAServiceScopePlugin = createRouteScopedPlugin("plug-a-scope") {
+        private fun pluginApplicationHeaderPlugin(headerValue: String) = createApplicationPlugin("plugin-app-scope-$headerValue") {
             onCall { call ->
-                call.response.headers.append("X-Service-Scope", "plug-a")
+                call.response.headers.append("X-Plugin-App-Scope", headerValue)
             }
         }
 
-        private val noopServiceScopePlugin = createRouteScopedPlugin("noop-scope") {}
+        private fun serviceHeaderPlugin(headerValue: String) = createRouteScopedPlugin("service-scope-$headerValue") {
+            onCall { call ->
+                call.response.headers.append("X-Service-Scope", headerValue)
+            }
+        }
+
+        private val duplicatedApplicationPlugin = createApplicationPlugin("duplicated-application-plugin") {}
     }
 }

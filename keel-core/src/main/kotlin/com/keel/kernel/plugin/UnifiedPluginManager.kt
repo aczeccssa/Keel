@@ -30,6 +30,7 @@ import io.opentelemetry.context.Context
 import io.ktor.http.HttpMethod
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.ContentType
+import io.ktor.server.application.Application
 import io.ktor.server.request.path
 import io.ktor.server.http.content.staticResources
 import io.ktor.server.response.respond
@@ -77,6 +78,47 @@ class UnifiedPluginManager(
     private val logger = KeelLoggerService.getLogger("UnifiedPluginManager")
     private val entries = ConcurrentHashMap<String, ManagedPlugin>()
     private val developmentSources = ConcurrentHashMap<String, PluginDevelopmentSource>()
+
+    data class KtorScopeSignature(
+        val applicationPluginKeys: List<String>,
+        val servicePluginKeys: List<String>
+    )
+
+    data class ReloadCompatibilityDecision(
+        val outcome: DevReloadOutcome,
+        val message: String
+    )
+
+    companion object {
+        fun hasKtorScopeDrift(previous: KtorScopeSignature, current: KtorScopeSignature): Boolean {
+            return previous.applicationPluginKeys != current.applicationPluginKeys ||
+                previous.servicePluginKeys != current.servicePluginKeys
+        }
+
+        fun decideReloadCompatibility(
+            previousTopology: Set<String>,
+            newTopology: Set<String>,
+            previousKtorScope: KtorScopeSignature,
+            newKtorScope: KtorScopeSignature
+        ): ReloadCompatibilityDecision {
+            if (newTopology != previousTopology) {
+                return ReloadCompatibilityDecision(
+                    outcome = DevReloadOutcome.RESTART_REQUIRED,
+                    message = "Endpoint topology changed and requires restart"
+                )
+            }
+            if (hasKtorScopeDrift(previousKtorScope, newKtorScope)) {
+                return ReloadCompatibilityDecision(
+                    outcome = DevReloadOutcome.RESTART_REQUIRED,
+                    message = "Ktor scope configuration changed and requires restart"
+                )
+            }
+            return ReloadCompatibilityDecision(
+                outcome = DevReloadOutcome.RELOADED,
+                message = "Reload-compatible generation shape"
+            )
+        }
+    }
     private val pluginScopeManager = PluginScopeManager(kernelKoin)
     private val managerScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var routing: Routing? = null
@@ -87,11 +129,11 @@ class UnifiedPluginManager(
 
     fun registerPlugin(
         plugin: KeelPlugin,
-        enabledOverride: Boolean? = null,
-        serviceRouteInstallers: List<Route.() -> Unit> = emptyList()
+        enabledOverride: Boolean? = null
     ) {
         val descriptor = plugin.descriptor
         val config = descriptor.toConfig(enabled = enabledOverride ?: true)
+        val ktorConfig = plugin.ktorPlugins()
         val routeDefinitions = plugin.endpoints()
         validateServiceDeclaration(descriptor, routeDefinitions)
         val endpointDefinitions = routeDefinitions.filterIsInstance<PluginEndpointDefinition<*, *>>()
@@ -110,9 +152,39 @@ class UnifiedPluginManager(
             healthState = PluginHealthState.UNKNOWN,
             generation = PluginGeneration.INITIAL,
             processState = if (config.runtimeMode == PluginRuntimeMode.EXTERNAL_JVM) PluginProcessState.STOPPED else null,
-            serviceRouteInstallers = serviceRouteInstallers
+            pluginApplicationInstallers = ktorConfig.configuredApplicationInstallers(),
+            pluginServiceRouteInstallers = ktorConfig.configuredServiceInstallers()
         )
         logger.info("Registered unified plugin ${descriptor.pluginId} mode=${config.runtimeMode}")
+    }
+
+    fun installConfiguredPluginApplicationKtorPlugins(application: Application) {
+        val installedPluginOwners = linkedMapOf<String, String>()
+        entries.values
+            .asSequence()
+            .filter { it.config.enabled }
+            .sortedBy { it.plugin.descriptor.pluginId }
+            .forEach { entry ->
+                entry.pluginApplicationInstallers.forEach { installer ->
+                    val pluginId = entry.plugin.descriptor.pluginId
+                    val existingOwner = installedPluginOwners.putIfAbsent(installer.pluginKey, pluginId)
+                    if (existingOwner != null) {
+                        throw IllegalStateException(
+                            "Duplicate plugin application-scope Ktor plugin key='${installer.pluginKey}' " +
+                                "already declared by pluginId=$existingOwner, conflicted pluginId=$pluginId"
+                        )
+                    }
+                    runCatching {
+                        installer.installer(application)
+                    }.getOrElse { error ->
+                        throw IllegalStateException(
+                            "Failed to install plugin application-scope Ktor plugin key='${installer.pluginKey}' " +
+                                "for pluginId=$pluginId: ${error.message}",
+                            error
+                        )
+                    }
+                }
+            }
     }
 
     fun registerPluginSource(source: PluginDevelopmentSource) {
@@ -163,6 +235,8 @@ class UnifiedPluginManager(
         val endpointById: Map<String, PluginEndpointDefinition<*, *>>,
         val topology: Set<String>,
         val sseByPath: Map<String, PluginSseDefinition>,
+        val pluginApplicationInstallers: List<ApplicationKtorInstaller>,
+        val pluginServiceRouteInstallers: List<ServiceKtorInstaller>,
         val sourceClassLoader: URLClassLoader?,
         val config: PluginConfig,
         val generation: PluginGeneration
@@ -174,7 +248,9 @@ class UnifiedPluginManager(
         val routeDefinitions: List<PluginRouteDefinition>,
         val endpointById: Map<String, PluginEndpointDefinition<*, *>>,
         val topology: Set<String>,
-        val sseByPath: Map<String, PluginSseDefinition>
+        val sseByPath: Map<String, PluginSseDefinition>,
+        val pluginApplicationInstallers: List<ApplicationKtorInstaller>,
+        val pluginServiceRouteInstallers: List<ServiceKtorInstaller>
     )
 
     private data class LoadResult(
@@ -190,6 +266,8 @@ class UnifiedPluginManager(
             endpointById = entry.endpointById.toMap(),
             topology = entry.endpointTopology.toSet(),
             sseByPath = entry.sseByPath.toMap(),
+            pluginApplicationInstallers = entry.pluginApplicationInstallers,
+            pluginServiceRouteInstallers = entry.pluginServiceRouteInstallers,
             sourceClassLoader = entry.sourceClassLoader,
             config = entry.config,
             generation = entry.generation
@@ -211,6 +289,7 @@ class UnifiedPluginManager(
             runCatching { classLoader.close() }
             return LoadResult(error = error.message)
         }
+        val ktorConfig = plugin.ktorPlugins()
 
         val endpoints = plugin.endpoints()
         validateServiceDeclaration(plugin.descriptor, endpoints)
@@ -229,7 +308,9 @@ class UnifiedPluginManager(
                 routeDefinitions = endpoints,
                 endpointById = endpointById,
                 topology = topology,
-                sseByPath = sseByPath
+                sseByPath = sseByPath,
+                pluginApplicationInstallers = ktorConfig.configuredApplicationInstallers(),
+                pluginServiceRouteInstallers = ktorConfig.configuredServiceInstallers()
             )
         )
     }
@@ -246,11 +327,25 @@ class UnifiedPluginManager(
                 message = "Descriptor pluginId mismatch: expected ${source.pluginId}, actual ${newGeneration.plugin.descriptor.pluginId}"
             )
         }
-        if (newGeneration.topology != snapshot.topology) {
+        val previousKtorScope = KtorScopeSignature(
+            applicationPluginKeys = snapshot.pluginApplicationInstallers.map { it.pluginKey },
+            servicePluginKeys = snapshot.pluginServiceRouteInstallers.map { it.pluginKey }
+        )
+        val newKtorScope = KtorScopeSignature(
+            applicationPluginKeys = newGeneration.pluginApplicationInstallers.map { it.pluginKey },
+            servicePluginKeys = newGeneration.pluginServiceRouteInstallers.map { it.pluginKey }
+        )
+        val decision = decideReloadCompatibility(
+            previousTopology = snapshot.topology,
+            newTopology = newGeneration.topology,
+            previousKtorScope = previousKtorScope,
+            newKtorScope = newKtorScope
+        )
+        if (decision.outcome != DevReloadOutcome.RELOADED) {
             return ReloadAttemptResult(
                 pluginId = source.pluginId,
-                outcome = DevReloadOutcome.RESTART_REQUIRED,
-                message = "Endpoint topology changed and requires restart"
+                outcome = decision.outcome,
+                message = decision.message
             )
         }
         return null
@@ -271,6 +366,8 @@ class UnifiedPluginManager(
         entry.endpointById = newGeneration.endpointById.toMutableMap()
         entry.endpointTopology = newGeneration.topology
         entry.sseByPath = newGeneration.sseByPath.toMutableMap()
+        entry.pluginApplicationInstallers = newGeneration.pluginApplicationInstallers
+        entry.pluginServiceRouteInstallers = newGeneration.pluginServiceRouteInstallers
         entry.sourceClassLoader = newGeneration.classLoader
         entry.config = newGeneration.plugin.descriptor.toConfig().copy(runtimeMode = source.runtimeMode)
         entry.generation = snapshot.generation.next()
@@ -295,6 +392,8 @@ class UnifiedPluginManager(
             entry.endpointById = snapshot.endpointById.toMutableMap()
             entry.endpointTopology = snapshot.topology
             entry.sseByPath = snapshot.sseByPath.toMutableMap()
+            entry.pluginApplicationInstallers = snapshot.pluginApplicationInstallers
+            entry.pluginServiceRouteInstallers = snapshot.pluginServiceRouteInstallers
             entry.sourceClassLoader = snapshot.sourceClassLoader
             entry.config = snapshot.config
             entry.generation = snapshot.generation
@@ -792,8 +891,8 @@ class UnifiedPluginManager(
             error("Plugin static resource path conflict for pluginId=$pluginId: ${staticConflicts.joinToString { it.path }}")
         }
         routing.route("/api/plugins/$pluginId") {
-            entry.serviceRouteInstallers.forEach { installer ->
-                installer(this)
+            entry.pluginServiceRouteInstallers.forEach { installer ->
+                installer.installer(this)
             }
             for (endpoint in endpoints) {
                 registerPluginOperation(pluginId, endpoint)
@@ -1344,7 +1443,8 @@ class UnifiedPluginManager(
         var recoveryAttempts: Int = 0,
         var lastRecoveryAtEpochMs: Long? = null,
         val recoveryInProgress: AtomicBoolean = AtomicBoolean(false),
-        val serviceRouteInstallers: List<Route.() -> Unit> = emptyList()
+        var pluginApplicationInstallers: List<ApplicationKtorInstaller> = emptyList(),
+        var pluginServiceRouteInstallers: List<ServiceKtorInstaller> = emptyList()
     )
 
     private data class BasicPluginInitContext(
