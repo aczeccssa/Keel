@@ -552,7 +552,7 @@ object ExternalPluginHostMain {
                             .map {
                             PluginEndpointInventoryItem(it.endpointId, it.method.value, it.path)
                         },
-                        routeInventory = plugin.endpoints().mapNotNull { route ->
+                        routeInventory = plugin.endpoints().map { route ->
                             when (route) {
                                 is com.keel.kernel.plugin.PluginEndpointDefinition<*, *> -> PluginRouteInventoryItem(
                                     routeType = "ENDPOINT",

@@ -6,10 +6,13 @@ import com.keel.kernel.plugin.PluginDescriptor
 import com.keel.kernel.plugin.PluginEndpointBuilders
 import com.keel.kernel.plugin.PluginEndpointBuilders.pluginEndpoints
 import com.keel.kernel.plugin.PluginInitContext
+import com.keel.kernel.plugin.PluginKtorConfig
 import com.keel.kernel.plugin.PluginResult
 import com.keel.kernel.plugin.PluginRuntimeContext
 import com.keel.openapi.annotations.KeelApiPlugin
 import com.keel.openapi.runtime.OpenApiDoc
+import io.ktor.server.application.call
+import io.ktor.server.application.createRouteScopedPlugin
 
 @KeelApiPlugin("helloworld", "Hello World Plugin")
 class HelloWorldPlugin : KeelPlugin {
@@ -19,6 +22,12 @@ class HelloWorldPlugin : KeelPlugin {
 
     override suspend fun onInit(context: PluginInitContext) {
         logger.info("Initialized hello world plugin in ${context.descriptor.defaultRuntimeMode}")
+    }
+
+    override fun ktorPlugins(): PluginKtorConfig = PluginKtorConfig().apply {
+        service {
+            install(sampleServiceScopeHeaderPlugin)
+        }
     }
 
     override fun endpoints() = pluginEndpoints(descriptor.pluginId) {
@@ -41,5 +50,13 @@ class HelloWorldPlugin : KeelPlugin {
 
     override suspend fun onStop(context: PluginRuntimeContext) {
         logger.info("Hello world plugin stopped")
+    }
+
+    companion object {
+        private val sampleServiceScopeHeaderPlugin = createRouteScopedPlugin("helloworld-service-scope") {
+            onCall { call ->
+                call.response.headers.append("X-HelloWorld-Service-Scope", "enabled")
+            }
+        }
     }
 }

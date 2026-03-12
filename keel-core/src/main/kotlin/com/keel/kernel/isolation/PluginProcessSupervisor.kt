@@ -824,7 +824,7 @@ class PluginProcessSupervisor(
         }.toSet()
         if (expectedEndpointInventory != actualEndpointInventory) return false
 
-        val expectedRouteInventory = expectedRoutes.mapNotNull { route ->
+        val expectedRouteInventory = expectedRoutes.map { route ->
             when (route) {
                 is PluginEndpointDefinition<*, *> -> PluginRouteInventoryItem(
                     routeType = "ENDPOINT",

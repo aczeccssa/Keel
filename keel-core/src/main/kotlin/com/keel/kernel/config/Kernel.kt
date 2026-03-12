@@ -31,7 +31,6 @@ import io.ktor.server.application.ApplicationStarted
 import io.ktor.server.application.ApplicationStopping
 import io.ktor.server.application.call
 import io.ktor.server.application.install
-import io.ktor.server.application.BaseRouteScopedPlugin
 import io.ktor.server.http.content.staticResources
 import io.ktor.server.request.httpMethod
 import io.ktor.server.request.path
@@ -99,10 +98,9 @@ class Kernel(
 
     fun registerPlugin(
         plugin: KeelPlugin,
-        enabledOverride: Boolean? = null,
-        serviceRouteInstallers: List<Route.() -> Unit> = emptyList()
+        enabledOverride: Boolean? = null
     ): Kernel {
-        pluginManager.registerPlugin(plugin, enabledOverride, serviceRouteInstallers)
+        pluginManager.registerPlugin(plugin, enabledOverride)
         return this
     }
 
@@ -138,6 +136,7 @@ class Kernel(
                 }
             }
             serverConfig.installConfiguredGlobalKtorPlugins(this)
+            pluginManager.installConfiguredPluginApplicationKtorPlugins(this)
 
             val loggerService = KeelLoggerService.initialize()
             if (ConfigHotReloader.isDevelopmentMode()) {
@@ -253,29 +252,11 @@ class Kernel(
     fun pluginDevelopmentSourceIds(): Set<String> = pluginDevelopmentSources.map { it.pluginId }.toSet()
 }
 
-class ServicePluginConfig {
-    private val inScopeKtorPluginInstallers = mutableListOf<Route.() -> Unit>()
-
-    fun <B : Any, F : Any> install(
-        plugin: BaseRouteScopedPlugin<B, F>,
-        configure: B.() -> Unit = {}
-    ) {
-        inScopeKtorPluginInstallers += {
-            install(plugin, configure)
-        }
-    }
-
-    internal fun configuredInScopeKtorPlugins(): List<Route.() -> Unit> {
-        return inScopeKtorPluginInstallers.toList()
-    }
-}
-
 class KernelBuilder {
     private data class PluginRegistration(
         val plugin: KeelPlugin,
         val enabled: Boolean,
-        val hotReloadEnabled: Boolean,
-        val serviceRouteInstallers: List<Route.() -> Unit>
+        val hotReloadEnabled: Boolean
     )
 
     private val logger = KeelLoggerService.getLogger("KernelBuilder")
@@ -299,15 +280,12 @@ class KernelBuilder {
     fun plugin(
         plugin: KeelPlugin,
         enabled: Boolean = true,
-        hotReloadEnabled: Boolean = ConfigHotReloader.isDevelopmentMode(),
-        configure: ServicePluginConfig.() -> Unit = {}
+        hotReloadEnabled: Boolean = ConfigHotReloader.isDevelopmentMode()
     ) {
-        val serviceConfig = ServicePluginConfig().apply(configure)
         plugins += PluginRegistration(
             plugin = plugin,
             enabled = enabled,
-            hotReloadEnabled = hotReloadEnabled,
-            serviceRouteInstallers = serviceConfig.configuredInScopeKtorPlugins()
+            hotReloadEnabled = hotReloadEnabled
         )
     }
 
@@ -401,8 +379,7 @@ class KernelBuilder {
             registeredPluginIds += plugin.descriptor.pluginId
             kernel.registerPlugin(
                 plugin = plugin,
-                enabledOverride = registration.enabled,
-                serviceRouteInstallers = registration.serviceRouteInstallers
+                enabledOverride = registration.enabled
             )
         }
         pluginSourceById.values.forEach { source ->
