@@ -9,6 +9,7 @@ import com.keel.kernel.plugin.PluginRecoveryPolicy
 import com.keel.kernel.plugin.PluginResult
 import com.keel.kernel.plugin.PluginRuntimeMode
 import com.keel.kernel.plugin.PluginServiceType
+import com.keel.kernel.plugin.PluginLifecycleState
 import com.keel.kernel.plugin.UnifiedPluginManager
 import io.ktor.client.request.get
 import io.ktor.client.statement.bodyAsText
@@ -163,6 +164,65 @@ class ExternalJvmE2EIntegrationTest {
         manager.stopAll()
     }
 
+    @Test
+    fun overDeclaredServicesDoNotBlockRegistration() = runBlocking {
+        val pluginId = "over-declared-service"
+        val manager = newManager()
+        manager.registerPlugin(OverDeclaredServicePlugin())
+        manager.startPlugin(pluginId)
+
+        val snapshot = manager.getRuntimeSnapshot(pluginId)
+        assertNotNull(snapshot)
+        assertEquals(PluginRuntimeMode.EXTERNAL_JVM, snapshot.runtimeMode)
+        manager.stopAll()
+    }
+
+    @Test
+    fun recoveryBudgetExhaustionClearsStickyModeBeforeManualRestart() = runBlocking {
+        val pluginId = "recovery-budget"
+        val manager = newManager()
+        manager.registerPlugin(BudgetRecoveryPlugin())
+        manager.startPlugin(pluginId)
+
+        manager.getProcessHandle(pluginId)?.destroyForcibly()
+        waitUntil(8000) {
+            val current = manager.getRuntimeSnapshot(pluginId) ?: return@waitUntil false
+            current.lifecycleState == PluginLifecycleState.RUNNING &&
+                current.diagnostics.activeCommunicationMode == JvmCommunicationMode.TCP
+        }
+
+        manager.getProcessHandle(pluginId)?.destroyForcibly()
+        waitUntil(8000) {
+            manager.getRuntimeSnapshot(pluginId)?.lifecycleState == PluginLifecycleState.FAILED
+        }
+
+        manager.startPlugin(pluginId)
+        waitUntil(8000) {
+            val current = manager.getRuntimeSnapshot(pluginId) ?: return@waitUntil false
+            current.lifecycleState == PluginLifecycleState.RUNNING &&
+                current.diagnostics.activeCommunicationMode == JvmCommunicationMode.UDS
+        }
+        manager.stopAll()
+    }
+
+    @Test
+    fun burstFailureSignalsDoNotCauseRestartStormAfterRecovery() = runBlocking {
+        val manager = newManager()
+        manager.registerPlugin(ExternalE2EPlugin())
+        manager.startPlugin(pluginId)
+
+        manager.getProcessHandle(pluginId)?.destroyForcibly()
+        waitUntil(8000) {
+            val current = manager.getRuntimeSnapshot(pluginId) ?: return@waitUntil false
+            current.lifecycleState == PluginLifecycleState.RUNNING &&
+                current.processId != null
+        }
+        delay(1500)
+        assertEquals(PluginLifecycleState.RUNNING, manager.getRuntimeSnapshot(pluginId)?.lifecycleState)
+        assertEquals(com.keel.kernel.plugin.PluginDispatchDisposition.AVAILABLE, manager.resolveDispatchDisposition(pluginId))
+        manager.stopAll()
+    }
+
     private fun newManager(runtimeRoot: File = File("/tmp/keel-test-e2e")): UnifiedPluginManager {
         val koin = startKoin {}.also { koinStarted = true }.koin
         return UnifiedPluginManager(koin, runtimeRoot = runtimeRoot)
@@ -226,6 +286,50 @@ class ExternalJvmE2EIntegrationTest {
 
         override fun endpoints() = PluginEndpointBuilders.pluginEndpoints(descriptor.pluginId) {
             staticResources(path = "/ui", basePackage = "external-e2e", index = "index.html")
+        }
+    }
+
+    class OverDeclaredServicePlugin : StandardKeelPlugin {
+        override val descriptor: PluginDescriptor = PluginDescriptor(
+            pluginId = "over-declared-service",
+            version = "1.0.0",
+            displayName = "over-declared-service",
+            defaultRuntimeMode = PluginRuntimeMode.EXTERNAL_JVM,
+            supportedServices = setOf(PluginServiceType.ENDPOINT, PluginServiceType.SSE)
+        )
+
+        override fun endpoints() = PluginEndpointBuilders.pluginEndpoints(descriptor.pluginId) {
+            get<String>("/ping") {
+                PluginResult(body = "pong")
+            }
+        }
+    }
+
+    class BudgetRecoveryPlugin : StandardKeelPlugin {
+        override val descriptor: PluginDescriptor = PluginDescriptor(
+            pluginId = "recovery-budget",
+            version = "1.0.0",
+            displayName = "recovery-budget",
+            defaultRuntimeMode = PluginRuntimeMode.EXTERNAL_JVM,
+            communicationStrategy = JvmCommunicationStrategy(
+                preferredMode = JvmCommunicationMode.UDS,
+                fallbackMode = JvmCommunicationMode.TCP,
+                maxAttempts = 2
+            ),
+            supportedServices = setOf(PluginServiceType.ENDPOINT),
+            recoveryPolicy = PluginRecoveryPolicy(
+                maxRestarts = 1,
+                baseBackoffMs = 50,
+                maxBackoffMs = 100,
+                resetWindowMs = 5000
+            ),
+            healthCheckIntervalMs = 200
+        )
+
+        override fun endpoints() = PluginEndpointBuilders.pluginEndpoints(descriptor.pluginId) {
+            get<String>("/ping") {
+                PluginResult(body = "pong")
+            }
         }
     }
 }

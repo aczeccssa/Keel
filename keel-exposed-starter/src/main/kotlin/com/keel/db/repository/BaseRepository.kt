@@ -1,7 +1,6 @@
 package com.keel.db.repository
 
 import com.keel.db.database.KeelDatabase
-import org.jetbrains.exposed.sql.Op
 import org.jetbrains.exposed.sql.Table
 import org.jetbrains.exposed.sql.Transaction
 import org.jetbrains.exposed.sql.selectAll

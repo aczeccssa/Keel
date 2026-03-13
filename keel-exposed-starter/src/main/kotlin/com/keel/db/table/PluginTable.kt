@@ -1,9 +1,6 @@
 package com.keel.db.table
 
-import kotlinx.datetime.Instant
-import org.jetbrains.exposed.sql.Column
 import org.jetbrains.exposed.sql.Table
-import org.jetbrains.exposed.sql.kotlin.datetime.timestamp
 
 /**
  * Base table class that enforces plugin-specific table naming.

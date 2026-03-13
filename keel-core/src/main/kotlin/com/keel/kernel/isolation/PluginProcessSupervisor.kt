@@ -39,7 +39,6 @@ import com.keel.jvm.runtime.PluginStoppingEvent
 import com.keel.jvm.runtime.PluginJvmFrameCodec
 import com.keel.jvm.runtime.PluginJvmJson
 import com.keel.jvm.runtime.ReloadPrepareRequest
-import com.keel.jvm.runtime.ReloadPrepareResponse
 import com.keel.jvm.runtime.SseCloseRequest
 import com.keel.jvm.runtime.SseCloseResponse
 import com.keel.jvm.runtime.SseOpenRequest
@@ -53,6 +52,7 @@ import io.ktor.server.request.path
 import io.opentelemetry.context.Context
 import java.io.BufferedReader
 import java.io.File
+import java.io.IOException
 import java.io.InputStreamReader
 import java.net.StandardProtocolFamily
 import java.net.UnixDomainSocketAddress
@@ -65,7 +65,6 @@ import java.util.concurrent.ConcurrentHashMap
 import kotlin.io.path.deleteIfExists
 import kotlin.io.path.exists
 import kotlin.io.path.pathString
-import kotlin.math.absoluteValue
 import kotlin.time.Duration.Companion.milliseconds
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -360,7 +359,7 @@ class PluginProcessSupervisor(
 
         val timeoutMs = endpoint.executionPolicy.timeoutMs ?: config.callTimeoutMs
         val response = runCatching {
-            sendInvokeMessage(request, InvokeResponse.serializer(), timeoutMs)
+            sendInvokeMessageWithRetry(request, InvokeResponse.serializer(), timeoutMs)
         }.getOrElse { error ->
             logger.warn("Invoke channel failed pluginId=${descriptor.pluginId} endpoint=${endpoint.endpointId}: ${error.message}")
             reportTerminalFailure(
@@ -375,6 +374,30 @@ class PluginProcessSupervisor(
             return oversizedResponse(call, "Response payload exceeds $maxPayloadBytes bytes")
         }
         return response
+    }
+
+    private suspend fun <T> sendInvokeMessageWithRetry(
+        message: Any,
+        serializer: KSerializer<T>,
+        timeoutMs: Long
+    ): T {
+        var lastError: Throwable? = null
+        repeat(3) { attempt ->
+            try {
+                return sendInvokeMessage(message, serializer, timeoutMs)
+            } catch (error: Throwable) {
+                lastError = error
+                if (!shouldRetryInvokeSend(error) || attempt == 2 || process?.isAlive != true) {
+                    throw error
+                }
+                delay(25L * (attempt + 1))
+            }
+        }
+        throw lastError ?: IllegalStateException("Invoke channel failed without an exception")
+    }
+
+    private fun shouldRetryInvokeSend(error: Throwable): Boolean {
+        return error is IOException
     }
 
     private enum class CommunicationLane {
@@ -594,6 +617,7 @@ class PluginProcessSupervisor(
             connection.adminPath.deleteIfExists()
             connection.eventPath.deleteIfExists()
         }
+        clearSseListeners("process-stop")
         process = null
         eventChannelConnected = false
         readyEventReceived = false
@@ -772,13 +796,23 @@ class PluginProcessSupervisor(
             "plugin-sse-data-event" -> {
                 val event = PluginJvmJson.instance.decodeFromString(PluginSseDataEvent.serializer(), payload)
                 if (validateEvent(event)) {
-                    sseListeners[event.streamId]?.onData?.invoke(event)
+                    val listener = sseListeners[event.streamId]
+                    if (listener == null) {
+                        logger.warn("Received SSE data for unknown stream pluginId=${descriptor.pluginId} streamId=${event.streamId}")
+                    } else {
+                        listener.onData.invoke(event)
+                    }
                 }
             }
             "plugin-sse-closed-event" -> {
                 val event = PluginJvmJson.instance.decodeFromString(PluginSseClosedEvent.serializer(), payload)
                 if (validateEvent(event)) {
-                    sseListeners.remove(event.streamId)?.onClosed?.invoke()
+                    val listener = sseListeners.remove(event.streamId)
+                    if (listener == null) {
+                        logger.warn("Received SSE close for unknown stream pluginId=${descriptor.pluginId} streamId=${event.streamId}")
+                    } else {
+                        listener.onClosed.invoke()
+                    }
                 }
             }
             else -> {
@@ -873,6 +907,7 @@ class PluginProcessSupervisor(
     private fun reportTerminalFailure(reason: String, suggestTcpFallback: Boolean) {
         if (stopping || terminalFailureReported) return
         terminalFailureReported = true
+        clearSseListeners("terminal-failure:$reason")
         if (suggestTcpFallback) {
             fallbackActivated = true
             lastFallbackReason = reason
@@ -888,6 +923,20 @@ class PluginProcessSupervisor(
                 message = message
             )
         )
+    }
+
+    private fun clearSseListeners(reason: String) {
+        val entries = sseListeners.entries.toList()
+        for ((streamId, listener) in entries) {
+            if (sseListeners.remove(streamId, listener)) {
+                runCatching { listener.onClosed.invoke() }
+                    .onFailure { error ->
+                        logger.warn(
+                            "Failed SSE listener cleanup pluginId=${descriptor.pluginId} streamId=$streamId reason=$reason: ${error.message}"
+                        )
+                    }
+            }
+        }
     }
 
     private fun unavailableResponse(call: ApplicationCall, message: String): InvokeResponse {

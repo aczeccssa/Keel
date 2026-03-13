@@ -6,6 +6,7 @@ import com.keel.kernel.plugin.PluginDescriptor
 import com.keel.kernel.plugin.PluginEndpointBuilders
 import com.keel.kernel.plugin.PluginEndpointBuilders.pluginEndpoints
 import com.keel.kernel.plugin.PluginInitContext
+import com.keel.kernel.plugin.PluginRouteDefinition
 import com.keel.kernel.plugin.PluginKtorConfig
 import com.keel.kernel.plugin.PluginResult
 import com.keel.kernel.plugin.PluginRuntimeContext
@@ -30,7 +31,7 @@ class HelloWorldPlugin : StandardKeelPlugin {
         }
     }
 
-    override fun endpoints() = pluginEndpoints(descriptor.pluginId) {
+    override fun endpoints(): List<PluginRouteDefinition> = pluginEndpoints(descriptor.pluginId) {
         get<GreetingData>(doc = OpenApiDoc(summary = "Hello World greeting", tags = listOf("helloworld"))) {
             PluginResult(body = GreetingData("Hello from HelloWorldPlugin!"))
         }

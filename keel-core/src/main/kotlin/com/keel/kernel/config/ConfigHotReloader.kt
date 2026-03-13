@@ -1,5 +1,6 @@
 package com.keel.kernel.config
 
+import com.keel.kernel.hotreload.PluginDevelopmentSource
 import com.keel.kernel.logging.KeelLoggerService
 import java.io.File
 import java.nio.file.ClosedWatchServiceException
@@ -46,12 +47,15 @@ class ConfigHotReloader private constructor(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     private val _isWatching = MutableStateFlow(false)
+    @Suppress("unused")
     val isWatching: StateFlow<Boolean> = _isWatching.asStateFlow()
 
     private val _lastReloadTime = MutableStateFlow(0L)
+    @Suppress("unused")
     val lastReloadTime: StateFlow<Long> = _lastReloadTime.asStateFlow()
 
     private val _moduleChanges = MutableSharedFlow<ModuleChangeEvent>()
+    @Suppress("unused")
     val moduleChanges: SharedFlow<ModuleChangeEvent> = _moduleChanges.asSharedFlow()
 
     private val watchers = mutableListOf<WatchService>()
@@ -298,23 +302,25 @@ class ConfigHotReloader private constructor(
         private val fileFilters = mutableListOf<(String) -> Boolean>()
         private var onModuleChange: (ModuleChangeEvent) -> Unit = {}
 
-        fun watchModuleDir(dir: String) = addWatchDirectory(dir, WatchDirectoryKind.MODULE)
+        fun watchModuleDir(dir: String): Builder = addWatchDirectory(dir, WatchDirectoryKind.MODULE)
 
-        fun watchModuleDirectories(dirs: Iterable<String>) = apply {
+        fun watchModuleDirectories(dirs: Iterable<String>): Builder = apply {
             dirs.forEach(::watchModuleDir)
         }
 
-        fun watchDirectory(dir: String) = addWatchDirectory(dir, WatchDirectoryKind.MANUAL)
+        fun watchDirectory(dir: String): Builder = addWatchDirectory(dir, WatchDirectoryKind.MANUAL)
 
-        fun watchDirectories(dirs: Iterable<String>) = apply {
+        fun watchDirectories(dirs: Iterable<String>): Builder = apply {
             dirs.forEach(::watchDirectory)
         }
 
-        fun watchDirectories(vararg dirs: String) = watchDirectories(dirs.asIterable())
+        @Suppress("unused")
+        fun watchDirectories(vararg dirs: String): Builder = watchDirectories(dirs.asIterable())
 
-        fun addFileFilter(filter: (String) -> Boolean) = apply { fileFilters += filter }
+        @Suppress("unused")
+        fun addFileFilter(filter: (String) -> Boolean): Builder = apply { fileFilters += filter }
 
-        fun onModuleChange(callback: (ModuleChangeEvent) -> Unit) = apply { onModuleChange = callback }
+        fun onModuleChange(callback: (ModuleChangeEvent) -> Unit): Builder = apply { onModuleChange = callback }
 
         fun build(): ConfigHotReloader {
             return ConfigHotReloader(

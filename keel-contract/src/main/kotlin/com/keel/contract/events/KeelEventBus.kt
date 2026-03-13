@@ -35,6 +35,7 @@ interface KeelEvent
 /**
  * Simple event wrapper with timestamp.
  */
+@Suppress("unused")
 data class GenericEvent(
     val type: String,
     val payload: Map<String, String> = emptyMap()

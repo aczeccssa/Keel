@@ -16,6 +16,7 @@ import kotlin.coroutines.resumeWithException
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 
@@ -207,7 +208,7 @@ class DefaultDevHotReloadEngine(
 
     override val events: SharedFlow<DevReloadEvent> = _events.asSharedFlow()
 
-    val statusFlow = _status.asStateFlow()
+    val statusFlow: StateFlow<DevHotReloadStatus> = _status.asStateFlow()
 
     override fun registerSource(source: PluginDevelopmentSource) {
         sources[source.pluginId] = source

@@ -3,25 +3,10 @@ package com.keel.kernel.plugin
 import com.keel.kernel.hotreload.DevReloadOutcome
 import com.keel.kernel.hotreload.PluginDevelopmentSource
 import com.keel.kernel.hotreload.ReloadAttemptResult
-import com.keel.kernel.plugin.buildRequestContext
-import com.keel.kernel.plugin.decodeRequestBody
-import com.keel.kernel.plugin.encodeResponseBody
-import com.keel.kernel.plugin.fullPluginPath
-import com.keel.kernel.plugin.operationKey
-import com.keel.kernel.plugin.readValidatedRequestBody
-import com.keel.kernel.plugin.registerPluginOperation
-import com.keel.kernel.plugin.registerPluginSseOperation
-import com.keel.kernel.plugin.registerPluginStaticOperation
-import com.keel.kernel.plugin.respondPluginResult
-import com.keel.kernel.plugin.runtimeJson
-import com.keel.kernel.plugin.serializer
 import com.keel.openapi.runtime.OpenApiRegistry
 import com.keel.kernel.di.PluginPrivateScopeHandle
 import com.keel.kernel.di.PluginScopeManager
 import com.keel.kernel.isolation.PluginProcessSupervisor
-import com.keel.kernel.isolation.PluginJvmConnectionInfo
-import com.keel.kernel.isolation.PluginJvmUdsConnectionInfo
-import com.keel.kernel.isolation.PluginJvmTcpConnectionInfo
 import com.keel.kernel.logging.KeelLoggerService
 import com.keel.kernel.observability.ObservabilityHub
 import com.keel.kernel.observability.ObservabilityTracing
@@ -57,6 +42,7 @@ import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.withTimeout
 import java.io.File
 import java.util.UUID
@@ -64,7 +50,6 @@ import java.util.Base64
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.io.path.createDirectories
-import kotlin.math.absoluteValue
 import org.koin.core.Koin
 import org.koin.core.scope.Scope
 
@@ -89,6 +74,8 @@ class UnifiedPluginManager(
     )
 
     companion object {
+        private const val EXTERNAL_SSE_IDLE_TIMEOUT_MS: Long = 60_000
+
         fun hasKtorScopeDrift(previous: KtorScopeSignature, current: KtorScopeSignature): Boolean {
             return previous.applicationPluginKeys != current.applicationPluginKeys ||
                 previous.servicePluginKeys != current.servicePluginKeys
@@ -474,26 +461,31 @@ class UnifiedPluginManager(
 
     fun getAllPlugins(): Map<String, KeelPlugin> = entries.mapValues { it.value.plugin }.toSortedMap()
 
+    @Suppress("unused")
     fun getPlugin(pluginId: String): KeelPlugin? = entries[pluginId]?.plugin
 
     fun getRuntimeMode(pluginId: String): PluginRuntimeMode? = entries[pluginId]?.config?.runtimeMode
 
     fun getLifecycleState(pluginId: String): PluginLifecycleState = entries[pluginId]?.lifecycleState ?: PluginLifecycleState.REGISTERED
 
+    @Suppress("unused")
     fun getHealthState(pluginId: String): PluginHealthState = entries[pluginId]?.healthState ?: PluginHealthState.UNKNOWN
 
     fun getGeneration(pluginId: String): PluginGeneration = entries[pluginId]?.generation ?: PluginGeneration.INITIAL
 
+    @Suppress("unused")
     fun getProcessState(pluginId: String): PluginProcessState? = entries[pluginId]?.processState
 
     fun getProcessId(pluginId: String): Long? = entries[pluginId]?.processId
 
     fun getProcessHandle(pluginId: String): ProcessHandle? = entries[pluginId]?.processHandle
 
+    @Suppress("unused")
     fun isProcessAlive(pluginId: String): Boolean = entries[pluginId]?.processHandle?.isAlive ?: false
 
     fun getRuntimeConfig(pluginId: String): PluginConfig? = entries[pluginId]?.config
 
+    @Suppress("unused")
     fun getLastFailure(pluginId: String): PluginFailureRecord? = entries[pluginId]?.lastFailure
 
     fun getRuntimeSnapshot(pluginId: String): PluginRuntimeSnapshot? = entries[pluginId]?.let(::buildSnapshot)
@@ -502,6 +494,7 @@ class UnifiedPluginManager(
         .sortedBy { it.plugin.descriptor.pluginId }
         .map(::buildSnapshot)
 
+    @Suppress("unused")
     fun isIsolated(pluginId: String): Boolean = getRuntimeMode(pluginId) == PluginRuntimeMode.EXTERNAL_JVM
 
     override fun isPluginEnabled(pluginId: String): Boolean = getLifecycleState(pluginId) == PluginLifecycleState.RUNNING
@@ -633,6 +626,9 @@ class UnifiedPluginManager(
             if (entry.config.runtimeMode != PluginRuntimeMode.EXTERNAL_JVM) return@withPluginLock
             if (!entry.recoveryInProgress.compareAndSet(false, true)) return@withPluginLock
             try {
+                if (shouldSkipRecovery(entry)) {
+                    return@withPluginLock
+                }
                 if (entry.lifecycleState == PluginLifecycleState.STOPPING || entry.lifecycleState == PluginLifecycleState.DISPOSING || entry.lifecycleState == PluginLifecycleState.DISPOSED) {
                     return@withPluginLock
                 }
@@ -648,6 +644,7 @@ class UnifiedPluginManager(
                     }.onFailure { stopError ->
                         logger.warn("Failed to stop plugin while exhausting recovery budget pluginId=$pluginId: ${stopError.message}")
                     }
+                    entry.stickyCommunicationMode = null
                     entry.lifecycleState = PluginLifecycleState.FAILED
                     entry.processState = PluginProcessState.FAILED
                     entry.healthState = PluginHealthState.UNREACHABLE
@@ -657,9 +654,12 @@ class UnifiedPluginManager(
 
                 entry.recoveryAttempts += 1
                 entry.lastRecoveryAtEpochMs = now
-                val exponential = 1L shl (entry.recoveryAttempts - 1).coerceAtLeast(0)
-                val backoffMs = (policy.baseBackoffMs * exponential).coerceAtMost(policy.maxBackoffMs)
+                val backoffMs = computeRecoveryBackoffMs(policy, entry.recoveryAttempts)
                 delay(backoffMs)
+
+                if (shouldSkipRecovery(entry)) {
+                    return@withPluginLock
+                }
 
                 if (suggestTcpFallback) {
                     entry.stickyCommunicationMode = JvmCommunicationMode.TCP
@@ -677,6 +677,19 @@ class UnifiedPluginManager(
                 entry.recoveryInProgress.set(false)
             }
         }
+    }
+
+    private fun shouldSkipRecovery(entry: ManagedPlugin): Boolean {
+        return entry.lifecycleState == PluginLifecycleState.RUNNING &&
+            entry.processState == PluginProcessState.RUNNING &&
+            entry.processHandle?.isAlive == true &&
+            entry.healthState != PluginHealthState.UNREACHABLE
+    }
+
+    private fun computeRecoveryBackoffMs(policy: PluginRecoveryPolicy, attempts: Int): Long {
+        val shift = (attempts - 1).coerceAtLeast(0)
+        val exponential = 1L shl shift
+        return (policy.baseBackoffMs * exponential).coerceAtMost(policy.maxBackoffMs)
     }
 
     private suspend fun stopPluginLocked(entry: ManagedPlugin) {
@@ -847,13 +860,6 @@ class UnifiedPluginManager(
         return entry.lifecycleMutex.withLock { block(entry) }
     }
 
-    private fun socketFileStem(pluginId: String): String {
-        val sanitized = pluginId.filter { it.isLetterOrDigit() || it == '-' || it == '_' }.ifBlank { "plugin" }
-        val prefix = sanitized.take(12)
-        val suffix = sanitized.hashCode().absoluteValue.toString(16)
-        return "$prefix-$suffix"
-    }
-
     private fun validateServiceDeclaration(
         descriptor: PluginDescriptor,
         routeDefinitions: List<PluginRouteDefinition>
@@ -866,6 +872,12 @@ class UnifiedPluginManager(
         val missing = requiredServices - descriptor.supportedServices
         require(missing.isEmpty()) {
             "Plugin ${descriptor.pluginId} is missing service declarations: ${missing.joinToString()}"
+        }
+        val declaredButUnused = descriptor.supportedServices - requiredServices
+        if (declaredButUnused.isNotEmpty()) {
+            logger.warn(
+                "Plugin ${descriptor.pluginId} declares unused services: ${declaredButUnused.joinToString()}"
+            )
         }
     }
 
@@ -891,7 +903,7 @@ class UnifiedPluginManager(
         if (duplicateStatic.isNotEmpty()) {
             error("Duplicate plugin static resource registration for pluginId=$pluginId: ${duplicateStatic.joinToString()}")
         }
-        val pathCollisions = endpointKeys.toSet().intersect(sseKeys.toSet())
+        val pathCollisions = endpointKeys.intersect(sseKeys)
         if (pathCollisions.isNotEmpty()) {
             error("Plugin endpoint/SSE path conflict for pluginId=$pluginId: ${pathCollisions.joinToString()}")
         }
@@ -1121,7 +1133,9 @@ class UnifiedPluginManager(
                 return
             }
             while (true) {
-                val event = eventChannel.receiveCatching().getOrNull() ?: break
+                val event = withTimeoutOrNull(EXTERNAL_SSE_IDLE_TIMEOUT_MS) {
+                    eventChannel.receiveCatching().getOrNull()
+                } ?: break
                 send(
                     ServerSentEvent(
                         data = event.data,
@@ -1133,6 +1147,11 @@ class UnifiedPluginManager(
             }
         } finally {
             runCatching { supervisor.closeSseStream(streamId) }
+                .onFailure { error ->
+                    logger.warn(
+                        "Failed to close SSE stream pluginId=${entry.plugin.descriptor.pluginId} streamId=$streamId: ${error.message}"
+                    )
+                }
             supervisor.unregisterSseStreamListener(streamId)
             eventChannel.close()
         }
@@ -1152,10 +1171,11 @@ class UnifiedPluginManager(
             val tracer = ObservabilityTracing.kernelTracer()
             if (!ensureDispatchAvailable(entry, endpoint, responseEnvelope)) return
             if (!tryAcquireInvokeLimiter(entry, endpoint, responseEnvelope)) return
-            val requestPayload = readRequestPayload(entry, endpoint, responseEnvelope) ?: return
-
+            var invocationStarted = false
             try {
+                val requestPayload = readRequestPayload(entry, endpoint, responseEnvelope) ?: return
                 entry.inFlightInvocations.incrementAndGet()
+                invocationStarted = true
                 val timeoutMs = endpoint.executionPolicy.timeoutMs ?: entry.config.callTimeoutMs
                 val parentContext = call.attributes.getOrNull(ObservabilityTracing.TRACE_CONTEXT_KEY) ?: Context.current()
                 when (entry.config.runtimeMode) {
@@ -1183,7 +1203,9 @@ class UnifiedPluginManager(
                     }
                 }
             } finally {
-                entry.inFlightInvocations.decrementAndGet()
+                if (invocationStarted) {
+                    entry.inFlightInvocations.decrementAndGet()
+                }
                 entry.invokeLimiter.release()
             }
         } catch (error: TimeoutCancellationException) {
@@ -1363,6 +1385,7 @@ class UnifiedPluginManager(
         }
     }
 
+    @Suppress("unused")
     fun applicationRouting(): Routing = requireNotNull(routing) { "Routing has not been mounted yet" }
 
     private fun resolveEndpoint(pluginId: String, endpointId: String): PluginEndpointDefinition<*, *>? {

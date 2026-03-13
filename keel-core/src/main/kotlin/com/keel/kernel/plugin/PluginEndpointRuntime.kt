@@ -1,6 +1,5 @@
 package com.keel.kernel.plugin
 
-import com.keel.contract.dto.KeelResponse
 import com.keel.openapi.runtime.OpenApiDoc
 import com.keel.openapi.runtime.OpenApiOperation
 import com.keel.openapi.runtime.OpenApiRegistry

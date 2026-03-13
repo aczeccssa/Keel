@@ -1,5 +1,8 @@
 package com.keel.test.kernel
 
+import com.keel.db.database.DatabaseConfig
+import com.keel.db.database.DatabaseFactory
+import com.keel.db.di.databaseModule
 import com.keel.kernel.hotreload.DevReloadOutcome
 import com.keel.kernel.plugin.EndpointPlugin
 import com.keel.kernel.plugin.KeelPlugin
@@ -374,6 +377,35 @@ class UnifiedPluginManagerTest {
         assertEquals(PluginLifecycleState.RUNNING, manager.getLifecycleState("module-only"))
     }
 
+    @Test
+    fun pluginInitCanResolveDatabaseThroughConvenienceApiWhenDatabaseModuleIsLoaded() = runTest {
+        val koin = startKoin {
+            modules(databaseModule(DatabaseConfig.h2Memory(name = "plugin-init-${System.nanoTime()}")))
+        }.also { koinStarted = true }.koin
+        val manager = UnifiedPluginManager(koin)
+        val plugin = DatabaseAwareLifecyclePlugin("database-aware")
+
+        manager.registerPlugin(plugin)
+        manager.startPlugin("database-aware")
+
+        assertTrue(plugin.databaseResolvedInInit)
+        assertTrue(plugin.transactionExecutedInInit)
+        koin.get<DatabaseFactory>().close()
+    }
+
+    @Test
+    fun pluginInitReturnsNullDatabaseWhenModuleIsNotLoaded() = runTest {
+        val koin = startKoin {}.also { koinStarted = true }.koin
+        val manager = UnifiedPluginManager(koin)
+        val plugin = DatabaseAwareLifecyclePlugin("database-missing")
+
+        manager.registerPlugin(plugin)
+        manager.startPlugin("database-missing")
+
+        assertFalse(plugin.databaseResolvedInInit)
+        assertFalse(plugin.transactionExecutedInInit)
+    }
+
     private class DelayedPlugin(
         pluginId: String,
         private val initDelayMs: Long
@@ -458,5 +490,19 @@ class UnifiedPluginManagerTest {
                 single { "module-only" }
             }
         )
+    }
+
+    private class DatabaseAwareLifecyclePlugin(
+        pluginId: String
+    ) : KeelPlugin, LifecyclePlugin {
+        override val descriptor: PluginDescriptor = PluginDescriptor(pluginId, "1.0.0", pluginId)
+        var databaseResolvedInInit: Boolean = false
+        var transactionExecutedInInit: Boolean = false
+
+        override suspend fun onInit(context: PluginInitContext) {
+            val database = context.getDatabase()
+            databaseResolvedInInit = database != null
+            transactionExecutedInInit = database?.transaction { 1 } == 1
+        }
     }
 }

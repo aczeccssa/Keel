@@ -12,6 +12,7 @@ data class LogEntry(
 )
 
 @Serializable
+@Suppress("unused")
 data class LogStreamEvent(
     val type: String = "log",
     val data: LogEntry

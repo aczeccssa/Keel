@@ -122,6 +122,7 @@ object OpenApiAggregator {
         return json.encodeToString(JsonElement.serializer(), spec)
     }
 
+    @Suppress("unused")
     internal fun invalidateCache() {
         specCache = null
     }
@@ -383,19 +384,16 @@ object OpenApiAggregator {
         operation: OpenApiOperation,
         schemaGenerator: OpenApiSchemaGenerator
     ): Map<String, JsonElement> {
-        val contentTypes = operation.responseContentTypes
-        if (contentTypes == null) {
-            return mapOf(
-                "application/json" to JsonObject(
-                    mapOf(
-                        "schema" to schemaGenerator.schemaForResponse(
-                            operation.responseBodyType,
-                            operation.responseEnvelope
-                        )
+        val contentTypes = operation.responseContentTypes ?: return mapOf(
+            "application/json" to JsonObject(
+                mapOf(
+                    "schema" to schemaGenerator.schemaForResponse(
+                        operation.responseBodyType,
+                        operation.responseEnvelope
                     )
                 )
             )
-        }
+        )
 
         return contentTypes.distinct().associateWith { contentType ->
             if (contentType == "application/json" && operation.responseBodyType != null) {
@@ -414,7 +412,7 @@ object OpenApiAggregator {
     }
 
     private fun inferPathParameters(path: String): List<JsonElement> {
-        return "\\{([^}/]+)\\}".toRegex()
+        return """\{([^}/]+)\}""".toRegex()
             .findAll(path)
             .map { match ->
                 val name = match.groupValues[1]

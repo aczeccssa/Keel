@@ -73,6 +73,7 @@ class Kernel(
         buildExecutor = GradleDevBuildExecutor(repoRoot),
         generationLoader = ManagerBackedGenerationLoader(pluginManager)
     )
+    @Suppress("unused")
     private val pluginLifecycleHotReloadAdapter = PluginLifecycleHotReloadAdapter(
         pluginManager,
         if (enablePluginHotReload) devHotReloadEngine else null
@@ -405,11 +406,11 @@ class KernelBuilder {
     }
 }
 
-fun buildKeel(block: KernelBuilder.() -> Unit) = KernelBuilder().apply(block).build()
+fun buildKeel(block: KernelBuilder.() -> Unit): Kernel = KernelBuilder().apply(block).build()
 
-fun runKeel(block: KernelBuilder.() -> Unit) = buildKeel(block).run()
+fun runKeel(block: KernelBuilder.() -> Unit): Unit = buildKeel(block).run()
 
-fun runKeel(port: Int, block: KernelBuilder.() -> Unit) = buildKeel(block).run(port)
+fun runKeel(port: Int, block: KernelBuilder.() -> Unit): Unit = buildKeel(block).run(port)
 
 private fun locateRepoRoot(start: File): File {
     return generateSequence(start) { it.parentFile }
