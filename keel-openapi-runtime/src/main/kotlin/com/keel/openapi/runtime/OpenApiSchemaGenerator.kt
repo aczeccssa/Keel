@@ -88,14 +88,18 @@ class OpenApiSchemaGenerator {
 
         val descriptor = serializerFor(type).descriptor
         val schemaName = schemaNameFor(type, descriptor)
-        if (!components.containsKey(schemaName)) {
-            if (!inProgress.add(schemaName)) {
-                return ref(schemaName)
-            }
-            components[schemaName] = JsonObject(emptyMap())
-            components[schemaName] = buildComponentSchema(type, descriptor)
-            inProgress.remove(schemaName)
+        if (components.containsKey(schemaName)) {
+            return ref(schemaName)
         }
+
+        if (!inProgress.add(schemaName)) {
+            return ref(schemaName)
+        }
+
+        components[schemaName] = JsonObject(emptyMap())
+        components[schemaName] = buildComponentSchema(type, descriptor)
+        inProgress.remove(schemaName)
+
         return ref(schemaName)
     }
 
@@ -265,7 +269,7 @@ class OpenApiSchemaGenerator {
         return JsonObject(mapOf("nullable" to JsonPrimitive(true)))
     }
 
-    private fun ref(name: String): JsonObject = JsonObject(mapOf("\$ref" to JsonPrimitive("#/components/schemas/$name")))
+    private fun ref(name: String): JsonObject = JsonObject(mapOf($$"$ref" to JsonPrimitive($$"#/components/schemas/$$name")))
 
     private fun schemaNameFor(type: KType, descriptor: SerialDescriptor): String {
         val schemaAnnotation = descriptor.annotations.filterIsInstance<KeelApiSchema>().firstOrNull()

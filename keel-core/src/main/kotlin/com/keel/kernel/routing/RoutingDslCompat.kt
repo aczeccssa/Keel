@@ -118,6 +118,7 @@ inline fun <reified Req : Any, reified Res : Any> Route.typedPost(
     invokePost(path, body)
 }
 
+@Suppress("unused")
 inline fun <reified Req : Any, reified Res : Any> Route.typedPut(
     path: String = "",
     doc: OpenApiDoc = OpenApiDoc(),
@@ -133,6 +134,7 @@ inline fun <reified Req : Any, reified Res : Any> Route.typedPut(
     invokePut(path, body)
 }
 
+@Suppress("unused")
 inline fun <reified Res : Any> Route.typedDelete(
     path: String = "",
     doc: OpenApiDoc = OpenApiDoc(),

@@ -1,4 +1,5 @@
 import org.gradle.api.tasks.bundling.Jar
+import org.gradle.api.artifacts.ProjectDependency
 import org.gradle.api.publish.PublishingExtension
 import org.gradle.api.publish.maven.MavenPublication
 import org.jetbrains.dokka.gradle.DokkaExtension
@@ -10,11 +11,13 @@ plugins {
     alias(libs.plugins.ksp) apply false
 }
 
-val repoUrl = "https://github.com/aczeccssa/Keel"
-val excludedFromDocs = setOf("keel-samples")
-val excludedFromPublishing = setOf("keel-samples", "keel-test-suite")
+val repoUrl: String = "https://github.com/aczeccssa/Keel"
+val excludedFromDocs: Set<String> = setOf("keel-samples")
+val excludedFromPublishing: Set<String> = setOf("keel-samples", "keel-test-suite")
+val githubPackagesUser: String? = System.getenv("GITHUB_ACTOR") ?: System.getenv("GPR_USER")
+val githubPackagesToken: String? = System.getenv("GITHUB_TOKEN") ?: System.getenv("GPR_TOKEN")
 
-val docsProjects = subprojects.filter { it.name !in excludedFromDocs }
+val docsProjects: List<Project> = subprojects.filter { it.name !in excludedFromDocs }
 
 repositories {
     google()
@@ -68,7 +71,7 @@ subprojects {
     configurations.configureEach {
         withDependencies {
             forEach { dependency ->
-                val projectDependency = dependency as? org.gradle.api.artifacts.ProjectDependency ?: return@forEach
+                val projectDependency = dependency as? ProjectDependency ?: return@forEach
                 val dependencyPath = projectDependency.path
                 require(!dependencyPath.startsWith(":plugins:")) {
                     "Plugin project $path must not depend on another plugin project: $dependencyPath"
@@ -153,11 +156,18 @@ subprojects {
             }
             repositories {
                 maven {
-                    name = "GitHubPackages"
-                    url = uri("https://maven.pkg.github.com/aczeccssa/Keel")
-                    credentials {
-                        username = System.getenv("GITHUB_ACTOR") ?: System.getenv("GPR_USER")
-                        password = System.getenv("GITHUB_TOKEN") ?: System.getenv("GPR_TOKEN")
+                    val hasGithubPackagesCredentials = !githubPackagesUser.isNullOrBlank() && !githubPackagesToken.isNullOrBlank()
+                    name = if (hasGithubPackagesCredentials) "GitHubPackages" else "LocalBuild"
+                    url = if (hasGithubPackagesCredentials) {
+                        uri("https://maven.pkg.github.com/aczeccssa/Keel")
+                    } else {
+                        uri(rootProject.layout.buildDirectory.dir("local-maven-repo"))
+                    }
+                    if (hasGithubPackagesCredentials) {
+                        credentials {
+                            username = githubPackagesUser
+                            password = githubPackagesToken
+                        }
                     }
                 }
             }

@@ -6,9 +6,9 @@ import com.keel.kernel.logging.KeelLoggerService
 import com.keel.kernel.plugin.StandardKeelPlugin
 import com.keel.kernel.plugin.PluginApiException
 import com.keel.kernel.plugin.PluginDescriptor
-import com.keel.kernel.plugin.PluginEndpointBuilders
 import com.keel.kernel.plugin.PluginEndpointBuilders.pluginEndpoints
 import com.keel.kernel.plugin.PluginInitContext
+import com.keel.kernel.plugin.PluginRouteDefinition
 import com.keel.kernel.plugin.PluginResult
 import com.keel.kernel.plugin.PluginRuntimeContext
 import com.keel.kernel.plugin.PluginRuntimeMode
@@ -44,7 +44,7 @@ class DbDemoPlugin : StandardKeelPlugin {
         seedData()
     }
 
-    override fun endpoints() = pluginEndpoints(descriptor.pluginId) {
+    override fun endpoints(): List<PluginRouteDefinition> = pluginEndpoints(descriptor.pluginId) {
         route("/notes") {
             get<NoteListData>(doc = OpenApiDoc(summary = "List all active notes", tags = listOf("notes"), responseEnvelope = true)) {
                 PluginResult(body = NoteListData(notes = repository.findAll(), total = repository.countActive()))

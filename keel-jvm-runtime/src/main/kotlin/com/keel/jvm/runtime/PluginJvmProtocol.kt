@@ -6,6 +6,7 @@ import kotlinx.serialization.json.Json
 const val PLUGIN_JVM_PROTOCOL_VERSION: Int = 2
 
 object PluginJvmLimits {
+    @Suppress("unused")
     const val NORMAL_FRAME_BYTES: Int = 256 * 1024
     const val MAX_FRAME_BYTES: Int = 2 * 1024 * 1024
 }
@@ -378,6 +379,7 @@ data class PluginDrainCompleteEvent(
 ) : PluginRuntimeEvent
 
 @Serializable
+@Suppress("unused")
 data class PluginProcessExitedEvent(
     val kind: String = "plugin-process-exited-event",
     override val protocolVersion: Int = PLUGIN_JVM_PROTOCOL_VERSION,

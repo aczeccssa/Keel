@@ -5,15 +5,13 @@ import com.keel.kernel.logging.KeelLoggerService
 import com.keel.kernel.observability.ObservabilityTracing
 import com.keel.kernel.plugin.KeelPlugin
 import com.keel.kernel.plugin.PluginApiException
-import com.keel.kernel.plugin.PluginConfig
 import com.keel.kernel.plugin.PluginDescriptor
+import com.keel.kernel.plugin.decodeRequestBody
+import com.keel.kernel.plugin.encodeResponseBody
 import com.keel.kernel.plugin.toConfig
 import com.keel.kernel.plugin.PluginHealthState
 import com.keel.kernel.plugin.PluginRequestContext
 import com.keel.kernel.plugin.PluginRuntimeMode
-import com.keel.kernel.plugin.decodeRequestBody
-import com.keel.kernel.plugin.encodeResponseBody
-import com.keel.kernel.plugin.serializer
 import com.keel.jvm.runtime.HandshakeRequest
 import com.keel.jvm.runtime.HandshakeResponse
 import com.keel.jvm.runtime.HealthRequest
@@ -59,7 +57,6 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
-import kotlin.io.encoding.ExperimentalEncodingApi
 import kotlin.io.path.deleteIfExists
 import kotlin.time.Duration.Companion.milliseconds
 import kotlinx.coroutines.CoroutineScope
@@ -71,7 +68,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.jsonObject
@@ -80,6 +76,8 @@ import org.koin.core.context.startKoin
 import org.koin.core.context.stopKoin
 
 import com.keel.kernel.plugin.JvmCommunicationMode
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.channels.Channel
 
 data class ExternalPluginHostArgs(
     val pluginClass: String,
@@ -122,6 +120,8 @@ object ExternalPluginHostMain {
     private val logger = KeelLoggerService.getLogger("ExternalPluginHostMain")
     private const val MAX_INVOKE_THREADS = 8
     private const val MIN_INVOKE_THREADS = 2
+    private const val MIN_SOCKET_BACKLOG = 64
+    private const val MAX_SOCKET_BACKLOG = 1024
 
     @JvmStatic
     fun main(args: Array<String>) {
@@ -237,15 +237,18 @@ object ExternalPluginHostMain {
         }
 
         private fun createServerSocket(mode: JvmCommunicationMode, socketPath: Path?, port: Int?): ServerSocketChannel {
+            val backlog = plugin.descriptor.maxConcurrentCalls
+                .coerceAtLeast(MIN_SOCKET_BACKLOG)
+                .coerceAtMost(MAX_SOCKET_BACKLOG)
             return when (mode) {
                 JvmCommunicationMode.UDS -> {
                     ServerSocketChannel.open(StandardProtocolFamily.UNIX).also {
-                        it.bind(UnixDomainSocketAddress.of(requireNotNull(socketPath)))
+                        it.bind(UnixDomainSocketAddress.of(requireNotNull(socketPath)), backlog)
                     }
                 }
                 JvmCommunicationMode.TCP -> {
                     ServerSocketChannel.open().also {
-                        it.bind(java.net.InetSocketAddress("127.0.0.1", requireNotNull(port)))
+                        it.bind(java.net.InetSocketAddress("127.0.0.1", requireNotNull(port)), backlog)
                     }
                 }
             }
@@ -536,8 +539,7 @@ object ExternalPluginHostMain {
     ) {
         val payload = PluginJvmFrameCodec.read(channel)
         val json = PluginJvmJson.instance.parseToJsonElement(payload).jsonObject
-        val kind = json["kind"]?.jsonPrimitive?.content.orEmpty()
-        val response = when (kind) {
+        val response = when (val kind = json["kind"]?.jsonPrimitive?.content.orEmpty()) {
             "handshake-request" -> {
                 val request = PluginJvmJson.instance.decodeFromString(HandshakeRequest.serializer(), payload)
                 val accepted = validateControlRequest(request.pluginId, request.generation, request.authToken, plugin.descriptor.pluginId, generation, authToken)
@@ -988,11 +990,7 @@ object ExternalPluginHostMain {
 
     private fun normalizeStaticResourcePath(raw: String, index: String?): String? {
         val trimmed = raw.trim().replace('\\', '/').trimStart('/')
-        val candidate = if (trimmed.isBlank()) {
-            index?.trim()?.replace('\\', '/')?.trimStart('/').orEmpty()
-        } else {
-            trimmed
-        }
+        val candidate = trimmed.ifBlank { index?.trim()?.replace('\\', '/')?.trimStart('/').orEmpty() }
         if (candidate.isBlank()) return ""
         val parts = candidate.split('/')
             .filter { it.isNotBlank() && it != "." }
@@ -1113,17 +1111,17 @@ private class PluginEventEmitter(
     private val commMode: JvmCommunicationMode,
     private val socketPath: Path?,
     private val port: Int?,
-    private val dispatcher: kotlinx.coroutines.CoroutineDispatcher
+    dispatcher: CoroutineDispatcher
 ) {
     private val logger = KeelLoggerService.getLogger("PluginEventEmitter")
     private val scope = CoroutineScope(SupervisorJob() + dispatcher)
-    private val criticalEvents = kotlinx.coroutines.channels.Channel<PluginRuntimeEvent>(capacity = descriptor.criticalEventQueueSize)
+    private val criticalEvents = Channel<PluginRuntimeEvent>(capacity = descriptor.criticalEventQueueSize)
     private val criticalDepth = AtomicInteger(0)
     private val droppedLogs = AtomicLong(0)
     private val logBuffer = ArrayDeque<PluginLogEvent>()
     private val overflowPending = AtomicBoolean(false)
     private val connected = AtomicBoolean(false)
-    private var senderJob: kotlinx.coroutines.Job? = null
+    private var senderJob: Job? = null
 
     suspend fun start() {
         senderJob = scope.launch {
@@ -1143,8 +1141,8 @@ private class PluginEventEmitter(
                     channel.use {
                         connected.set(true)
                         while (isActive && it.isOpen) {
-                            val overflowEvent = if (overflowPending.getAndSet(false)) {
-                                PluginEventQueueOverflowEvent(
+                            val event = when {
+                                overflowPending.getAndSet(false) -> PluginEventQueueOverflowEvent(
                                     pluginId = pluginId,
                                     generation = generation,
                                     timestamp = System.currentTimeMillis(),
@@ -1153,13 +1151,17 @@ private class PluginEventEmitter(
                                     queueType = "critical",
                                     capacity = descriptor.criticalEventQueueSize
                                 )
-                            } else {
-                                null
-                            }
-                            val event = overflowEvent ?: criticalEvents.tryReceive().getOrNull()?.also {
-                                criticalDepth.decrementAndGet()
-                            } ?: synchronized(logBuffer) {
-                                if (logBuffer.isEmpty()) null else logBuffer.removeFirst()
+                                else -> {
+                                    val criticalEvent = criticalEvents.tryReceive().getOrNull()
+                                    if (criticalEvent != null) {
+                                        criticalDepth.decrementAndGet()
+                                        criticalEvent
+                                    } else {
+                                        synchronized(logBuffer) {
+                                            if (logBuffer.isEmpty()) null else logBuffer.removeFirst()
+                                        }
+                                    }
+                                }
                             }
                             if (event == null) {
                                 delay(25)
@@ -1188,6 +1190,7 @@ private class PluginEventEmitter(
         }
     }
 
+    @Suppress("unused")
     fun emitLog(level: String, message: String) {
         synchronized(logBuffer) {
             if (logBuffer.size >= descriptor.eventLogRingBufferSize) {

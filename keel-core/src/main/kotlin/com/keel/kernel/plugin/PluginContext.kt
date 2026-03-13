@@ -1,9 +1,9 @@
 package com.keel.kernel.plugin
 
 import com.keel.db.database.KeelDatabase
+import com.keel.contract.di.KeelDiQualifiers
 import org.jetbrains.exposed.sql.Table
 import org.koin.core.Koin
-import org.koin.core.qualifier.named
 import org.koin.core.scope.Scope
 
 interface PluginInitContext {
@@ -13,12 +13,13 @@ interface PluginInitContext {
 
     fun getDatabase(): KeelDatabase? {
         return try {
-            kernelKoin.getOrNull<KeelDatabase>(named("keelDatabase"))
+            kernelKoin.getOrNull<KeelDatabase>(KeelDiQualifiers.keelDatabaseQualifier)
         } catch (_: Exception) {
             null
         }
     }
 
+    @Suppress("unused")
     fun getTables(): List<Table> = emptyList()
 }
 

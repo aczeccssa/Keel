@@ -4,9 +4,9 @@ import com.keel.kernel.logging.KeelLoggerService
 import com.keel.kernel.observability.KeelObservability
 import com.keel.kernel.plugin.StandardKeelPlugin
 import com.keel.kernel.plugin.PluginDescriptor
-import com.keel.kernel.plugin.PluginEndpointBuilders
 import com.keel.kernel.plugin.PluginEndpointBuilders.pluginEndpoints
 import com.keel.kernel.plugin.PluginInitContext
+import com.keel.kernel.plugin.PluginRouteDefinition
 import com.keel.kernel.plugin.PluginResult
 import com.keel.kernel.plugin.PluginRuntimeContext
 import com.keel.openapi.annotations.KeelApiPlugin
@@ -15,7 +15,6 @@ import io.ktor.http.HttpHeaders
 import io.ktor.util.cio.ChannelWriteException
 import io.ktor.utils.io.ClosedWriteChannelException
 import io.ktor.sse.ServerSentEvent
-import kotlinx.coroutines.flow.collect
 import java.io.IOException
 
 @KeelApiPlugin(
@@ -44,7 +43,7 @@ class ObservabilityPlugin : StandardKeelPlugin {
         logger.info("Initialized observability plugin")
     }
 
-    override fun endpoints() = pluginEndpoints(descriptor.pluginId) {
+    override fun endpoints(): List<PluginRouteDefinition> = pluginEndpoints(descriptor.pluginId) {
         get<RedirectMessage>(doc = OpenApiDoc(summary = "Open the observability UI", tags = listOf("observability"))) {
             PluginResult(
                 status = 302,

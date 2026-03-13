@@ -39,7 +39,6 @@ import com.keel.jvm.runtime.PluginStoppingEvent
 import com.keel.jvm.runtime.PluginJvmFrameCodec
 import com.keel.jvm.runtime.PluginJvmJson
 import com.keel.jvm.runtime.ReloadPrepareRequest
-import com.keel.jvm.runtime.ReloadPrepareResponse
 import com.keel.jvm.runtime.SseCloseRequest
 import com.keel.jvm.runtime.SseCloseResponse
 import com.keel.jvm.runtime.SseOpenRequest
@@ -53,6 +52,7 @@ import io.ktor.server.request.path
 import io.opentelemetry.context.Context
 import java.io.BufferedReader
 import java.io.File
+import java.io.IOException
 import java.io.InputStreamReader
 import java.net.StandardProtocolFamily
 import java.net.UnixDomainSocketAddress
@@ -65,7 +65,6 @@ import java.util.concurrent.ConcurrentHashMap
 import kotlin.io.path.deleteIfExists
 import kotlin.io.path.exists
 import kotlin.io.path.pathString
-import kotlin.math.absoluteValue
 import kotlin.time.Duration.Companion.milliseconds
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -360,7 +359,7 @@ class PluginProcessSupervisor(
 
         val timeoutMs = endpoint.executionPolicy.timeoutMs ?: config.callTimeoutMs
         val response = runCatching {
-            sendInvokeMessage(request, InvokeResponse.serializer(), timeoutMs)
+            sendInvokeMessageWithRetry(request, InvokeResponse.serializer(), timeoutMs)
         }.getOrElse { error ->
             logger.warn("Invoke channel failed pluginId=${descriptor.pluginId} endpoint=${endpoint.endpointId}: ${error.message}")
             reportTerminalFailure(
@@ -375,6 +374,30 @@ class PluginProcessSupervisor(
             return oversizedResponse(call, "Response payload exceeds $maxPayloadBytes bytes")
         }
         return response
+    }
+
+    private suspend fun <T> sendInvokeMessageWithRetry(
+        message: Any,
+        serializer: KSerializer<T>,
+        timeoutMs: Long
+    ): T {
+        var lastError: Throwable? = null
+        repeat(3) { attempt ->
+            try {
+                return sendInvokeMessage(message, serializer, timeoutMs)
+            } catch (error: Throwable) {
+                lastError = error
+                if (!shouldRetryInvokeSend(error) || attempt == 2 || process?.isAlive != true) {
+                    throw error
+                }
+                delay(25L * (attempt + 1))
+            }
+        }
+        throw lastError ?: IllegalStateException("Invoke channel failed without an exception")
+    }
+
+    private fun shouldRetryInvokeSend(error: Throwable): Boolean {
+        return error is IOException
     }
 
     private enum class CommunicationLane {

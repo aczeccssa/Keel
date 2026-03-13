@@ -6,10 +6,8 @@ import org.jetbrains.exposed.sql.Database
 import org.jetbrains.exposed.sql.SchemaUtils
 import org.jetbrains.exposed.sql.Table
 import org.jetbrains.exposed.sql.Transaction
-import org.jetbrains.exposed.sql.transactions.TransactionManager
 import org.jetbrains.exposed.sql.transactions.transaction
 import com.keel.db.logging.DbScopeLogger
-import java.sql.Connection
 
 /**
  * Database connection manager for the Keel framework.
@@ -38,6 +36,7 @@ class KeelDatabase(
      *
      * @param tables The tables to drop
      */
+    @Suppress("unused")
     fun dropTables(vararg tables: Table) {
         transaction(database) {
             SchemaUtils.drop(*tables)
@@ -51,6 +50,7 @@ class KeelDatabase(
      * @param block The transaction block
      * @return Result containing the transaction result or an error
      */
+    @Suppress("unused")
     fun <T> transactionWithResult(block: Transaction.() -> T): Result<T> {
         return try {
             Result.success(transaction(database, block))
@@ -108,6 +108,7 @@ class KeelDatabase(
      * @param block The suspending transaction block
      * @return Result containing the transaction result or an error
      */
+    @Suppress("unused")
     suspend fun <T> suspendTransactionWithResult(block: Transaction.() -> T): Result<T> = withContext(Dispatchers.IO) {
         try {
             Result.success(transaction(database) { block() })
@@ -130,5 +131,6 @@ class KeelDatabase(
     /**
      * Get the underlying database instance.
      */
+    @Suppress("unused")
     fun getDatabase(): Database = database
 }

@@ -3,7 +3,6 @@ package com.keel.db.table
 import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
 import org.jetbrains.exposed.sql.Column
-import org.jetbrains.exposed.sql.Table
 import org.jetbrains.exposed.sql.kotlin.datetime.timestamp
 
 /**
@@ -79,5 +78,6 @@ abstract class AuditPluginTable(
     /**
      * Get the current timestamp using kotlinx.datetime.Clock.
      */
+    @Suppress("unused")
     fun currentTime(): Instant = Clock.System.now()
 }

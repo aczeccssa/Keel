@@ -1,5 +1,6 @@
 package com.keel.kernel.di
 
+import com.keel.contract.di.KeelDiQualifiers
 import com.keel.kernel.plugin.PluginConfig
 import com.keel.kernel.plugin.PluginTeardownRegistry
 import com.keel.kernel.logging.KeelLoggerService
@@ -31,11 +32,12 @@ class PluginScopeManager(
         modules: List<Module>
     ): PluginPrivateScopeHandle {
         closeScope(pluginId)
+        val kernelKoin = koin
         val pluginApplication = koinApplication {
             modules(
                 module {
                     single { config }
-                    single(named("kernelKoin")) { koin }
+                    single(KeelDiQualifiers.kernelKoinQualifier) { kernelKoin }
                 },
                 *modules.toTypedArray()
             )

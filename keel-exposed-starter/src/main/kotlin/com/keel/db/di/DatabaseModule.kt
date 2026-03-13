@@ -3,6 +3,8 @@ package com.keel.db.di
 import com.keel.db.database.DatabaseConfig
 import com.keel.db.database.DatabaseFactory
 import com.keel.db.database.KeelDatabase
+import com.keel.contract.di.KeelDiQualifiers
+import org.koin.core.module.Module
 import org.koin.dsl.module
 
 /**
@@ -19,12 +21,12 @@ import org.koin.dsl.module
 fun databaseModule(
     config: DatabaseConfig,
     initialize: Boolean = true
-) = module {
+): Module = module {
     // Register DatabaseFactory as a factory (creates new instances)
     single { DatabaseFactory.fromConfig(config) }
 
     // Register KeelDatabase as singleton - initialized on startup
-    single {
+    single(qualifier = KeelDiQualifiers.keelDatabaseQualifier) {
         val factory: DatabaseFactory = get()
         factory.init()
     }
@@ -37,8 +39,8 @@ fun databaseModule(
  * @param database The already initialized KeelDatabase instance
  * @return A Koin Module for database dependencies
  */
-fun databaseModule(database: KeelDatabase) = module {
-    single { database }
+fun databaseModule(database: KeelDatabase): Module = module {
+    single(qualifier = KeelDiQualifiers.keelDatabaseQualifier) { database }
 }
 
 /**
@@ -50,12 +52,13 @@ fun databaseModule(database: KeelDatabase) = module {
  * @param poolSize Connection pool size (default: 10)
  * @return A Koin Module for database dependencies
  */
+@Suppress("unused")
 fun h2MemoryDatabaseModule(
     name: String = "testdb",
     username: String = "sa",
     password: String = "",
     poolSize: Int = 10
-) = databaseModule(
+): Module = databaseModule(
     config = DatabaseConfig.h2Memory(name, username, password, poolSize),
     initialize = true
 )
@@ -66,7 +69,8 @@ fun h2MemoryDatabaseModule(
  * @param filePath Path to the SQLite file
  * @return A Koin Module for database dependencies
  */
-fun sqliteDatabaseModule(filePath: String) = databaseModule(
+@Suppress("unused")
+fun sqliteDatabaseModule(filePath: String): Module = databaseModule(
     config = DatabaseConfig.sqlite(filePath),
     initialize = true
 )

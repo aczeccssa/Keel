@@ -61,6 +61,7 @@ data class JvmCommunicationStrategy(
     companion object {
         val DEFAULT = JvmCommunicationStrategy()
         val PREFER_TCP = JvmCommunicationStrategy(preferredMode = JvmCommunicationMode.TCP)
+        @Suppress("unused")
         val REQUIRE_UDS = JvmCommunicationStrategy(fallbackMode = JvmCommunicationMode.UDS)
     }
 }
