@@ -42,6 +42,7 @@ import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.withTimeout
 import java.io.File
 import java.util.UUID
@@ -73,6 +74,8 @@ class UnifiedPluginManager(
     )
 
     companion object {
+        private const val EXTERNAL_SSE_IDLE_TIMEOUT_MS: Long = 60_000
+
         fun hasKtorScopeDrift(previous: KtorScopeSignature, current: KtorScopeSignature): Boolean {
             return previous.applicationPluginKeys != current.applicationPluginKeys ||
                 previous.servicePluginKeys != current.servicePluginKeys
@@ -623,6 +626,9 @@ class UnifiedPluginManager(
             if (entry.config.runtimeMode != PluginRuntimeMode.EXTERNAL_JVM) return@withPluginLock
             if (!entry.recoveryInProgress.compareAndSet(false, true)) return@withPluginLock
             try {
+                if (shouldSkipRecovery(entry)) {
+                    return@withPluginLock
+                }
                 if (entry.lifecycleState == PluginLifecycleState.STOPPING || entry.lifecycleState == PluginLifecycleState.DISPOSING || entry.lifecycleState == PluginLifecycleState.DISPOSED) {
                     return@withPluginLock
                 }
@@ -638,6 +644,7 @@ class UnifiedPluginManager(
                     }.onFailure { stopError ->
                         logger.warn("Failed to stop plugin while exhausting recovery budget pluginId=$pluginId: ${stopError.message}")
                     }
+                    entry.stickyCommunicationMode = null
                     entry.lifecycleState = PluginLifecycleState.FAILED
                     entry.processState = PluginProcessState.FAILED
                     entry.healthState = PluginHealthState.UNREACHABLE
@@ -647,9 +654,12 @@ class UnifiedPluginManager(
 
                 entry.recoveryAttempts += 1
                 entry.lastRecoveryAtEpochMs = now
-                val exponential = 1L shl (entry.recoveryAttempts - 1).coerceAtLeast(0)
-                val backoffMs = (policy.baseBackoffMs * exponential).coerceAtMost(policy.maxBackoffMs)
+                val backoffMs = computeRecoveryBackoffMs(policy, entry.recoveryAttempts)
                 delay(backoffMs)
+
+                if (shouldSkipRecovery(entry)) {
+                    return@withPluginLock
+                }
 
                 if (suggestTcpFallback) {
                     entry.stickyCommunicationMode = JvmCommunicationMode.TCP
@@ -667,6 +677,19 @@ class UnifiedPluginManager(
                 entry.recoveryInProgress.set(false)
             }
         }
+    }
+
+    private fun shouldSkipRecovery(entry: ManagedPlugin): Boolean {
+        return entry.lifecycleState == PluginLifecycleState.RUNNING &&
+            entry.processState == PluginProcessState.RUNNING &&
+            entry.processHandle?.isAlive == true &&
+            entry.healthState != PluginHealthState.UNREACHABLE
+    }
+
+    private fun computeRecoveryBackoffMs(policy: PluginRecoveryPolicy, attempts: Int): Long {
+        val shift = (attempts - 1).coerceAtLeast(0)
+        val exponential = 1L shl shift
+        return (policy.baseBackoffMs * exponential).coerceAtMost(policy.maxBackoffMs)
     }
 
     private suspend fun stopPluginLocked(entry: ManagedPlugin) {
@@ -850,6 +873,12 @@ class UnifiedPluginManager(
         require(missing.isEmpty()) {
             "Plugin ${descriptor.pluginId} is missing service declarations: ${missing.joinToString()}"
         }
+        val declaredButUnused = descriptor.supportedServices - requiredServices
+        if (declaredButUnused.isNotEmpty()) {
+            logger.warn(
+                "Plugin ${descriptor.pluginId} declares unused services: ${declaredButUnused.joinToString()}"
+            )
+        }
     }
 
     private fun mountPluginRoutes(routing: Routing, entry: ManagedPlugin) {
@@ -874,7 +903,7 @@ class UnifiedPluginManager(
         if (duplicateStatic.isNotEmpty()) {
             error("Duplicate plugin static resource registration for pluginId=$pluginId: ${duplicateStatic.joinToString()}")
         }
-        val pathCollisions = endpointKeys.toSet().intersect(sseKeys.toSet())
+        val pathCollisions = endpointKeys.intersect(sseKeys)
         if (pathCollisions.isNotEmpty()) {
             error("Plugin endpoint/SSE path conflict for pluginId=$pluginId: ${pathCollisions.joinToString()}")
         }
@@ -1104,7 +1133,9 @@ class UnifiedPluginManager(
                 return
             }
             while (true) {
-                val event = eventChannel.receiveCatching().getOrNull() ?: break
+                val event = withTimeoutOrNull(EXTERNAL_SSE_IDLE_TIMEOUT_MS) {
+                    eventChannel.receiveCatching().getOrNull()
+                } ?: break
                 send(
                     ServerSentEvent(
                         data = event.data,
@@ -1116,6 +1147,11 @@ class UnifiedPluginManager(
             }
         } finally {
             runCatching { supervisor.closeSseStream(streamId) }
+                .onFailure { error ->
+                    logger.warn(
+                        "Failed to close SSE stream pluginId=${entry.plugin.descriptor.pluginId} streamId=$streamId: ${error.message}"
+                    )
+                }
             supervisor.unregisterSseStreamListener(streamId)
             eventChannel.close()
         }

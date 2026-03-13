@@ -617,6 +617,7 @@ class PluginProcessSupervisor(
             connection.adminPath.deleteIfExists()
             connection.eventPath.deleteIfExists()
         }
+        clearSseListeners("process-stop")
         process = null
         eventChannelConnected = false
         readyEventReceived = false
@@ -795,13 +796,23 @@ class PluginProcessSupervisor(
             "plugin-sse-data-event" -> {
                 val event = PluginJvmJson.instance.decodeFromString(PluginSseDataEvent.serializer(), payload)
                 if (validateEvent(event)) {
-                    sseListeners[event.streamId]?.onData?.invoke(event)
+                    val listener = sseListeners[event.streamId]
+                    if (listener == null) {
+                        logger.warn("Received SSE data for unknown stream pluginId=${descriptor.pluginId} streamId=${event.streamId}")
+                    } else {
+                        listener.onData.invoke(event)
+                    }
                 }
             }
             "plugin-sse-closed-event" -> {
                 val event = PluginJvmJson.instance.decodeFromString(PluginSseClosedEvent.serializer(), payload)
                 if (validateEvent(event)) {
-                    sseListeners.remove(event.streamId)?.onClosed?.invoke()
+                    val listener = sseListeners.remove(event.streamId)
+                    if (listener == null) {
+                        logger.warn("Received SSE close for unknown stream pluginId=${descriptor.pluginId} streamId=${event.streamId}")
+                    } else {
+                        listener.onClosed.invoke()
+                    }
                 }
             }
             else -> {
@@ -896,6 +907,7 @@ class PluginProcessSupervisor(
     private fun reportTerminalFailure(reason: String, suggestTcpFallback: Boolean) {
         if (stopping || terminalFailureReported) return
         terminalFailureReported = true
+        clearSseListeners("terminal-failure:$reason")
         if (suggestTcpFallback) {
             fallbackActivated = true
             lastFallbackReason = reason
@@ -911,6 +923,20 @@ class PluginProcessSupervisor(
                 message = message
             )
         )
+    }
+
+    private fun clearSseListeners(reason: String) {
+        val entries = sseListeners.entries.toList()
+        for ((streamId, listener) in entries) {
+            if (sseListeners.remove(streamId, listener)) {
+                runCatching { listener.onClosed.invoke() }
+                    .onFailure { error ->
+                        logger.warn(
+                            "Failed SSE listener cleanup pluginId=${descriptor.pluginId} streamId=$streamId reason=$reason: ${error.message}"
+                        )
+                    }
+            }
+        }
     }
 
     private fun unavailableResponse(call: ApplicationCall, message: String): InvokeResponse {
