@@ -27,6 +27,18 @@ jobs:
       - name: Build and Test
         run: ./gradlew build dokkaGenerate
 
+      - name: Test keel-samples fixtures demos (PR gate)
+        run: ./gradlew :keel-samples:test --no-daemon --console=plain
+
+      - name: Test keel-test-fixtures (explicit gate)
+        run: ./gradlew :keel-test-fixtures:test --rerun-tasks --no-daemon --console=plain
+
+      - name: Validate keel-test-fixtures publish artifacts
+        run: ./gradlew :keel-test-fixtures:publishToMavenLocal --no-daemon --console=plain
+
+      - name: Stress test keel-test-fixtures (60 rounds)
+        run: ./gradlew :keel-test-fixtures:stressTest --no-daemon --console=plain
+
       - name: Performance Benchmarks (CI Gate)
         run: ./gradlew :keel-test-suite:test --tests "com.keel.test.perf.*" --info
 

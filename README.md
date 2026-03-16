@@ -85,7 +85,8 @@ keel-openapi-annotations OpenAPI annotations used by plugin/system APIs
 keel-openapi-processor   KSP processor for OpenAPI fragments
 keel-openapi-runtime     OpenAPI aggregation and Swagger UI routes
 keel-uds-runtime         UDS protocol/runtime support for plugin isolation
-keel-test-suite          Kernel, routing, DB, config, loader, and contract tests
+keel-test-fixtures       Reusable plugin-test DSL/fixtures for plugin and sample modules
+keel-test-suite          Internal kernel regression/performance/contract test suite
 keel-samples             Runnable sample app and sample plugins
 assets/brand             Project brand assets and logo materials
 ```
@@ -123,6 +124,7 @@ After startup, these endpoints are useful:
 ```bash
 ./gradlew build
 ./gradlew test
+./gradlew :keel-samples:test
 ./gradlew dokka
 ```
 
@@ -390,6 +392,23 @@ The sample application demonstrates three plugin styles already present in the r
 - `observability`: topology, traces, flows, UI assets, and streaming-oriented behavior
 
 These samples are the best starting point if you want to understand how Keel is intended to be used in practice.
+
+## Testing with Fixtures
+
+Keel provides reusable plugin-testing fixtures in `keel-test-fixtures`. The sample module (`keel-samples`) includes full fixtures demos using test-only plugins, covering:
+
+- single-plugin smoke checks
+- HTTP CRUD assertions
+- multi-plugin lifecycle assertions
+- in-memory database setup
+- SSE endpoint reachability
+- diagnostic failure reporting
+
+Run the sample fixtures demo suite with:
+
+```bash
+./gradlew :keel-samples:test
+```
 
 ## Performance & Stress Test Report
 

@@ -31,4 +31,15 @@ dependencies {
     implementation(libs.h2.database)
 
     ksp(project(":keel-openapi-processor"))
+
+    testImplementation(project(":keel-test-fixtures"))
+    testImplementation(libs.kotlin.test)
+    testImplementation(libs.kotlin.test.junit5)
+    testImplementation(libs.junit.jupiter)
+    testImplementation(libs.kotlinx.serialization.json)
+    testRuntimeOnly(libs.junit.platform.launcher)
+}
+
+tasks.test {
+    useJUnitPlatform()
 }
