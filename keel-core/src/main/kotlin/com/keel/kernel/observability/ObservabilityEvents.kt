@@ -59,6 +59,89 @@ data class PanelInfo(
 )
 
 @Serializable
+data class TopEdgeMetric(
+    val edgeFrom: String,
+    val edgeTo: String,
+    val count: Int,
+    val errorCount: Int = 0
+)
+
+@Serializable
+data class KernelProcessMetrics(
+    val processCpuLoad: Double? = null,
+    val systemLoadAverage: Double? = null,
+    val availableProcessors: Int = 1,
+    val heapUsedBytes: Long = 0,
+    val heapMaxBytes: Long = 0,
+    val heapUsedPercent: Double = 0.0,
+    val threadCount: Int = 0
+)
+
+internal data class SystemMetrics(
+    val processCpuLoad: Double?,
+    val systemLoadAverage: Double?,
+    val availableProcessors: Int
+)
+
+@Serializable
+data class LatencyMetrics(
+    val avgMs: Double = 0.0,
+    val p95Ms: Long = 0,
+    val p99Ms: Long = 0,
+    val errorRate: Double = 0.0,
+    val completedSpanCount: Int = 0
+)
+
+@Serializable
+data class TrafficMetrics(
+    val recentFlowCount: Int = 0,
+    val recentTraceCount: Int = 0,
+    val topEdges: List<TopEdgeMetric> = emptyList()
+)
+
+@Serializable
+data class NodeSummary(
+    val node: JvmNode,
+    val recentFlowCount: Int = 0,
+    val recentTraceCount: Int = 0,
+    val errorCount: Int = 0
+)
+
+@Serializable
+data class StructuredLogRecord(
+    val timestamp: Long,
+    val level: String,
+    val source: String,
+    val message: String,
+    val throwable: String? = null,
+    val traceId: String? = null,
+    val spanId: String? = null,
+    val pluginId: String? = null,
+    val attributes: Map<String, String> = emptyMap()
+)
+
+@Serializable
+data class LogSnapshotPage(
+    val items: List<StructuredLogRecord>,
+    val total: Int,
+    val limit: Int
+)
+
+@Serializable
+data class ObservabilityMetricsSnapshot(
+    val windowMs: Long,
+    val runtimeNodeCount: Int,
+    val externalNodeCount: Int,
+    val totalInflight: Int,
+    val totalQueueDepth: Int,
+    val droppedLogCount: Long,
+    val kernel: KernelProcessMetrics,
+    val latency: LatencyMetrics,
+    val traffic: TrafficMetrics,
+    val nodes: List<NodeSummary>
+)
+
+@Serializable
 data class CustomEvent(
     val type: String,
     val payload: JsonElement
@@ -69,7 +152,12 @@ data class LogEvent(
     val timestamp: Long,
     val level: String,
     val source: String,
-    val message: String
+    val message: String,
+    val throwable: String? = null,
+    val traceId: String? = null,
+    val spanId: String? = null,
+    val pluginId: String? = null,
+    val attributes: Map<String, String> = emptyMap()
 )
 
 data class ObservabilityStreamEvent(

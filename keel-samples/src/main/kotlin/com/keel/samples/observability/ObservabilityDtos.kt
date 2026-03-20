@@ -2,6 +2,9 @@ package com.keel.samples.observability
 
 import com.keel.kernel.observability.FlowEvent
 import com.keel.kernel.observability.JvmNode
+import com.keel.kernel.observability.LogSnapshotPage
+import com.keel.kernel.observability.NodeSummary
+import com.keel.kernel.observability.ObservabilityMetricsSnapshot
 import com.keel.kernel.observability.PanelInfo
 import com.keel.kernel.observability.TraceSpanEvent
 import com.keel.openapi.annotations.KeelApiField
@@ -34,6 +37,27 @@ data class ObservabilityFlowData(
 data class ObservabilityPanelData(
     @KeelApiField("Registered custom observability panels", "[]")
     val panels: List<PanelInfo>
+)
+
+@KeelApiSchema
+@Serializable
+data class ObservabilityMetricsData(
+    @KeelApiField("Aggregated runtime, latency, traffic and node metrics for observability views")
+    val snapshot: ObservabilityMetricsSnapshot
+)
+
+@KeelApiSchema
+@Serializable
+data class ObservabilityNodeSummaryData(
+    @KeelApiField("Derived observability summaries for each runtime node", "[]")
+    val nodes: List<NodeSummary>
+)
+
+@KeelApiSchema
+@Serializable
+data class ObservabilityLogData(
+    @KeelApiField("Structured log page for the observability log explorer")
+    val page: LogSnapshotPage
 )
 
 @KeelApiSchema

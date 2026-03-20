@@ -408,9 +408,7 @@ class KernelBuilder {
 
 fun buildKeel(block: KernelBuilder.() -> Unit): Kernel = KernelBuilder().apply(block).build()
 
-fun runKeel(block: KernelBuilder.() -> Unit): Unit = buildKeel(block).run()
-
-fun runKeel(port: Int, block: KernelBuilder.() -> Unit): Unit = buildKeel(block).run(port)
+fun runKeel(port: Int? = null, block: KernelBuilder.() -> Unit): Unit = buildKeel(block).run(port)
 
 private fun locateRepoRoot(start: File): File {
     return generateSequence(start) { it.parentFile }

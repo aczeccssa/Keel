@@ -2,6 +2,5 @@
   "files.watcherExclude": {
     "**/.gradle/**": true,
     "**/build/**": true
-  },
-  "java.configuration.updateBuildConfiguration": "automatic"
+  }
 }

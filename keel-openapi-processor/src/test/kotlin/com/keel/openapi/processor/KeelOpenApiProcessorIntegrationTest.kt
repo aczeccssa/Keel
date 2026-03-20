@@ -40,6 +40,14 @@ class KeelOpenApiProcessorIntegrationTest {
             .build()
 
         assertTrue(result.output.contains("BUILD SUCCESSFUL"), "Expected successful build, but got:\n${result.output}")
+        assertTrue(
+            fixtureDir.resolve("build/generated/ksp/main/kotlin/com/keel/generated/FixturePluginInterceptorMetadata.kt").isFile,
+            "Expected generated interceptor metadata source to exist"
+        )
+        assertTrue(
+            fixtureDir.resolve("build/generated/ksp/main/resources/META-INF/services/com.keel.kernel.plugin.KeelGeneratedInterceptorMetadataProvider").isFile,
+            "Expected generated interceptor metadata service file to exist"
+        )
     }
 
     private fun createFixtureProject(useLegacyKeelApi: Boolean): File {
@@ -106,10 +114,24 @@ class KeelOpenApiProcessorIntegrationTest {
             """
             package fixture
 
+            import com.keel.kernel.plugin.KeelInterceptorResult
+            import com.keel.kernel.plugin.KeelRequestContext
+            import com.keel.kernel.plugin.KeelRequestInterceptor
             import com.keel.openapi.annotations.KeelApiPlugin
+            import com.keel.openapi.annotations.KeelInterceptors
+            import com.keel.openapi.annotations.KeelRouteInterceptors
 
             @KeelApiPlugin(pluginId = "fixture", title = "Fixture")
+            @KeelInterceptors(FixtureInterceptor::class)
+            @KeelRouteInterceptors(method = "GET", path = "/admin", value = [FixtureInterceptor::class])
             class FixturePlugin
+
+            class FixtureInterceptor : KeelRequestInterceptor {
+                override suspend fun intercept(
+                    context: KeelRequestContext,
+                    next: suspend () -> KeelInterceptorResult
+                ): KeelInterceptorResult = next()
+            }
             """
         }
         projectDir.writeFile("src/main/kotlin/fixture/Fixture.kt", source)

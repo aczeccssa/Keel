@@ -247,7 +247,7 @@ class UnifiedPluginManager(
     )
 
     private fun extractCapabilities(plugin: KeelPlugin, topologyPluginId: String): PluginCapabilities {
-        val routeDefinitions = plugin.endpoints()
+        val routeDefinitions = mergeGeneratedInterceptorMetadata(plugin, plugin.endpoints())
         validateServiceDeclaration(plugin.descriptor, routeDefinitions)
         val endpointDefinitions = routeDefinitions.filterIsInstance<PluginEndpointDefinition<*, *>>()
         val endpointById = endpointDefinitions.associateBy { it.endpointId }
@@ -1330,8 +1330,27 @@ class UnifiedPluginManager(
         try {
             val request = decodeRequestBody(rawBody, endpoint.requestType)
             val context = buildRequestContext(call, entry.plugin.descriptor.pluginId, endpoint.method, call.request.path())
-            val result = withTimeout(timeoutMs) {
-                endpoint.execute(context, request)
+            val privateScope = requireNotNull(entry.privateScopeHandle?.privateScope) {
+                "No private scope available for plugin ${entry.plugin.descriptor.pluginId}"
+            }
+            val interceptors = resolveInterceptors(privateScope, endpoint.interceptors)
+            val interception = withTimeout(timeoutMs) {
+                executeKeelInterceptors(context, interceptors) {
+                    endpoint.execute(context, request)
+                }
+            }
+            val result = when (interception) {
+                is KeelInterceptorResult.Proceed -> interception.result
+                is KeelInterceptorResult.Reject -> {
+                    respondPluginResult(
+                        call = call,
+                        result = interception.toPluginResult(),
+                        responseType = endpoint.responseType,
+                        responseEnvelope = responseEnvelope,
+                        errorMessage = interception.message
+                    )
+                    return
+                }
             }
             val responseBytes = encodeResponseBody(result.body, endpoint.responseType)
                 ?.toByteArray(Charsets.UTF_8)?.size?.toLong() ?: 0L

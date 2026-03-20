@@ -1,9 +1,10 @@
 package com.keel.samples
 
 import com.keel.kernel.config.runKeel
-import com.keel.samples.dbdemo.DbDemoPlugin
-import com.keel.samples.helloworld.HelloWorldPlugin
+import com.keel.samples.authsample.AuthSamplePlugin
 import com.keel.samples.observability.ObservabilityPlugin
+import com.keel.samples.ordersample.OrderSamplePlugin
+import com.keel.samples.productsample.ProductSamplePlugin
 import io.ktor.server.http.content.*
 
 /**
@@ -42,10 +43,11 @@ import io.ktor.server.http.content.*
  * Or set environment variable:
  *   KEEL_ENV=development java -jar keel-samples.jar
  */
-fun main(): Unit = runKeel {
+fun main() = runKeel {
     // Mount Plugins
-    plugin(HelloWorldPlugin())
-    plugin(DbDemoPlugin())
+    plugin(AuthSamplePlugin())
+    plugin(ProductSamplePlugin())
+    plugin(OrderSamplePlugin())
     plugin(ObservabilityPlugin())
 
     // Disable hot reload

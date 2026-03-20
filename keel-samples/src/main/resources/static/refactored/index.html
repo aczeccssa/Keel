@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8">
+    <meta content="width=device-width, initial-scale=1.0" name="viewport">
+    <title>Keel Observability</title>
+    <link rel="shortcut icon" href="/favicon.svg" type="image/x-icon">
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Newsreader:ital,wght@0,400;0,600;0,700;1,600&display=swap"
+        rel="stylesheet">
+    <link rel="stylesheet" href="css/style.css">
+</head>
+
+<body>
+    <div class="app-shell">
+        <aside class="sidebar">
+            <div class="brand">
+                <h1>Keel Precision</h1>
+                <p>Observability Core</p>
+            </div>
+
+            <nav class="nav-list" id="sidebar-nav"></nav>
+
+            <div class="sidebar-footer">
+                <div class="meta-list" id="sidebar-meta"></div>
+                <button class="sidebar-cta" id="recenter-kernel-btn" type="button">Center Kernel</button>
+            </div>
+        </aside>
+
+        <div class="main-shell">
+            <header class="topbar">
+                <div class="topbar-tabs" id="topbar-tabs"></div>
+                <div class="topbar-actions">
+                    <div class="status-pill" id="connection-pill">
+                        <span class="status-dot"></span>
+                        <span id="connection-text">Booting</span>
+                    </div>
+                    <button class="ghost-pill" id="stream-toggle-btn" type="button">Live On</button>
+                </div>
+            </header>
+
+            <main class="content">
+                <keel-panel-topology class="tab-panel" data-tab="topology"></keel-panel-topology>
+                <keel-panel-traces class="tab-panel" data-tab="traces"></keel-panel-traces>
+                <keel-panel-logs class="tab-panel" data-tab="logs"></keel-panel-logs>
+                <keel-panel-nodes class="tab-panel" data-tab="nodes"></keel-panel-nodes>
+                <keel-panel-metrics class="tab-panel" data-tab="metrics"></keel-panel-metrics>
+            </main>
+        </div>
+    </div>
+
+    <!-- refresh interval overlay — outside app-shell so position:fixed covers the whole page -->
+    <div class="refresh-interval-cover" id="refresh-interval-cover">
+        <div class="refresh-interval-panel">
+            <div class="refresh-interval-label">Refresh interval</div>
+            <div class="refresh-interval-options" id="refresh-interval-options"></div>
+        </div>
+    </div>
+
+    <script type="module" src="js/main.js"></script>
+</body>
+
+</html>

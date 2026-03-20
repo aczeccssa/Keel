@@ -56,3 +56,4 @@ bin/
 **/build
 **/bin
 /.qodana/
+/.local/

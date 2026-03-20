@@ -5,13 +5,18 @@ import com.keel.kernel.logging.KeelLoggerService
 import com.keel.kernel.observability.ObservabilityTracing
 import com.keel.kernel.plugin.KeelPlugin
 import com.keel.kernel.plugin.PluginApiException
+import com.keel.kernel.plugin.DefaultPluginRequestContext
 import com.keel.kernel.plugin.PluginDescriptor
+import com.keel.kernel.plugin.KeelInterceptorResult
 import com.keel.kernel.plugin.decodeRequestBody
 import com.keel.kernel.plugin.encodeResponseBody
+import com.keel.kernel.plugin.executeKeelInterceptors
+import com.keel.kernel.plugin.mergeGeneratedInterceptorMetadata
+import com.keel.kernel.plugin.normalizeRequestHeaders
 import com.keel.kernel.plugin.toConfig
 import com.keel.kernel.plugin.PluginHealthState
-import com.keel.kernel.plugin.PluginRequestContext
 import com.keel.kernel.plugin.PluginRuntimeMode
+import com.keel.kernel.plugin.resolveInterceptors
 import com.keel.jvm.runtime.HandshakeRequest
 import com.keel.jvm.runtime.HandshakeResponse
 import com.keel.jvm.runtime.HealthRequest
@@ -74,6 +79,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import org.koin.core.context.startKoin
 import org.koin.core.context.stopKoin
+import org.koin.core.scope.Scope
 
 import com.keel.kernel.plugin.JvmCommunicationMode
 import kotlinx.coroutines.CoroutineDispatcher
@@ -134,7 +140,7 @@ object ExternalPluginHostMain {
     ) {
         private val plugin = instantiatePlugin(hostArgs.pluginClass)
         private val startedAt = System.currentTimeMillis()
-        private val routeDefinitions = plugin.endpoints()
+        private val routeDefinitions = mergeGeneratedInterceptorMetadata(plugin, plugin.endpoints())
         private val endpoints = routeDefinitions
             .filterIsInstance<com.keel.kernel.plugin.PluginEndpointDefinition<*, *>>()
             .associateBy { it.endpointId }
@@ -336,7 +342,8 @@ object ExternalPluginHostMain {
                                             staticRoutes = staticRoutes,
                                             inFlightInvokes = inFlightInvokes,
                                             eventEmitter = eventEmitter,
-                                            tracer = tracing.tracer
+                                            tracer = tracing.tracer,
+                                            privateScope = privateScopeHandle.privateScope
                                         )
                                     }
                                 }
@@ -488,7 +495,8 @@ object ExternalPluginHostMain {
         staticRoutes: Map<String, com.keel.kernel.plugin.PluginStaticResourceDefinition>,
         inFlightInvokes: AtomicInteger,
         eventEmitter: PluginEventEmitter,
-        tracer: io.opentelemetry.api.trace.Tracer
+        tracer: io.opentelemetry.api.trace.Tracer,
+        privateScope: Scope
     ) {
         runCatching {
             handleInvokeConnection(
@@ -501,7 +509,8 @@ object ExternalPluginHostMain {
                 staticRoutes = staticRoutes,
                 inFlightInvokes = inFlightInvokes,
                 eventEmitter = eventEmitter,
-                tracer = tracer
+                tracer = tracer,
+                privateScope = privateScope
             )
         }.onFailure { error ->
             logger.warn("Malformed or failed invoke frame pluginId=${plugin.descriptor.pluginId}: ${error.message}")
@@ -665,15 +674,15 @@ object ExternalPluginHostMain {
                 val accepted = validateControlRequest(request.pluginId, request.generation, request.authToken, plugin.descriptor.pluginId, generation, authToken)
                 val definition = sseRoutes[request.routePath]
                 if (accepted && definition != null) {
-                    val context = object : PluginRequestContext {
-                        override val pluginId: String = request.pluginId
-                        override val method: String = "GET"
-                        override val rawPath: String = request.rawPath
-                        override val pathParameters: Map<String, String> = request.pathParameters
-                        override val queryParameters: Map<String, List<String>> = request.queryParameters
-                        override val requestHeaders: Map<String, List<String>> = request.headers
-                        override val requestId: String = request.requestId
-                    }
+                    val context = DefaultPluginRequestContext(
+                        pluginId = request.pluginId,
+                        method = "GET",
+                        rawPath = request.rawPath,
+                        pathParameters = request.pathParameters,
+                        queryParameters = request.queryParameters,
+                        requestHeaders = normalizeRequestHeaders(request.headers),
+                        requestId = request.requestId
+                    )
                     val job = CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
                         runCatching {
                             definition.handler.invoke(
@@ -769,7 +778,8 @@ object ExternalPluginHostMain {
         staticRoutes: Map<String, com.keel.kernel.plugin.PluginStaticResourceDefinition>,
         inFlightInvokes: AtomicInteger,
         eventEmitter: PluginEventEmitter,
-        tracer: io.opentelemetry.api.trace.Tracer
+        tracer: io.opentelemetry.api.trace.Tracer,
+        privateScope: Scope
     ) {
         val payload = PluginJvmFrameCodec.read(channel)
         val json = PluginJvmJson.instance.parseToJsonElement(payload).jsonObject
@@ -864,19 +874,22 @@ object ExternalPluginHostMain {
                 .startSpan()
             scope = span?.makeCurrent()
             val requestBody = decodeRequestBody(request.bodyJson, endpoint.requestType)
-            val context = object : PluginRequestContext {
-                override val pluginId: String = request.pluginId
-                override val method: String = request.method
-                override val rawPath: String = request.rawPath
-                override val pathParameters: Map<String, String> = request.pathParameters
-                override val queryParameters: Map<String, List<String>> = request.queryParameters
-                override val requestHeaders: Map<String, List<String>> = request.headers
-                override val requestId: String = request.requestId
-            }
+            val context = DefaultPluginRequestContext(
+                pluginId = request.pluginId,
+                method = request.method,
+                rawPath = request.rawPath,
+                pathParameters = request.pathParameters,
+                queryParameters = request.queryParameters,
+                requestHeaders = normalizeRequestHeaders(request.headers),
+                requestId = request.requestId
+            )
+            val interceptors = resolveInterceptors(privateScope, endpoint.interceptors)
 
             val timeoutMs = endpoint.executionPolicy.timeoutMs ?: descriptor.callTimeoutMs
-            val result = withTimeoutOrNull(timeoutMs.milliseconds) {
-                endpoint.execute(context, requestBody)
+            val interception = withTimeoutOrNull(timeoutMs.milliseconds) {
+                executeKeelInterceptors(context, interceptors) {
+                    endpoint.execute(context, requestBody)
+                }
             } ?: run {
                 PluginJvmFrameCodec.write(
                     channel,
@@ -895,6 +908,29 @@ object ExternalPluginHostMain {
                     )
                 )
                 return
+            }
+            val result = when (interception) {
+                is KeelInterceptorResult.Proceed -> interception.result
+                is KeelInterceptorResult.Reject -> {
+                    PluginJvmFrameCodec.write(
+                        channel,
+                        PluginJvmJson.instance.encodeToString(
+                            InvokeResponse.serializer(),
+                            InvokeResponse(
+                                pluginId = plugin.descriptor.pluginId,
+                                generation = generation,
+                                timestamp = System.currentTimeMillis(),
+                                messageId = eventEmitter.newMessageId(),
+                                correlationId = request.messageId,
+                                requestId = request.requestId,
+                                status = interception.status,
+                                headers = interception.headers,
+                                errorMessage = interception.message
+                            )
+                        )
+                    )
+                    return
+                }
             }
 
             val encodedBody = encodeResponseBody(result.body, endpoint.responseType)

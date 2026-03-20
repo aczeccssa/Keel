@@ -67,6 +67,35 @@ class ObservabilityPlugin : StandardKeelPlugin {
             PluginResult(body = ObservabilityFlowData(flows = observability.flowSnapshot(limit)))
         }
 
+        get<ObservabilityMetricsData>("/metrics", doc = OpenApiDoc(summary = "Get aggregated observability metrics", tags = listOf("observability"), responseEnvelope = true)) {
+            val windowMs = queryParameters["windowMs"]?.firstOrNull()?.toLongOrNull() ?: (15 * 60 * 1000L)
+            PluginResult(body = ObservabilityMetricsData(snapshot = observability.metricsSnapshot(windowMs)))
+        }
+
+        get<ObservabilityNodeSummaryData>("/nodes", doc = OpenApiDoc(summary = "Get observability node summaries", tags = listOf("observability"), responseEnvelope = true)) {
+            val windowMs = queryParameters["windowMs"]?.firstOrNull()?.toLongOrNull() ?: (15 * 60 * 1000L)
+            PluginResult(body = ObservabilityNodeSummaryData(nodes = observability.nodeSummarySnapshot(windowMs)))
+        }
+
+        get<ObservabilityLogData>("/logs", doc = OpenApiDoc(summary = "Get structured logs for the observability explorer", tags = listOf("observability"), responseEnvelope = true)) {
+            val limit = queryParameters["limit"]?.firstOrNull()?.toIntOrNull() ?: 100
+            val query = queryParameters["query"]?.firstOrNull()
+            val level = queryParameters["level"]?.firstOrNull()
+            val source = queryParameters["source"]?.firstOrNull()
+            val since = queryParameters["since"]?.firstOrNull()?.toLongOrNull()
+            PluginResult(
+                body = ObservabilityLogData(
+                    page = observability.logSnapshot(
+                        limit = limit,
+                        query = query,
+                        level = level,
+                        source = source,
+                        sinceEpochMs = since
+                    )
+                )
+            )
+        }
+
         get<ObservabilityPanelData>("/panels", doc = OpenApiDoc(summary = "Get registered observability panels", tags = listOf("observability"), responseEnvelope = true)) {
             PluginResult(body = ObservabilityPanelData(panels = observability.panels()))
         }
@@ -88,7 +117,7 @@ class ObservabilityPlugin : StandardKeelPlugin {
 
         staticResources(
             path = "/ui",
-            basePackage = "observability-ui",
+            basePackage = "static",
             doc = OpenApiDoc(summary = "Open the observability static UI", tags = listOf("observability")),
             index = "index.html"
         )
