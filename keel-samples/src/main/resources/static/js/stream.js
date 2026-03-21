@@ -1,6 +1,7 @@
 import { state, refreshSelectionDefaults } from './state.js';
 import { fetchPlugins, refreshMetrics, refreshNodes, refreshLogs } from './api.js';
 import { renderChrome, renderTopologyPanel, renderTracesPanel } from './render.js';
+import { API_BASE } from './config.js';
 
 export function startStreamPoll() {
     if (state.streamIntervalId !== null) clearInterval(state.streamIntervalId);
@@ -16,25 +17,25 @@ export function startStreamPoll() {
 export function connectStream() {
     if (!state.streamEnabled) return;
     if (state.eventSource) state.eventSource.close();
-    state.connectionState = "Connecting";
+    state.connectionState = 'Connecting';
     renderChrome();
-    state.eventSource = new EventSource("/api/plugins/observability/stream");
-    state.eventSource.addEventListener("open", () => {
-        state.connectionState = "Live";
+    state.eventSource = new EventSource(`${API_BASE}/plugins/observability/stream`);
+    state.eventSource.addEventListener('open', () => {
+        state.connectionState = 'Live';
         startStreamPoll();
         renderChrome();
     });
-    state.eventSource.addEventListener("error", () => {
-        state.connectionState = "Retrying";
+    state.eventSource.addEventListener('error', () => {
+        state.connectionState = 'Retrying';
         renderChrome();
     });
-    state.eventSource.addEventListener("jvm_status", (event) => {
+    state.eventSource.addEventListener('jvm_status', (event) => {
         upsertNode(JSON.parse(event.data));
     });
-    state.eventSource.addEventListener("plugin_status", (event) => {
+    state.eventSource.addEventListener('plugin_status', (event) => {
         upsertNode(JSON.parse(event.data));
     });
-    state.eventSource.addEventListener("trace_event", (event) => {
+    state.eventSource.addEventListener('trace_event', (event) => {
         const trace = JSON.parse(event.data);
         state.traces.push(trace);
         state.traces = state.traces.slice(-150);
@@ -42,7 +43,7 @@ export function connectStream() {
         renderTopologyPanel();
         renderTracesPanel();
     });
-    state.eventSource.addEventListener("flow_event", (event) => {
+    state.eventSource.addEventListener('flow_event', (event) => {
         const flow = JSON.parse(event.data);
         state.flows.push(flow);
         state.flows = state.flows.slice(-150);
@@ -55,10 +56,10 @@ export function connectStream() {
         });
         renderTopologyPanel();
     });
-    state.eventSource.addEventListener("log_event", () => {
+    state.eventSource.addEventListener('log_event', () => {
         // logs are polled by startStreamPoll(); no action needed here
     });
-    state.eventSource.addEventListener("panel_update", (event) => {
+    state.eventSource.addEventListener('panel_update', (event) => {
         const panel = JSON.parse(event.data);
         state.panels = [...state.panels.filter((item) => item.id !== panel.id), panel];
         renderChrome();

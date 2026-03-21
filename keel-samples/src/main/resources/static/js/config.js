@@ -1,9 +1,13 @@
+export const API_BASE = '/api';
+// export const API_BASE = 'http://localhost:8080/api';
+
 export const TABS = [
     { id: "topology", label: "Topology", note: "Graph + selected node" },
     { id: "traces", label: "Traces", note: "Grouped waterfall" },
     { id: "logs", label: "Logs", note: "Structured explorer" },
     { id: "nodes", label: "Nodes", note: "Cluster inventory" },
-    { id: "metrics", label: "Metrics", note: "Runtime snapshot" }
+    { id: "metrics", label: "Metrics", note: "Runtime snapshot" },
+    { id: "openapi", label: "OpenAPI", note: "Contract explorer" }
 ];
 export const VIEWBOX = 1000;
 export const LOG_LIMIT = 80;

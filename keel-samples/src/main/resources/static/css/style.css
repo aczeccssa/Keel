@@ -156,6 +156,11 @@ select {
     flex-shrink: 0;
 }
 
+.nav-icon svg {
+    width: 16px;
+    height: 16px;
+}
+
 .nav-link.is-active .nav-icon {
     background: rgba(15, 118, 110, 0.12);
     color: var(--teal);
@@ -239,32 +244,20 @@ select {
     z-index: 10;
 }
 
-.topbar-tabs {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 10px;
-}
-
-.tab-link {
-    padding: 10px 14px;
-    border-radius: 999px;
-    color: #667085;
-    font-size: 12px;
-    font-weight: 800;
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
-    transition: all 250ms var(--ease-smooth);
-}
-
-.tab-link:hover {
-    background: rgba(255, 255, 255, 0.7);
+.topbar-showcase {
+    font-family: "Newsreader", serif;
+    font-size: 20px;
+    font-weight: 700;
+    font-style: italic;
+    letter-spacing: -0.02em;
     color: var(--navy);
+    text-decoration: none;
+    transition: text-decoration 200ms ease;
 }
 
-.tab-link.is-active {
-    background: var(--panel-strong);
-    color: var(--navy);
-    /* box-shadow: 0 12px 22px rgba(15, 23, 42, 0.08); */
+.topbar-showcase:hover {
+    text-decoration: underline;
+    text-underline-offset: 3px;
 }
 
 .topbar-actions {
@@ -407,6 +400,13 @@ select {
 
 .tab-panel.is-active {
     display: flex;
+}
+
+.panel-root {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    min-height: 0;
 }
 
 @keyframes panel-enter {
@@ -633,6 +633,10 @@ select {
 
 .layout-grid.metrics {
     grid-template-columns: 0.67fr 1fr;
+}
+
+.layout-grid.openapi {
+    grid-template-columns: 380px minmax(0, 1fr);
 }
 
 .layout-grid>* {
@@ -1395,6 +1399,222 @@ select {
     min-height: 220px;
 }
 
+.openapi-nav-card,
+.openapi-detail-card {
+    min-height: 0;
+}
+
+.openapi-controls {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 10px;
+    margin-bottom: 12px;
+}
+
+.openapi-controls label {
+    display: grid;
+    gap: 8px;
+    color: var(--muted);
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+}
+
+.openapi-controls input,
+.openapi-controls select {
+    width: 100%;
+    padding: 10px 14px;
+    border-radius: 12px;
+    border: 1px solid rgba(17, 24, 39, 0.08);
+    background: rgba(255, 255, 255, 0.88);
+    color: var(--ink);
+}
+
+.openapi-actions {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 14px;
+}
+
+.openapi-endpoint-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.openapi-endpoint-row {
+    cursor: pointer;
+}
+
+.openapi-endpoint-top {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+}
+
+.openapi-endpoint-top code {
+    font-size: 12px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.openapi-detail-path {
+    margin: -8px 0 14px;
+    color: var(--muted);
+    font-size: 12px;
+}
+
+.openapi-detail-desc {
+    margin: 0 0 14px;
+    color: var(--ink);
+    font-size: 13px;
+    line-height: 1.6;
+}
+
+.openapi-section {
+    margin-top: 16px;
+}
+
+.openapi-schema-table-wrap {
+    border: 1px solid rgba(17, 24, 39, 0.06);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+    background: rgba(255, 255, 255, 0.62);
+}
+
+.openapi-schema-table th,
+.openapi-schema-table td {
+    vertical-align: top;
+}
+
+.openapi-prop-cell {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+.openapi-prop-name {
+    font-size: 12px;
+    font-family: ui-monospace, "SFMono-Regular", Menlo, Monaco, Consolas, monospace;
+    font-weight: 700;
+}
+
+.openapi-schema-desc {
+    font-size: 12px;
+    line-height: 1.5;
+    margin-bottom: 8px;
+}
+
+.openapi-schema-array {
+    margin-top: 10px;
+}
+
+.openapi-array-meta {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
+.openapi-enum-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.openapi-schema-leaf {
+    margin-top: 8px;
+}
+
+.openapi-code-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+}
+
+.openapi-code-card {
+    border-radius: var(--radius-md);
+    border: 1px solid rgba(17, 24, 39, 0.08);
+    overflow: hidden;
+    background: #0f172a;
+}
+
+.openapi-code-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 10px;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.2);
+}
+
+.openapi-code-lang {
+    color: #94a3b8;
+    font-size: 10px;
+    letter-spacing: 0.12em;
+    font-weight: 800;
+    text-transform: uppercase;
+}
+
+.openapi-copy-btn {
+    border: 0;
+    border-radius: 999px;
+    background: rgba(148, 163, 184, 0.15);
+    color: #e2e8f0;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    padding: 5px 10px;
+    cursor: pointer;
+}
+
+.openapi-copy-btn:hover {
+    background: rgba(148, 163, 184, 0.28);
+}
+
+.openapi-code-pre {
+    margin: 0;
+    padding: 12px 14px;
+    max-height: 260px;
+    overflow: auto;
+    white-space: pre;
+    color: #e2e8f0;
+    font-size: 12px;
+    line-height: 1.55;
+    font-family: ui-monospace, "SFMono-Regular", Menlo, Monaco, Consolas, monospace;
+}
+
+.openapi-method-get {
+    background: rgba(15, 118, 110, 0.14);
+    color: var(--teal);
+}
+
+.openapi-method-post {
+    background: rgba(19, 130, 79, 0.14);
+    color: var(--green);
+}
+
+.openapi-method-put,
+.openapi-method-patch {
+    background: rgba(197, 106, 27, 0.14);
+    color: var(--amber);
+}
+
+.openapi-method-delete {
+    background: rgba(198, 40, 40, 0.14);
+    color: var(--red);
+}
+
+.openapi-method-options,
+.openapi-method-head,
+.openapi-method-trace {
+    background: rgba(100, 116, 139, 0.12);
+    color: #475467;
+}
+
 .sparkline {
     width: 100%;
     height: 100px;
@@ -1438,7 +1658,8 @@ th {
 
     .layout-grid.topology,
     .layout-grid.traces,
-    .layout-grid.logs {
+    .layout-grid.logs,
+    .layout-grid.openapi {
         grid-template-columns: minmax(0, 1fr);
     }
 
@@ -1457,8 +1678,13 @@ th {
     .layout-grid.topology,
     .layout-grid.traces,
     .layout-grid.logs,
-    .layout-grid.metrics {
+    .layout-grid.metrics,
+    .layout-grid.openapi {
         grid-template-columns: minmax(0, 1fr);
+    }
+
+    .openapi-code-grid {
+        grid-template-columns: 1fr;
     }
 }
 

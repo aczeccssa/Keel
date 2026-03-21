@@ -1,24 +1,33 @@
 import { LOG_LIMIT } from './config.js';
 
+let appShell = null;
+
 export const state = {
-    activeTab: "topology",
+    activeTab: 'topology',
     topology: [],
     traces: [],
     flows: [],
     panels: [],
     metrics: null,
+    plugins: [],
     nodeSummaries: [],
     logs: { items: [], total: 0, limit: LOG_LIMIT },
-    logFilters: { query: "", level: "", source: "", window: "1h" },
+    logFilters: { query: '', level: '', source: '', window: '1h' },
+    openApiSpec: null,
+    openApiLoadState: 'idle',
+    openApiError: '',
+    openApiFilters: { query: '', tag: '' },
+    selectedOpenApiOpKey: null,
     metricsHistory: [],
-    selectedNodeId: null, // 默认无选择
+    selectedNodeId: null,
     selectedTraceId: null,
     selectedSpanId: null,
     selectedLogKey: null,
     streamEnabled: true,
     refreshIntervalMs: 5_000,
+    refreshOverlayOpen: false,
     streamIntervalId: null,
-    connectionState: "booting",
+    connectionState: 'Booting',
     zoom: 1,
     panX: 0,
     panY: 0,
@@ -33,20 +42,13 @@ export const state = {
     eventSource: null
 };
 
-export const els = {
-    get sidebarNav() { return document.getElementById("sidebar-nav"); },
-    get sidebarMeta() { return document.getElementById("sidebar-meta"); },
-    get topbarTabs() { return document.getElementById("topbar-tabs"); },
-    get connectionText() { return document.getElementById("connection-text"); },
-    get connectionPill() { return document.getElementById("connection-pill"); },
-    get streamToggleBtn() { return document.getElementById("stream-toggle-btn"); },
-    get topologyStage() { return document.getElementById("topology-stage"); },
-    get topologyViewport() { return document.getElementById("topology-viewport"); },
-    get topologyBaseSvg() { return document.getElementById("topology-base-svg"); },
-    get topologyFlowSvg() { return document.getElementById("topology-flow-svg"); },
-    get topologyNodeLayer() { return document.getElementById("topology-node-layer"); },
-    get zoomLabel() { return document.getElementById("zoom-label"); }
-};
+export function setAppShell(element) {
+    appShell = element;
+}
+
+export function getAppShell() {
+    return appShell || document.querySelector('keel-observability-app');
+}
 
 export function currentNodeSummary(nodeId) {
     return state.nodeSummaries.find((item) => item.node.id === nodeId) || null;
@@ -67,7 +69,7 @@ export function groupedTraces() {
         const ordered = [...spans].sort((a, b) => (a.startEpochMs || 0) - (b.startEpochMs || 0));
         const start = ordered[0] ? ordered[0].startEpochMs : 0;
         const end = Math.max(...ordered.map((span) => span.endEpochMs || (span.startEpochMs || 0)));
-        const errors = ordered.filter((span) => String(span.status).toUpperCase() === "ERROR").length;
+        const errors = ordered.filter((span) => String(span.status).toUpperCase() === 'ERROR').length;
         return {
             traceId,
             spans: ordered,
@@ -75,7 +77,7 @@ export function groupedTraces() {
             endEpochMs: end,
             durationMs: Math.max(end - start, 0),
             operation: ordered[0] ? ordered[0].operation : traceId,
-            service: ordered[0] ? ordered[0].service : "unknown",
+            service: ordered[0] ? ordered[0].service : 'unknown',
             errorCount: errors,
             spanCount: ordered.length
         };
@@ -96,7 +98,7 @@ export function selectedSpan() {
 }
 
 export function logKey(item) {
-    return [item.timestamp, item.level, item.source, item.message].join("|");
+    return [item.timestamp, item.level, item.source, item.message].join('|');
 }
 
 export function selectedLog() {
@@ -117,6 +119,32 @@ export function refreshSelectionDefaults() {
     if (state.logs.items && state.logs.items.length && !state.logs.items.some((item) => logKey(item) === state.selectedLogKey)) {
         state.selectedLogKey = logKey(state.logs.items[0]);
     }
+}
+
+const OPENAPI_METHOD_ORDER = ['get', 'post', 'put', 'patch', 'delete', 'options', 'head', 'trace'];
+
+export function openApiOperations(spec = state.openApiSpec) {
+    if (!spec || typeof spec !== 'object' || !spec.paths || typeof spec.paths !== 'object') return [];
+    const operations = [];
+    Object.entries(spec.paths).forEach(([path, methods]) => {
+        if (!methods || typeof methods !== 'object') return;
+        Object.entries(methods).forEach(([method, operation]) => {
+            const normalized = String(method || '').toLowerCase();
+            if (!OPENAPI_METHOD_ORDER.includes(normalized)) return;
+            operations.push({
+                key: `${normalized.toUpperCase()} ${path}`,
+                path,
+                method: normalized,
+                operation: operation || {}
+            });
+        });
+    });
+
+    operations.sort((a, b) => {
+        if (a.path !== b.path) return a.path.localeCompare(b.path);
+        return OPENAPI_METHOD_ORDER.indexOf(a.method) - OPENAPI_METHOD_ORDER.indexOf(b.method);
+    });
+    return operations;
 }
 
 export function rememberMetrics(snapshot) {

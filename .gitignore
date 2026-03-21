@@ -57,3 +57,7 @@ bin/
 **/bin
 /.qodana/
 /.local/
+**/target
+**/out
+**/dist
+/tui/Cargo.lock

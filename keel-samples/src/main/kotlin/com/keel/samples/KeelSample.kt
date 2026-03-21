@@ -6,6 +6,7 @@ import com.keel.samples.observability.ObservabilityPlugin
 import com.keel.samples.ordersample.OrderSamplePlugin
 import com.keel.samples.productsample.ProductSamplePlugin
 import io.ktor.server.http.content.*
+import io.ktor.server.plugins.cors.routing.CORS
 
 /**
  * Sample application demonstrating the Keel framework.
@@ -52,6 +53,15 @@ fun main() = runKeel {
 
     // Disable hot reload
     enablePluginHotReload(false)
+
+    // Global ktor plugin: CORS
+    server {
+        globalKtorPlugin {
+            install(CORS) {
+                anyHost()
+            }
+        }
+    }
 
     // Global: Register global static resources
     routing {
