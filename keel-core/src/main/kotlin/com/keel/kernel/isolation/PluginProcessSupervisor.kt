@@ -137,6 +137,7 @@ class PluginProcessSupervisor(
     private var processExitJob: Job? = null
     private var eventServer: ServerSocketChannel? = null
     private var controlFailureCount: Int = 0
+    private var recoveryGraceActive: Boolean = false
     private var eventChannelConnected: Boolean = false
     private var readyEventReceived: Boolean = false
     private var lastHealthLatencyMs: Long? = null
@@ -165,6 +166,11 @@ class PluginProcessSupervisor(
     suspend fun start() {
         stopping = false
         terminalFailureReported = false
+        // 显式重置，避免依赖 stopProcess() 副作用的竞态窗口
+        controlFailureCount = 0
+        readyEventReceived = false
+        // 允许新进程在启动后有宽限期，避免在握手指引完成前的健康检查失败触发重启
+        recoveryGraceActive = true
         var lastError: Throwable? = null
         val strategy = descriptor.communicationStrategy
         repeat(strategy.maxAttempts) { attempt ->
@@ -574,13 +580,16 @@ class PluginProcessSupervisor(
 
                 if (response == null) {
                     controlFailureCount += 1
-                    if (controlFailureCount > 1) {
+                    // 恢复宽限期内（进程刚启动），允许最多 2 次健康检查失败而不触发重启
+                    if (controlFailureCount > 1 && !recoveryGraceActive) {
                         reportTerminalFailure(
                             reason = "admin-lane-unavailable",
                             suggestTcpFallback = activeCommunicationMode == JvmCommunicationMode.UDS
                         )
                     }
                 } else {
+                    // 首次成功健康检查后关闭宽限期
+                    recoveryGraceActive = false
                     controlFailureCount = 0
                     lastHealthLatencyMs = System.currentTimeMillis() - startedAt
                     eventQueueDepth = response.eventQueueDepth
