@@ -1,0 +1,1816 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Keel - Commerce Showcase</title>
+    <link rel="shortcut icon" href="/favicon.svg" type="image/x-icon">
+    <style>
+        :root {
+            --bg: #f6efe4;
+            --ink: #1d2733;
+            --muted: #677489;
+            --line: rgba(29, 39, 51, 0.12);
+            --card: rgba(255, 255, 255, 0.82);
+            --accent: #a1441d;
+            --accent-2: #0f766e;
+            --accent-3: #1e40af;
+            --ok: #166534;
+            --warn: #b45309;
+            --bad: #b91c1c;
+            --shadow: 0 24px 60px rgba(47, 32, 18, 0.08);
+            --radius-lg: 32px;
+            --radius-md: 24px;
+            --radius-sm: 16px;
+            --surface: rgba(255, 255, 255, 0.58);
+            --surface-strong: rgba(255, 255, 255, 0.92);
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            min-height: 100vh;
+            font-family: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Georgia, serif;
+            color: var(--ink);
+            background:
+                radial-gradient(circle at top left, rgba(161, 68, 29, 0.15), transparent 35%),
+                radial-gradient(circle at top right, rgba(15, 118, 110, 0.15), transparent 35%),
+                linear-gradient(180deg, #fbf7f0 0%, var(--bg) 100%);
+            line-height: 1.6;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        .shell {
+            width: min(1360px, calc(100vw - 40px));
+            margin: 0 auto;
+            padding: 56px 0 88px;
+        }
+
+        .hero {
+            display: grid;
+            grid-template-columns: 1.35fr 0.95fr;
+            gap: 28px;
+            align-items: stretch;
+        }
+
+        .panel {
+            background: var(--card);
+            border: 1px solid var(--line);
+            border-radius: var(--radius-lg);
+            box-shadow: var(--shadow);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+        }
+
+        .hero-copy {
+            padding: 48px;
+            position: relative;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+        }
+
+        .hero-copy::after {
+            content: "";
+            position: absolute;
+            inset: auto -80px -110px auto;
+            width: 300px;
+            height: 300px;
+            background: radial-gradient(circle, rgba(161, 68, 29, 0.12), transparent 70%);
+            pointer-events: none;
+        }
+
+        .eyebrow {
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 18px;
+            padding: 8px 16px;
+            border-radius: 999px;
+            border: 1px solid rgba(15, 118, 110, 0.2);
+            background: rgba(15, 118, 110, 0.06);
+            color: var(--accent-2);
+            font: 600 13px/1.2 "IBM Plex Mono", "SFMono-Regular", monospace;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            align-self: flex-start;
+        }
+
+        h1 {
+            margin: 0 0 18px;
+            font-size: clamp(38px, 5vw, 68px);
+            line-height: 1.02;
+            letter-spacing: -0.03em;
+            font-weight: 700;
+        }
+
+        .lead {
+            max-width: 60ch;
+            margin: 0;
+            color: var(--muted);
+            font-size: 18px;
+            line-height: 1.65;
+        }
+
+        .hero-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 14px;
+            margin-top: 34px;
+        }
+
+        .stat {
+            padding: 18px;
+            border-radius: var(--radius-md);
+            border: 1px solid var(--line);
+            background: rgba(255, 255, 255, 0.54);
+        }
+
+        .stat strong {
+            display: block;
+            margin-bottom: 6px;
+            font-size: 22px;
+            line-height: 1.2;
+        }
+
+        .stat span {
+            display: block;
+            color: var(--muted);
+            font-size: 14px;
+            line-height: 1.5;
+        }
+
+        .cta-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+            margin-top: 24px;
+        }
+
+        .note-band {
+            margin-top: 18px;
+            padding: 16px 20px;
+            border-radius: var(--radius-sm);
+            border: 1px solid rgba(30, 64, 175, 0.12);
+            background: rgba(30, 64, 175, 0.06);
+            color: var(--ink);
+            font-size: 14px;
+        }
+
+        .session-panel {
+            padding: 36px;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        .section-title {
+            margin: 0 0 6px;
+            font: 700 22px/1.2 "Avenir Next Condensed", "Arial Narrow", sans-serif;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+        }
+
+        .section-copy {
+            margin: 0;
+            color: var(--muted);
+            font-size: 15px;
+            line-height: 1.55;
+        }
+
+        .form-grid,
+        .content-grid {
+            display: grid;
+            gap: 20px;
+        }
+
+        .form-grid {
+            grid-template-columns: 1fr 1fr;
+        }
+
+        .content-grid {
+            grid-template-columns: 1.08fr 0.92fr;
+            gap: 28px;
+            margin-top: 30px;
+        }
+
+        .stack {
+            display: grid;
+            gap: 28px;
+            align-content: start;
+        }
+
+        .card {
+            padding: 30px;
+            border-radius: var(--radius-md);
+        }
+
+        label {
+            display: block;
+            font: 600 12px/1.2 "IBM Plex Mono", "SFMono-Regular", monospace;
+            color: var(--muted);
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            margin-bottom: 10px;
+        }
+
+        input,
+        textarea {
+            width: 100%;
+            border: 1px solid rgba(29, 39, 51, 0.16);
+            border-radius: var(--radius-sm);
+            background: var(--surface-strong);
+            padding: 14px 18px;
+            font: 500 15px/1.5 "IBM Plex Sans", "Avenir Next", sans-serif;
+            color: var(--ink);
+            transition: all 0.2s ease;
+        }
+
+        textarea {
+            resize: vertical;
+            min-height: 84px;
+        }
+
+        input:focus,
+        textarea:focus {
+            outline: none;
+            border-color: var(--accent-2);
+            box-shadow: 0 0 0 4px rgba(15, 118, 110, 0.12);
+            background: #ffffff;
+        }
+
+        .button-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+        }
+
+        button,
+        .link-button {
+            border: 0;
+            border-radius: 999px;
+            padding: 14px 22px;
+            cursor: pointer;
+            font: 700 13px/1 "IBM Plex Mono", "SFMono-Regular", monospace;
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        button:hover,
+        .link-button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+        }
+
+        .primary {
+            background: var(--accent);
+            color: #fff8f2;
+        }
+
+        .secondary {
+            background: rgba(15, 118, 110, 0.12);
+            color: var(--accent-2);
+        }
+
+        .tertiary {
+            background: rgba(30, 64, 175, 0.1);
+            color: var(--accent-3);
+        }
+
+        .danger {
+            background: rgba(185, 28, 28, 0.12);
+            color: var(--bad);
+        }
+
+        .muted-button {
+            background: rgba(29, 39, 51, 0.08);
+            color: var(--ink);
+        }
+
+        .status {
+            min-height: 22px;
+            font: 600 13px/1.4 "IBM Plex Mono", "SFMono-Regular", monospace;
+            display: flex;
+            align-items: center;
+        }
+
+        .ok {
+            color: var(--ok);
+        }
+
+        .warn {
+            color: var(--warn);
+        }
+
+        .bad {
+            color: var(--bad);
+        }
+
+        .account-shell {
+            display: grid;
+            gap: 14px;
+        }
+
+        .account-card,
+        .mini-surface,
+        .activity-item,
+        .product-card,
+        .cart-item,
+        .order-card,
+        .db-card {
+            border-radius: var(--radius-sm);
+            border: 1px solid var(--line);
+            background: var(--surface);
+        }
+
+        .account-card {
+            padding: 18px 20px;
+        }
+
+        .account-header {
+            display: flex;
+            justify-content: space-between;
+            gap: 14px;
+            align-items: center;
+        }
+
+        .account-name {
+            font-size: 22px;
+            line-height: 1.1;
+            font-weight: 700;
+        }
+
+        .account-meta {
+            color: var(--muted);
+            font-size: 14px;
+        }
+
+        .badge {
+            padding: 7px 12px;
+            border-radius: 999px;
+            border: 1px solid var(--line);
+            background: rgba(255, 255, 255, 0.75);
+            font: 600 11px/1.2 "IBM Plex Mono", "SFMono-Regular", monospace;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .token-strip {
+            padding: 13px 16px;
+            border-radius: var(--radius-sm);
+            background: #1c2229;
+            color: #dfeeff;
+            font: 400 13px/1.6 "IBM Plex Mono", "SFMono-Regular", monospace;
+            overflow: auto;
+        }
+
+        .product-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 16px;
+            margin-top: 20px;
+        }
+
+        .product-card {
+            padding: 18px;
+            display: grid;
+            gap: 12px;
+        }
+
+        .product-top {
+            display: flex;
+            justify-content: space-between;
+            gap: 12px;
+            align-items: flex-start;
+        }
+
+        .product-name {
+            font-size: 21px;
+            line-height: 1.15;
+            font-weight: 700;
+        }
+
+        .product-copy {
+            color: var(--muted);
+            font-size: 14px;
+            line-height: 1.55;
+            min-height: 66px;
+        }
+
+        .price-row {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 14px;
+        }
+
+        .price {
+            font-size: 26px;
+            line-height: 1;
+            font-weight: 700;
+            white-space: nowrap;
+        }
+
+        .product-actions {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 10px;
+            width: 100%;
+        }
+
+        .product-actions button {
+            width: 100%;
+            min-width: 0;
+            padding-inline: 18px;
+            white-space: nowrap;
+        }
+
+        .pill-row,
+        .db-pill-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+
+        .pill {
+            padding: 8px 12px;
+            border-radius: 999px;
+            border: 1px solid var(--line);
+            background: rgba(255, 255, 255, 0.78);
+            font: 500 12px/1.2 "IBM Plex Mono", "SFMono-Regular", monospace;
+        }
+
+        .cart-shell,
+        .orders-shell,
+        .admin-shell,
+        .activity-shell,
+        .inventory-shell {
+            display: grid;
+            gap: 14px;
+            margin-top: 18px;
+        }
+
+        .cart-item,
+        .order-card,
+        .activity-item {
+            padding: 18px;
+        }
+
+        .cart-item-top,
+        .order-top,
+        .db-grid {
+            display: flex;
+            justify-content: space-between;
+            gap: 14px;
+            align-items: flex-start;
+        }
+
+        .cart-item-title,
+        .order-title {
+            font-size: 18px;
+            font-weight: 700;
+            line-height: 1.2;
+        }
+
+        .meta-line {
+            color: var(--muted);
+            font-size: 13px;
+            line-height: 1.5;
+        }
+
+        .summary-grid {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 14px;
+            margin-top: 18px;
+        }
+
+        .summary-card,
+        .db-card {
+            padding: 18px;
+        }
+
+        .summary-value,
+        .db-value {
+            font-size: 30px;
+            line-height: 1;
+            font-weight: 700;
+        }
+
+        .summary-label,
+        .db-label {
+            margin-top: 8px;
+            font: 600 12px/1.3 "IBM Plex Mono", "SFMono-Regular", monospace;
+            color: var(--muted);
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+        }
+
+        .spotlight {
+            margin-top: 18px;
+            padding: 20px;
+            border-radius: var(--radius-sm);
+            border: 1px solid rgba(30, 64, 175, 0.12);
+            background: rgba(30, 64, 175, 0.06);
+        }
+
+        .spotlight h3 {
+            margin: 0 0 8px;
+            font-size: 18px;
+        }
+
+        .detail-list {
+            display: grid;
+            gap: 10px;
+            margin-top: 14px;
+        }
+
+        .detail-row {
+            display: flex;
+            justify-content: space-between;
+            gap: 14px;
+            color: var(--muted);
+            font-size: 14px;
+        }
+
+        .detail-row strong {
+            color: var(--ink);
+            font-weight: 600;
+        }
+
+        .empty-state {
+            padding: 26px 18px;
+            text-align: center;
+            color: var(--muted);
+            border-radius: var(--radius-sm);
+            border: 1px dashed var(--line);
+            background: rgba(255, 255, 255, 0.4);
+        }
+
+        .activity-item strong {
+            display: block;
+            margin-bottom: 4px;
+            font-size: 15px;
+        }
+
+        .form-card {
+            padding: 18px;
+            border-radius: var(--radius-sm);
+            border: 1px solid var(--line);
+            background: rgba(255, 255, 255, 0.7);
+            margin-top: 18px;
+        }
+
+        .form-card-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 14px;
+        }
+
+        .activity-item code {
+            display: inline-block;
+            margin-top: 8px;
+            padding: 4px 8px;
+            border-radius: 999px;
+            background: rgba(255, 255, 255, 0.7);
+            font: 600 11px/1.2 "IBM Plex Mono", "SFMono-Regular", monospace;
+        }
+
+        details {
+            margin-top: 18px;
+            border-radius: var(--radius-sm);
+            border: 1px solid var(--line);
+            background: rgba(255, 255, 255, 0.46);
+            overflow: hidden;
+        }
+
+        summary {
+            cursor: pointer;
+            padding: 16px 18px;
+            font: 700 12px/1.2 "IBM Plex Mono", "SFMono-Regular", monospace;
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+            color: var(--muted);
+        }
+
+        pre {
+            margin: 0;
+            min-height: 120px;
+            max-height: 320px;
+            overflow: auto;
+            background: #191c20;
+            color: #e5f0ff;
+            padding: 18px;
+            font: 400 13px/1.6 "IBM Plex Mono", "SFMono-Regular", monospace;
+        }
+
+        .mini-copy {
+            color: var(--muted);
+            font-size: 13px;
+            margin-top: 12px;
+        }
+
+        @media (max-width: 1180px) {
+
+            .hero,
+            .content-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .shell {
+                width: 100%;
+                padding: 32px 18px 72px;
+            }
+        }
+
+        @media (max-width: 760px) {
+
+            .hero-grid,
+            .form-grid,
+            .product-grid,
+            .summary-grid,
+            .form-card-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .product-actions {
+                grid-template-columns: 1fr;
+                justify-content: stretch;
+            }
+
+            .product-actions button {
+                width: 100%;
+                min-width: 0;
+            }
+
+            .hero-copy,
+            .session-panel,
+            .card {
+                padding: 24px;
+            }
+
+            h1 {
+                font-size: 34px;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="shell">
+        <section class="hero">
+            <div class="panel hero-copy">
+                <div class="eyebrow">Keel Commerce / Auth / Database Showcase</div>
+                <h1>Business UI first.<br>Plugins underneath.</h1>
+                <p class="lead">
+                    This page now behaves like a storefront and operations console instead of an API tester.
+                    <code>authsample</code> still owns login and session state, <code>productsample</code>
+                    owns storefront discovery, and <code>ordersample</code> owns Cart &amp; Checkout, order history,
+                    and admin transitions on top of <code>keel-exposed-starter</code> persistence.
+                </p>
+                <div class="hero-grid">
+                    <div class="stat">
+                        <strong>Storefront</strong>
+                        <span>Browse catalog cards, add products with one click, and checkout from a real cart
+                            summary.</span>
+                    </div>
+                    <div class="stat">
+                        <strong>/productsample</strong>
+                        <span>Catalog browsing and merchandising highlights now come from a dedicated product
+                            plugin.</span>
+                    </div>
+                    <div class="stat">
+                        <strong>/ordersample</strong>
+                        <span>Cart, checkout, order timeline, and admin transitions stay in the order domain.</span>
+                    </div>
+                </div>
+                <div class="note-band">
+                    Recommended flow: sign in as <code>user</code>, add a couple of catalog items, checkout,
+                    then switch to <code>admin</code> and move seeded orders through their next statuses.
+                </div>
+                <div class="cta-row">
+                    <a class="link-button secondary" href="/">Open Control Panel</a>
+                    <button class="muted-button" id="refresh-all-btn" type="button">Refresh All Panels</button>
+                </div>
+            </div>
+
+            <aside class="panel session-panel">
+                <div>
+                    <h2 class="section-title">Sign In</h2>
+                    <p class="section-copy">
+                        Session state still lives in the auth plugin. The UI now surfaces it as an account summary
+                        instead of a raw token console.
+                    </p>
+                </div>
+                <div class="form-grid">
+                    <div>
+                        <label for="username">Username</label>
+                        <input id="username" value="user" autocomplete="username">
+                    </div>
+                    <div>
+                        <label for="password">Password</label>
+                        <input id="password" type="password" value="user123" autocomplete="current-password">
+                    </div>
+                </div>
+                <div class="button-row">
+                    <button class="primary" id="login-btn" type="button">Login</button>
+                    <button class="secondary" id="preset-user-btn" type="button">Preset User</button>
+                    <button class="tertiary" id="preset-admin-btn" type="button">Preset Admin</button>
+                </div>
+                <div class="status" id="session-status"></div>
+
+                <div class="account-shell">
+                    <div class="account-card">
+                        <div class="account-header">
+                            <div>
+                                <div class="account-name" id="account-name">Guest Session</div>
+                                <div class="account-meta" id="account-meta">Browse catalog without signing in. Protected
+                                    actions will ask for a token.</div>
+                            </div>
+                            <div class="badge" id="role-badge">No Session</div>
+                        </div>
+                    </div>
+                    <div class="mini-surface" style="padding: 16px 18px;">
+                        <label for="checkout-note" style="margin-bottom: 8px;">Checkout Note</label>
+                        <textarea id="checkout-note"
+                            placeholder="Optional note stored with the order.">Ship in the next available batch.</textarea>
+                        <div class="mini-copy">This note becomes part of the order card after checkout.</div>
+                    </div>
+                    <div>
+                        <label>Session Token</label>
+                        <div class="token-strip" id="token-preview">No token yet</div>
+                    </div>
+                    <div class="button-row">
+                        <button class="secondary" id="load-profile-btn" type="button">Refresh Profile</button>
+                        <button class="tertiary" id="refresh-token-btn" type="button">Refresh Token</button>
+                    </div>
+                </div>
+            </aside>
+        </section>
+
+        <section class="content-grid">
+            <div class="stack">
+                <article class="panel card">
+                    <h2 class="section-title">Storefront</h2>
+                    <p class="section-copy">
+                        Public catalog cards now come from <code>productsample</code>, so the sample shows a real
+                        product domain feeding the order domain instead of one plugin owning both.
+                    </p>
+                    <div class="pill-row" style="margin-top: 16px;">
+                        <span class="pill">GET /api/plugins/productsample/catalog</span>
+                        <span class="pill">Public Route</span>
+                        <span class="pill">Business Cards</span>
+                    </div>
+                    <div class="db-pill-row" id="collection-pills" style="margin-top: 16px;"></div>
+                    <div class="product-grid" id="catalog-grid"></div>
+                </article>
+
+                <article class="panel card">
+                    <h2 class="section-title">Cart &amp; Checkout</h2>
+                    <p class="section-copy">
+                        Cart &amp; Checkout no longer shows raw payloads first. You see line items, subtotal, and
+                        primary business actions, with technical details moved below.
+                    </p>
+                    <div class="summary-grid" id="cart-summary-grid">
+                        <div class="summary-card">
+                            <div class="summary-value" id="cart-item-count">0</div>
+                            <div class="summary-label">Items In Cart</div>
+                        </div>
+                        <div class="summary-card">
+                            <div class="summary-value" id="cart-subtotal">$0.00</div>
+                            <div class="summary-label">Subtotal</div>
+                        </div>
+                        <div class="summary-card">
+                            <div class="summary-value" id="checkout-cta-copy">Ready</div>
+                            <div class="summary-label">Checkout State</div>
+                        </div>
+                    </div>
+                    <div class="cart-shell" id="cart-list"></div>
+                    <div class="button-row" style="margin-top: 18px;">
+                        <button class="secondary" id="refresh-cart-btn" type="button">Refresh Cart</button>
+                        <button class="primary" id="checkout-btn" type="button">Checkout</button>
+                    </div>
+                </article>
+
+                <article class="panel card">
+                    <h2 class="section-title">Database Story</h2>
+                    <p class="section-copy">
+                        The business UI stays primary, but the sample still explains how
+                        <code>keel-exposed-starter</code> is backing it under the hood.
+                    </p>
+                    <div class="summary-grid" id="db-grid"></div>
+                    <div style="margin-top: 18px;">
+                        <label>Physical Tables</label>
+                        <div class="db-pill-row" id="table-pills"></div>
+                    </div>
+                    <div style="margin-top: 16px;">
+                        <label>Audit Columns</label>
+                        <div class="db-pill-row" id="audit-pills"></div>
+                    </div>
+                    <p class="mini-copy">This complements the older <code>dbdemo</code> plugin rather than replacing it.
+                    </p>
+                </article>
+            </div>
+
+            <aside class="stack">
+                <article class="panel card">
+                    <h2 class="section-title">Order Journey</h2>
+                    <p class="section-copy">
+                        Customers now see their orders as a timeline of business states, not a sequence of JSON blobs.
+                    </p>
+                    <div class="spotlight" id="order-spotlight">
+                        <h3>Nothing selected yet</h3>
+                        <p class="section-copy">Place an order or open one from the list below to inspect its business
+                            detail and audit trail.</p>
+                    </div>
+                    <div class="orders-shell" id="orders-list"></div>
+                </article>
+
+                <article class="panel card">
+                    <h2 class="section-title">Admin Workbench</h2>
+                    <p class="section-copy">
+                        Admin actions are rendered as queue cards and merchandising controls, so the sample covers both
+                        product operations and order operations.
+                    </p>
+                    <div class="summary-grid" id="admin-summary-grid"></div>
+                    <div class="spotlight" id="product-merchandising" style="margin-top: 18px;">
+                        <h3>Merchandising is locked</h3>
+                        <p class="section-copy">Sign in as admin to load product plugin highlights and collection
+                            coverage.</p>
+                    </div>
+                    <div class="form-card">
+                        <label style="margin-bottom: 12px;">Product Management</label>
+                        <input id="product-form-product-id" type="hidden">
+                        <div class="form-card-grid">
+                            <div>
+                                <label for="product-form-title">Title</label>
+                                <input id="product-form-title" placeholder="Focus Lamp Pro">
+                            </div>
+                            <div>
+                                <label for="product-form-price">Price (USD)</label>
+                                <input id="product-form-price" type="number" min="1" step="0.01" placeholder="129.00">
+                            </div>
+                            <div>
+                                <label for="product-form-badge">Badge</label>
+                                <input id="product-form-badge" placeholder="New Arrival">
+                            </div>
+                            <div>
+                                <label for="product-form-collection">Collection</label>
+                                <input id="product-form-collection" placeholder="Workspace">
+                            </div>
+                        </div>
+                        <div style="margin-top: 14px;">
+                            <label for="product-form-description">Description</label>
+                            <textarea id="product-form-description"
+                                placeholder="A concise product story for the storefront card."></textarea>
+                        </div>
+                        <div class="button-row" style="margin-top: 14px;">
+                            <button class="primary" id="save-product-btn" type="button">Save Product</button>
+                            <button class="secondary" id="reset-product-form-btn" type="button">New Product</button>
+                        </div>
+                        <div class="status" id="product-form-status" style="margin-top: 12px;"></div>
+                        <div class="mini-copy">Create or edit a product here, then switch back to the storefront and buy
+                            it immediately.</div>
+                    </div>
+                    <div class="inventory-shell" id="admin-product-list"></div>
+                    <div class="admin-shell" id="admin-orders-list"></div>
+                </article>
+
+                <article class="panel card">
+                    <h2 class="section-title">Activity Feed</h2>
+                    <p class="section-copy">
+                        Technical detail is still available, but it sits behind a human-readable activity stream instead
+                        of dominating the layout.
+                    </p>
+                    <div class="activity-shell" id="activity-list"></div>
+                    <details>
+                        <summary>Technical Snapshot</summary>
+                        <pre id="technical-output">{
+  "authHeader": null,
+  "refreshToken": null,
+  "lastAction": "idle"
+}</pre>
+                    </details>
+                </article>
+            </aside>
+        </section>
+    </div>
+
+    <script>
+        const state = {
+            authHeader: "",
+            refreshToken: "",
+            lastAction: "idle",
+            profile: null,
+            catalog: [],
+            productCollections: [],
+            productMerchandising: null,
+            adminCatalog: [],
+            cart: null,
+            orders: [],
+            focusedOrder: null,
+            adminOrders: [],
+            adminSummary: null,
+            dbStats: null,
+            activity: []
+        };
+
+        const usernameInput = document.getElementById("username");
+        const passwordInput = document.getElementById("password");
+        const checkoutNoteInput = document.getElementById("checkout-note");
+        const statusNode = document.getElementById("session-status");
+        const technicalOutput = document.getElementById("technical-output");
+        const productFormProductId = document.getElementById("product-form-product-id");
+        const productFormTitle = document.getElementById("product-form-title");
+        const productFormPrice = document.getElementById("product-form-price");
+        const productFormBadge = document.getElementById("product-form-badge");
+        const productFormCollection = document.getElementById("product-form-collection");
+        const productFormDescription = document.getElementById("product-form-description");
+        const productFormStatusNode = document.getElementById("product-form-status");
+        const saveProductButton = document.getElementById("save-product-btn");
+        const resetProductFormButton = document.getElementById("reset-product-form-btn");
+
+        function escapeHtml(value) {
+            return String(value ?? "")
+                .replaceAll("&", "&amp;")
+                .replaceAll("<", "&lt;")
+                .replaceAll(">", "&gt;")
+                .replaceAll('"', "&quot;")
+                .replaceAll("'", "&#39;");
+        }
+
+        function formatMoney(cents) {
+            return new Intl.NumberFormat("en-US", {
+                style: "currency",
+                currency: "USD"
+            }).format((Number(cents || 0)) / 100);
+        }
+
+        function shortToken(token) {
+            if (!token) return "No token yet";
+            if (token.length < 28) return token;
+            return `${token.slice(0, 18)} ... ${token.slice(-10)}`;
+        }
+
+        function setPreset(kind) {
+            if (kind === "admin") {
+                usernameInput.value = "admin";
+                passwordInput.value = "admin123";
+            } else {
+                usernameInput.value = "user";
+                passwordInput.value = "user123";
+            }
+        }
+
+        function pushActivity(title, result, detail) {
+            state.activity.unshift({
+                title,
+                status: result.status,
+                ok: result.ok,
+                detail,
+                at: new Date().toLocaleTimeString("en-US", { hour12: false })
+            });
+            state.activity = state.activity.slice(0, 8);
+            renderActivity();
+        }
+
+        function updateStatus(message, tone = "ok") {
+            statusNode.textContent = message;
+            statusNode.className = `status ${tone}`;
+        }
+
+        function updateProductFormStatus(message, tone = "ok") {
+            productFormStatusNode.textContent = message;
+            productFormStatusNode.className = `status ${tone}`;
+        }
+
+        function setProductFormEnabled(enabled) {
+            [
+                productFormTitle,
+                productFormPrice,
+                productFormBadge,
+                productFormCollection,
+                productFormDescription,
+                saveProductButton,
+                resetProductFormButton
+            ].forEach((node) => {
+                node.disabled = !enabled;
+            });
+        }
+
+        function renderTechnicalSnapshot(extra = {}) {
+            technicalOutput.textContent = JSON.stringify({
+                authHeader: state.authHeader || null,
+                refreshToken: state.refreshToken || null,
+                lastAction: state.lastAction,
+                profile: state.profile,
+                focusedOrder: state.focusedOrder?.orderId || null,
+                ...extra
+            }, null, 2);
+        }
+
+        function renderAccount() {
+            const nameNode = document.getElementById("account-name");
+            const metaNode = document.getElementById("account-meta");
+            const badgeNode = document.getElementById("role-badge");
+            const tokenNode = document.getElementById("token-preview");
+
+            if (!state.profile) {
+                nameNode.textContent = "Guest Session";
+                metaNode.textContent = "Browse catalog without signing in. Protected actions will ask for a token.";
+                badgeNode.textContent = "No Session";
+                tokenNode.textContent = "No token yet";
+                return;
+            }
+
+            nameNode.textContent = state.profile.displayName;
+            metaNode.textContent = `${state.profile.userId} · ${state.profile.role} role`;
+            badgeNode.textContent = state.profile.role;
+            tokenNode.textContent = shortToken(state.authHeader);
+        }
+
+        function renderCatalog() {
+            const grid = document.getElementById("catalog-grid");
+            const collectionsNode = document.getElementById("collection-pills");
+            collectionsNode.innerHTML = state.productCollections.length
+                ? state.productCollections.map((collection) => `<span class="pill">${escapeHtml(collection.name)}</span>`).join("")
+                : `<span class="pill">Catalog collections load here</span>`;
+            if (!state.catalog.length) {
+                grid.innerHTML = `<div class="empty-state" style="grid-column: 1 / -1;">Catalog is loading.</div>`;
+                return;
+            }
+
+            grid.innerHTML = state.catalog.map((item) => `
+            <div class="product-card">
+                <div class="product-top">
+                    <div>
+                        <div class="product-name">${escapeHtml(item.title)}</div>
+                        <div class="meta-line">${escapeHtml(item.productId)}</div>
+                    </div>
+                    <div class="badge">${escapeHtml(item.badge)}</div>
+                </div>
+                <div class="product-copy">${escapeHtml(item.description)}</div>
+                <div class="price-row">
+                    <div class="price">${formatMoney(item.priceCents)}</div>
+                    <div class="product-actions">
+                        <button class="secondary" type="button" onclick="addProductToCart('${escapeHtml(item.productId)}')">Add To Cart</button>
+                        <button class="primary" type="button" onclick="buyNow('${escapeHtml(item.productId)}')">Buy Now</button>
+                    </div>
+                </div>
+            </div>
+        `).join("");
+        }
+
+        function renderCart() {
+            const countNode = document.getElementById("cart-item-count");
+            const subtotalNode = document.getElementById("cart-subtotal");
+            const ctaNode = document.getElementById("checkout-cta-copy");
+            const listNode = document.getElementById("cart-list");
+
+            const cart = state.cart;
+            if (!cart) {
+                countNode.textContent = "0";
+                subtotalNode.textContent = formatMoney(0);
+                ctaNode.textContent = "Awaiting Sign-In";
+                listNode.innerHTML = `<div class="empty-state">Sign in and add a product to begin Cart &amp; Checkout.</div>`;
+                return;
+            }
+
+            countNode.textContent = String(cart.totalItems || 0);
+            subtotalNode.textContent = formatMoney(cart.subtotalCents || 0);
+            ctaNode.textContent = cart.totalItems > 0 ? "Ready" : "Empty";
+
+            if (!cart.items.length) {
+                listNode.innerHTML = `<div class="empty-state">Your cart is empty. Pick something from the storefront above.</div>`;
+                return;
+            }
+
+            listNode.innerHTML = cart.items.map((item) => `
+            <div class="cart-item">
+                <div class="cart-item-top">
+                    <div>
+                        <div class="cart-item-title">${escapeHtml(item.title)}</div>
+                        <div class="meta-line">${escapeHtml(item.badge)} · Qty ${item.quantity}</div>
+                    </div>
+                    <div class="price">${formatMoney(item.lineTotalCents)}</div>
+                </div>
+                <div class="button-row" style="margin-top: 14px;">
+                    <button class="danger" type="button" onclick="removeProductFromCart('${escapeHtml(item.productId)}')">Remove</button>
+                </div>
+            </div>
+        `).join("");
+        }
+
+        function renderOrderSpotlight() {
+            const node = document.getElementById("order-spotlight");
+            if (!state.focusedOrder) {
+                node.innerHTML = `
+                <h3>Nothing selected yet</h3>
+                <p class="section-copy">Place an order or open one from the list below to inspect its business detail and audit trail.</p>
+            `;
+                return;
+            }
+
+            const order = state.focusedOrder;
+            node.innerHTML = `
+            <h3>${escapeHtml(order.orderId)} · ${escapeHtml(order.status)}</h3>
+            <p class="section-copy">${escapeHtml(order.ownerDisplayName)} · ${formatMoney(order.totalCents)} · ${escapeHtml(order.note || "No note")}</p>
+            <div class="detail-list">
+                ${order.items.map((item) => `
+                    <div class="detail-row">
+                        <span>${escapeHtml(item.title)} × ${item.quantity}</span>
+                        <strong>${formatMoney(item.lineTotalCents)}</strong>
+                    </div>
+                `).join("")}
+            </div>
+            <div class="detail-list" style="margin-top: 16px;">
+                <div class="detail-row"><span>Created At</span><strong>${escapeHtml(order.audit.createdAt)}</strong></div>
+                <div class="detail-row"><span>Updated At</span><strong>${escapeHtml(order.audit.updatedAt)}</strong></div>
+                <div class="detail-row"><span>Created By</span><strong>${escapeHtml(order.audit.createdBy || "system")}</strong></div>
+                <div class="detail-row"><span>Updated By</span><strong>${escapeHtml(order.audit.updatedBy || "system")}</strong></div>
+            </div>
+        `;
+        }
+
+        function renderOrders() {
+            const listNode = document.getElementById("orders-list");
+            if (!state.profile) {
+                listNode.innerHTML = `<div class="empty-state">Login to unlock your order timeline.</div>`;
+                renderOrderSpotlight();
+                return;
+            }
+
+            if (!state.orders.length) {
+                listNode.innerHTML = `<div class="empty-state">No orders yet. Checkout from the cart to create one.</div>`;
+                renderOrderSpotlight();
+                return;
+            }
+
+            listNode.innerHTML = state.orders.map((order) => `
+            <div class="order-card">
+                <div class="order-top">
+                    <div>
+                        <div class="order-title">${escapeHtml(order.orderId)}</div>
+                        <div class="meta-line">${escapeHtml(order.status)} · ${order.itemCount} line items · ${escapeHtml(order.createdAt)}</div>
+                    </div>
+                    <div class="price">${formatMoney(order.totalCents)}</div>
+                </div>
+                <div class="meta-line" style="margin-top: 10px;">${escapeHtml(order.note || "No customer note")}</div>
+                <div class="button-row" style="margin-top: 14px;">
+                    <button class="secondary" type="button" onclick="openOrderDetail('${escapeHtml(order.orderId)}')">View Detail</button>
+                    ${order.canCancel ? `<button class="danger" type="button" onclick="cancelOrder('${escapeHtml(order.orderId)}')">Cancel</button>` : ""}
+                </div>
+            </div>
+        `).join("");
+            renderOrderSpotlight();
+        }
+
+        function renderAdmin() {
+            const summaryNode = document.getElementById("admin-summary-grid");
+            const listNode = document.getElementById("admin-orders-list");
+            const merchNode = document.getElementById("product-merchandising");
+            const catalogNode = document.getElementById("admin-product-list");
+
+            if (!state.profile || state.profile.role !== "admin") {
+                setProductFormEnabled(false);
+                updateProductFormStatus("Sign in as admin to create or edit products.", "warn");
+                summaryNode.innerHTML = `
+                <div class="summary-card"><div class="summary-value">403</div><div class="summary-label">Admin Only</div></div>
+                <div class="summary-card"><div class="summary-value">Role</div><div class="summary-label">Sign In As Admin</div></div>
+                <div class="summary-card"><div class="summary-value">Queue</div><div class="summary-label">Locked</div></div>
+            `;
+                merchNode.innerHTML = `
+                <h3>Merchandising is locked</h3>
+                <p class="section-copy">Sign in as admin to load product plugin highlights and collection coverage.</p>
+            `;
+                catalogNode.innerHTML = `<div class="empty-state">Sign in as admin to manage storefront products.</div>`;
+                listNode.innerHTML = `<div class="empty-state">Switch to the admin preset to unlock the operations queue.</div>`;
+                return;
+            }
+
+            setProductFormEnabled(true);
+            updateProductFormStatus(productFormProductId.value ? `Editing ${productFormProductId.value}` : "Ready to create a new storefront product.", "ok");
+
+            const summary = state.adminSummary || {
+                totalOrders: 0,
+                placedOrders: 0,
+                processingOrders: 0
+            };
+            summaryNode.innerHTML = `
+            <div class="summary-card"><div class="summary-value">${summary.totalOrders}</div><div class="summary-label">Total Orders</div></div>
+            <div class="summary-card"><div class="summary-value">${summary.placedOrders}</div><div class="summary-label">Ready For Ops</div></div>
+            <div class="summary-card"><div class="summary-value">${summary.processingOrders}</div><div class="summary-label">In Process</div></div>
+        `;
+
+            if (state.productMerchandising) {
+                merchNode.innerHTML = `
+                <h3>Product Plugin Highlights</h3>
+                <p class="section-copy">${state.productMerchandising.totalProducts} products across ${state.productMerchandising.totalCollections} collections are currently featured.</p>
+                <div class="db-pill-row" style="margin-top: 14px;">
+                    ${state.productMerchandising.featuredCollections.map((name) => `<span class="pill">${escapeHtml(name)}</span>`).join("")}
+                </div>
+                <p class="mini-copy">Featured products: ${state.productMerchandising.featuredProducts.map(escapeHtml).join(", ")}</p>
+            `;
+            } else {
+                merchNode.innerHTML = `
+                <h3>Product Plugin Highlights</h3>
+                <p class="section-copy">Merchandising data is not available yet.</p>
+            `;
+            }
+
+            if (!state.adminCatalog.length) {
+                catalogNode.innerHTML = `<div class="empty-state">No products loaded for admin management yet.</div>`;
+            } else {
+                catalogNode.innerHTML = state.adminCatalog.map((item) => `
+                <div class="order-card">
+                    <div class="order-top">
+                        <div>
+                            <div class="order-title">${escapeHtml(item.title)}</div>
+                            <div class="meta-line">${escapeHtml(item.productId)} · ${escapeHtml(item.collection)} · ${escapeHtml(item.badge)}</div>
+                        </div>
+                        <div class="price">${formatMoney(item.priceCents)}</div>
+                    </div>
+                    <div class="meta-line" style="margin-top: 10px;">${escapeHtml(item.description)}</div>
+                    <div class="button-row" style="margin-top: 14px;">
+                        <button class="secondary" type="button" onclick="populateProductForm('${escapeHtml(item.productId)}')">Edit</button>
+                        <button class="tertiary" type="button" onclick="buyNow('${escapeHtml(item.productId)}')">Buy Test</button>
+                        <button class="danger" type="button" onclick="archiveProduct('${escapeHtml(item.productId)}')">Archive</button>
+                    </div>
+                </div>
+            `).join("");
+            }
+
+            if (!state.adminOrders.length) {
+                listNode.innerHTML = `<div class="empty-state">Admin queue is empty.</div>`;
+                return;
+            }
+
+            listNode.innerHTML = state.adminOrders.map((order) => {
+                const nextAction = order.status === "PLACED"
+                    ? `<button class="tertiary" type="button" onclick="advanceOrder('${escapeHtml(order.orderId)}', 'PROCESSING')">Move To Processing</button>`
+                    : order.status === "PROCESSING"
+                        ? `<button class="primary" type="button" onclick="advanceOrder('${escapeHtml(order.orderId)}', 'FULFILLED')">Mark Fulfilled</button>`
+                        : "";
+
+                return `
+                <div class="order-card">
+                    <div class="order-top">
+                        <div>
+                            <div class="order-title">${escapeHtml(order.orderId)}</div>
+                            <div class="meta-line">${escapeHtml(order.ownerDisplayName)} · ${escapeHtml(order.status)}</div>
+                        </div>
+                        <div class="price">${formatMoney(order.totalCents)}</div>
+                    </div>
+                    <div class="meta-line" style="margin-top: 10px;">${order.itemCount} line items · ${escapeHtml(order.note || "No customer note")}</div>
+                    <div class="button-row" style="margin-top: 14px;">
+                        <button class="secondary" type="button" onclick="openOrderDetail('${escapeHtml(order.orderId)}')">Inspect</button>
+                        ${nextAction}
+                    </div>
+                </div>
+            `;
+            }).join("");
+        }
+
+        function renderDbStats() {
+            const gridNode = document.getElementById("db-grid");
+            const tableNode = document.getElementById("table-pills");
+            const auditNode = document.getElementById("audit-pills");
+
+            if (!state.dbStats) {
+                gridNode.innerHTML = `
+                <div class="db-card"><div class="db-value">...</div><div class="db-label">Waiting For Data</div></div>
+                <div class="db-card"><div class="db-value">H2</div><div class="db-label">Engine</div></div>
+                <div class="db-card"><div class="db-value">Audit</div><div class="db-label">Columns</div></div>
+            `;
+                tableNode.innerHTML = `<span class="pill">No data yet</span>`;
+                auditNode.innerHTML = `<span class="pill">No data yet</span>`;
+                return;
+            }
+
+            const stats = state.dbStats;
+            gridNode.innerHTML = `
+            <div class="db-card"><div class="db-value">${stats.productCount}</div><div class="db-label">Catalog SKUs</div></div>
+            <div class="db-card"><div class="db-value">${stats.cartItemCount}</div><div class="db-label">Cart Lines</div></div>
+            <div class="db-card"><div class="db-value">${stats.orderCount}</div><div class="db-label">Orders</div></div>
+        `;
+            tableNode.innerHTML = stats.tableNames.map((name) => `<span class="pill">${escapeHtml(name)}</span>`).join("");
+            auditNode.innerHTML = stats.auditColumns.map((name) => `<span class="pill">${escapeHtml(name)}</span>`).join("");
+        }
+
+        function renderActivity() {
+            const node = document.getElementById("activity-list");
+            if (!state.activity.length) {
+                node.innerHTML = `<div class="empty-state">No activity yet. Login or interact with the storefront to populate the feed.</div>`;
+                return;
+            }
+
+            node.innerHTML = state.activity.map((item) => `
+            <div class="activity-item">
+                <strong>${escapeHtml(item.title)}</strong>
+                <div class="meta-line">${escapeHtml(item.detail)} · ${escapeHtml(item.at)}</div>
+                <code>${item.ok ? "OK" : "ERR"} ${item.status}</code>
+            </div>
+        `).join("");
+        }
+
+        async function requestJson(url, options = {}) {
+            const headers = new Headers(options.headers || {});
+            if (state.authHeader && !headers.has("Authorization")) {
+                headers.set("Authorization", state.authHeader);
+            }
+            if (options.body && !headers.has("Content-Type")) {
+                headers.set("Content-Type", "application/json");
+            }
+            const response = await fetch(url, { ...options, headers });
+            const text = await response.text();
+            let parsed;
+            try {
+                parsed = text ? JSON.parse(text) : null;
+            } catch (_) {
+                parsed = { raw: text };
+            }
+            return { ok: response.ok, status: response.status, data: parsed };
+        }
+
+        function payloadOf(result) {
+            const body = result?.data;
+            if (body && typeof body === "object" && "code" in body && "data" in body) {
+                return body.data;
+            }
+            return body;
+        }
+
+        async function refreshCatalog() {
+            const result = await requestJson("/api/plugins/productsample/catalog");
+            const payload = payloadOf(result);
+            if (result.ok) {
+                state.catalog = payload?.items || [];
+                state.productCollections = payload?.collections || [];
+                renderCatalog();
+            }
+            pushActivity("Catalog Refreshed", result, "Public storefront data loaded from productsample");
+            renderTechnicalSnapshot({ catalogStatus: result.status });
+            return result;
+        }
+
+        async function refreshProfile() {
+            if (!state.authHeader) {
+                state.profile = null;
+                renderAccount();
+                return { ok: false, status: 401, data: null };
+            }
+            const result = await requestJson("/api/plugins/authsample/profile");
+            const payload = payloadOf(result);
+            if (result.ok) {
+                state.profile = payload;
+                renderAccount();
+            }
+            pushActivity("Profile Sync", result, result.ok ? "Customer account refreshed" : "Profile request failed");
+            renderTechnicalSnapshot({ profileStatus: result.status });
+            return result;
+        }
+
+        async function refreshCart() {
+            if (!state.authHeader) {
+                state.cart = null;
+                renderCart();
+                return { ok: false, status: 401, data: null };
+            }
+            const result = await requestJson("/api/plugins/ordersample/cart");
+            const payload = payloadOf(result);
+            if (result.ok) {
+                state.cart = payload;
+                renderCart();
+            }
+            pushActivity("Cart Sync", result, result.ok ? "Shopping bag refreshed" : "Cart request failed");
+            renderTechnicalSnapshot({ cartStatus: result.status });
+            return result;
+        }
+
+        async function refreshOrders() {
+            if (!state.authHeader) {
+                state.orders = [];
+                state.focusedOrder = null;
+                renderOrders();
+                return { ok: false, status: 401, data: null };
+            }
+            const result = await requestJson("/api/plugins/ordersample/orders");
+            const payload = payloadOf(result);
+            if (result.ok) {
+                state.orders = payload?.orders || [];
+                if (!state.focusedOrder && state.orders.length > 0) {
+                    await openOrderDetail(state.orders[0].orderId, false);
+                } else {
+                    renderOrders();
+                }
+            }
+            pushActivity("Order Timeline", result, result.ok ? "Customer order list refreshed" : "Order list failed");
+            renderTechnicalSnapshot({ ordersStatus: result.status });
+            return result;
+        }
+
+        async function refreshAdminData() {
+            if (!state.profile || state.profile.role !== "admin") {
+                state.adminOrders = [];
+                state.adminSummary = null;
+                state.productMerchandising = null;
+                renderAdmin();
+                return;
+            }
+
+            const [ordersResult, summaryResult, merchandisingResult] = await Promise.all([
+                requestJson("/api/plugins/ordersample/admin/orders"),
+                requestJson("/api/plugins/ordersample/admin/summary"),
+                requestJson("/api/plugins/productsample/admin/merchandising")
+            ]);
+            const catalogResult = await requestJson("/api/plugins/productsample/admin/catalog");
+            const ordersPayload = payloadOf(ordersResult);
+            const summaryPayload = payloadOf(summaryResult);
+            const merchandisingPayload = payloadOf(merchandisingResult);
+            const catalogPayload = payloadOf(catalogResult);
+
+            if (ordersResult.ok) {
+                state.adminOrders = ordersPayload?.orders || [];
+            }
+            if (summaryResult.ok) {
+                state.adminSummary = summaryPayload;
+            }
+            if (merchandisingResult.ok) {
+                state.productMerchandising = merchandisingPayload;
+            }
+            if (catalogResult.ok) {
+                state.adminCatalog = catalogPayload?.items || [];
+            }
+            renderAdmin();
+            pushActivity("Admin Queue", ordersResult, ordersResult.ok ? "Operations queue refreshed" : "Admin order list failed");
+            pushActivity("Admin Summary", summaryResult, summaryResult.ok ? "Operations metrics refreshed" : "Admin summary failed");
+            pushActivity("Product Merchandising", merchandisingResult, merchandisingResult.ok ? "Product plugin highlights refreshed" : "Product merchandising failed");
+            pushActivity("Product Catalog Admin", catalogResult, catalogResult.ok ? "Product management list refreshed" : "Product admin catalog failed");
+            renderTechnicalSnapshot({
+                adminOrdersStatus: ordersResult.status,
+                adminSummaryStatus: summaryResult.status,
+                merchandisingStatus: merchandisingResult.status,
+                adminCatalogStatus: catalogResult.status
+            });
+        }
+
+        async function refreshDbStats() {
+            if (!state.authHeader) {
+                state.dbStats = null;
+                renderDbStats();
+                return { ok: false, status: 401, data: null };
+            }
+            const result = await requestJson("/api/plugins/ordersample/stats");
+            const payload = payloadOf(result);
+            if (result.ok) {
+                state.dbStats = payload;
+                renderDbStats();
+            }
+            pushActivity("Database Insight", result, result.ok ? "Persistence metadata refreshed" : "DB insight failed");
+            renderTechnicalSnapshot({ statsStatus: result.status });
+            return result;
+        }
+
+        async function refreshAllPanels() {
+            state.lastAction = "refresh all";
+            await refreshCatalog();
+            await refreshProfile();
+            await refreshCart();
+            await refreshOrders();
+            await refreshDbStats();
+            await refreshAdminData();
+        }
+
+        async function login() {
+            state.lastAction = "login";
+            const result = await requestJson("/api/plugins/authsample/session/login", {
+                method: "POST",
+                body: JSON.stringify({
+                    username: usernameInput.value.trim(),
+                    password: passwordInput.value
+                })
+            });
+            const payload = payloadOf(result);
+
+            if (result.ok) {
+                state.authHeader = payload.authorizationHeader;
+                state.refreshToken = payload.tokenPair.refreshToken;
+                state.profile = payload.profile;
+                updateStatus(`Logged in as ${payload.profile.displayName}`, "ok");
+                renderAccount();
+                await refreshCart();
+                await refreshOrders();
+                await refreshDbStats();
+                await refreshAdminData();
+            } else {
+                updateStatus(`Login failed with ${result.status}`, "bad");
+            }
+
+            pushActivity("Login", result, result.ok ? "Session established" : "Credentials rejected");
+            renderTechnicalSnapshot({ loginResponse: result.data });
+        }
+
+        async function refreshToken() {
+            state.lastAction = "refresh token";
+            const result = await requestJson("/api/plugins/authsample/session/refresh", {
+                method: "POST",
+                body: JSON.stringify({ refreshToken: state.refreshToken })
+            });
+
+            if (result.ok) {
+                const accessToken = result.data?.accessToken || result.data?.tokenPair?.accessToken;
+                const refreshTokenValue = result.data?.refreshToken || result.data?.tokenPair?.refreshToken || state.refreshToken;
+
+                if (!accessToken) {
+                    updateStatus("Refresh response did not include an access token", "bad");
+                    pushActivity("Token Refresh", { ok: false, status: 500 }, "Refresh payload was missing accessToken");
+                    renderTechnicalSnapshot({ refreshStatus: 500, refreshPayload: result.data });
+                    return;
+                }
+
+                state.authHeader = `Bearer ${accessToken}`;
+                state.refreshToken = refreshTokenValue;
+                updateStatus("Session token refreshed", "ok");
+                renderAccount();
+                await refreshProfile();
+            } else {
+                updateStatus(`Refresh failed with ${result.status}`, "bad");
+            }
+
+            pushActivity("Token Refresh", result, result.ok ? "Session extended" : "Refresh token rejected");
+            renderTechnicalSnapshot({ refreshStatus: result.status });
+        }
+
+        async function addProductToCart(productId) {
+            state.lastAction = "add to cart";
+            const result = await requestJson("/api/plugins/ordersample/cart/items", {
+                method: "POST",
+                body: JSON.stringify({ productId, quantity: 1 })
+            });
+            const payload = payloadOf(result);
+            if (result.ok) {
+                state.cart = payload;
+                renderCart();
+                updateStatus(`Added ${productId} to cart`, "ok");
+            } else {
+                updateStatus(`Add to cart returned ${result.status}`, "warn");
+            }
+            pushActivity("Add To Cart", result, result.ok ? `${productId} added to bag` : "Cart mutation failed");
+            renderTechnicalSnapshot({ addCartStatus: result.status, productId });
+        }
+
+        async function buyNow(productId) {
+            state.lastAction = "buy now";
+            const addResult = await requestJson("/api/plugins/ordersample/cart/items", {
+                method: "POST",
+                body: JSON.stringify({ productId, quantity: 1 })
+            });
+            const addPayload = payloadOf(addResult);
+            if (!addResult.ok) {
+                updateStatus(`Buy now could not add ${productId}`, addResult.status === 401 ? "warn" : "bad");
+                pushActivity("Buy Now", addResult, `${productId} could not enter the cart`);
+                renderTechnicalSnapshot({ buyNowAddStatus: addResult.status, productId });
+                return;
+            }
+
+            state.cart = addPayload;
+            renderCart();
+            const checkoutResult = await requestJson("/api/plugins/ordersample/checkout", {
+                method: "POST",
+                body: JSON.stringify({ note: `Instant checkout from ${productId}` })
+            });
+            const checkoutPayload = payloadOf(checkoutResult);
+            if (checkoutResult.ok) {
+                updateStatus(`Bought ${productId} and created ${checkoutPayload.orderId}`, "ok");
+                await refreshCart();
+                await refreshOrders();
+                await refreshAdminData();
+                await refreshDbStats();
+            } else {
+                updateStatus(`Buy now checkout returned ${checkoutResult.status}`, "bad");
+            }
+            pushActivity("Buy Now", checkoutResult, checkoutResult.ok ? `${productId} moved from catalog to order` : "Buy now checkout failed");
+            renderTechnicalSnapshot({ buyNowCheckoutStatus: checkoutResult.status, productId });
+        }
+
+        async function removeProductFromCart(productId) {
+            state.lastAction = "remove cart item";
+            const result = await requestJson(`/api/plugins/ordersample/cart/items/${encodeURIComponent(productId)}`, {
+                method: "DELETE"
+            });
+            const payload = payloadOf(result);
+            if (result.ok) {
+                state.cart = payload;
+                renderCart();
+                updateStatus(`Removed ${productId} from cart`, "ok");
+            } else {
+                updateStatus(`Remove returned ${result.status}`, "warn");
+            }
+            pushActivity("Remove Cart Item", result, result.ok ? `${productId} removed` : "Cart removal failed");
+            renderTechnicalSnapshot({ removeCartStatus: result.status, productId });
+        }
+
+        async function checkout() {
+            state.lastAction = "checkout";
+            const result = await requestJson("/api/plugins/ordersample/checkout", {
+                method: "POST",
+                body: JSON.stringify({ note: checkoutNoteInput.value })
+            });
+            const payload = payloadOf(result);
+            if (result.ok) {
+                updateStatus(`Checkout created ${payload.orderId}`, "ok");
+                await refreshCart();
+                await refreshOrders();
+                await refreshAdminData();
+                await refreshDbStats();
+            } else {
+                updateStatus(`Checkout returned ${result.status}`, "bad");
+            }
+            pushActivity("Checkout", result, result.ok ? "Order created from active cart" : "Checkout failed");
+            renderTechnicalSnapshot({ checkoutStatus: result.status });
+        }
+
+        async function openOrderDetail(orderId, log = true) {
+            const result = await requestJson(`/api/plugins/ordersample/orders/${encodeURIComponent(orderId)}`);
+            const payload = payloadOf(result);
+            if (result.ok) {
+                state.focusedOrder = payload;
+                renderOrders();
+                if (log) {
+                    pushActivity("Order Detail", result, `${orderId} opened in spotlight`);
+                }
+            } else if (log) {
+                pushActivity("Order Detail", result, `${orderId} detail request failed`);
+            }
+            renderTechnicalSnapshot({ orderDetailStatus: result.status, orderId });
+            return result;
+        }
+
+        async function cancelOrder(orderId) {
+            state.lastAction = "cancel order";
+            const result = await requestJson(`/api/plugins/ordersample/orders/${encodeURIComponent(orderId)}/cancel`, {
+                method: "POST"
+            });
+            const payload = payloadOf(result);
+            if (result.ok) {
+                state.focusedOrder = payload;
+                updateStatus(`Cancelled ${orderId}`, "ok");
+                await refreshOrders();
+                await refreshAdminData();
+            } else {
+                updateStatus(`Cancel returned ${result.status}`, "warn");
+            }
+            pushActivity("Cancel Order", result, result.ok ? `${orderId} moved to cancelled` : "Cancel action failed");
+            renderTechnicalSnapshot({ cancelStatus: result.status, orderId });
+        }
+
+        async function advanceOrder(orderId, nextStatus) {
+            state.lastAction = "advance order";
+            const result = await requestJson(`/api/plugins/ordersample/admin/orders/${encodeURIComponent(orderId)}/status`, {
+                method: "POST",
+                body: JSON.stringify({ status: nextStatus })
+            });
+            const payload = payloadOf(result);
+            if (result.ok) {
+                state.focusedOrder = payload;
+                updateStatus(`${orderId} moved to ${nextStatus}`, "ok");
+                await refreshOrders();
+                await refreshAdminData();
+            } else {
+                updateStatus(`Status update returned ${result.status}`, "warn");
+            }
+            pushActivity("Admin Transition", result, result.ok ? `${orderId} -> ${nextStatus}` : "Admin transition failed");
+            renderTechnicalSnapshot({ adminUpdateStatus: result.status, orderId, nextStatus });
+        }
+
+        function resetProductForm() {
+            productFormProductId.value = "";
+            productFormTitle.value = "";
+            productFormPrice.value = "";
+            productFormBadge.value = "";
+            productFormCollection.value = "Workspace";
+            productFormDescription.value = "";
+            updateProductFormStatus("Ready to create a new storefront product.", "ok");
+        }
+
+        function populateProductForm(productId) {
+            const product = state.adminCatalog.find((item) => item.productId === productId);
+            if (!product) return;
+            productFormProductId.value = product.productId;
+            productFormTitle.value = product.title;
+            productFormPrice.value = (product.priceCents / 100).toFixed(2);
+            productFormBadge.value = product.badge;
+            productFormCollection.value = product.collection;
+            productFormDescription.value = product.description;
+            updateStatus(`Editing ${product.productId}`, "ok");
+            updateProductFormStatus(`Editing ${product.productId}`, "ok");
+        }
+
+        async function saveProduct() {
+            state.lastAction = "save product";
+            if (!state.profile || state.profile.role !== "admin") {
+                updateStatus("Save Product requires an admin session", "warn");
+                updateProductFormStatus("Product changes are locked until you sign in as admin.", "warn");
+                return;
+            }
+            const productId = productFormProductId.value.trim();
+            if (!productFormTitle.value.trim() || !productFormDescription.value.trim() || !productFormPrice.value.trim()) {
+                updateProductFormStatus("Title, description, and price are required.", "warn");
+                return;
+            }
+            const payload = {
+                productId: productId || null,
+                title: productFormTitle.value.trim(),
+                description: productFormDescription.value.trim(),
+                priceCents: Math.round(Number(productFormPrice.value || 0) * 100),
+                badge: productFormBadge.value.trim(),
+                collection: productFormCollection.value.trim()
+            };
+            const isEdit = Boolean(productId);
+            const result = await requestJson(
+                isEdit
+                    ? `/api/plugins/productsample/admin/products/${encodeURIComponent(productId)}`
+                    : "/api/plugins/productsample/admin/products",
+                {
+                    method: isEdit ? "PUT" : "POST",
+                    body: JSON.stringify(payload)
+                }
+            );
+            const responsePayload = payloadOf(result);
+            if (result.ok) {
+                updateStatus(`${isEdit ? "Updated" : "Created"} ${responsePayload.productId}`, "ok");
+                updateProductFormStatus(`${isEdit ? "Updated" : "Created"} ${responsePayload.productId}. Refreshing storefront and admin list.`, "ok");
+                resetProductForm();
+                await refreshCatalog();
+                await refreshAdminData();
+                await refreshDbStats();
+            } else {
+                updateStatus(`Save product returned ${result.status}`, "bad");
+                updateProductFormStatus(`Save failed with ${result.status}. Check admin session and field values.`, "bad");
+            }
+            pushActivity("Save Product", result, result.ok ? "Product catalog updated" : "Product save failed");
+            renderTechnicalSnapshot({ saveProductStatus: result.status, isEdit });
+        }
+
+        async function archiveProduct(productId) {
+            state.lastAction = "archive product";
+            const result = await requestJson(`/api/plugins/productsample/admin/products/${encodeURIComponent(productId)}`, {
+                method: "DELETE"
+            });
+            if (result.ok) {
+                updateStatus(`Archived ${productId}`, "ok");
+                updateProductFormStatus(`${productId} archived from the storefront.`, "ok");
+                await refreshCatalog();
+                await refreshAdminData();
+                await refreshDbStats();
+            } else {
+                updateStatus(`Archive returned ${result.status}`, "warn");
+                updateProductFormStatus(`Archive failed with ${result.status}.`, "warn");
+            }
+            pushActivity("Archive Product", result, result.ok ? `${productId} removed from storefront` : "Archive failed");
+            renderTechnicalSnapshot({ archiveProductStatus: result.status, productId });
+        }
+
+        window.addProductToCart = addProductToCart;
+        window.buyNow = buyNow;
+        window.removeProductFromCart = removeProductFromCart;
+        window.openOrderDetail = openOrderDetail;
+        window.cancelOrder = cancelOrder;
+        window.advanceOrder = advanceOrder;
+        window.populateProductForm = populateProductForm;
+        window.archiveProduct = archiveProduct;
+
+        document.getElementById("login-btn").addEventListener("click", login);
+        document.getElementById("preset-user-btn").addEventListener("click", () => setPreset("user"));
+        document.getElementById("preset-admin-btn").addEventListener("click", () => setPreset("admin"));
+        document.getElementById("load-profile-btn").addEventListener("click", refreshProfile);
+        document.getElementById("refresh-token-btn").addEventListener("click", refreshToken);
+        document.getElementById("refresh-cart-btn").addEventListener("click", refreshCart);
+        document.getElementById("checkout-btn").addEventListener("click", checkout);
+        document.getElementById("refresh-all-btn").addEventListener("click", refreshAllPanels);
+        document.getElementById("save-product-btn").addEventListener("click", saveProduct);
+        document.getElementById("reset-product-form-btn").addEventListener("click", resetProductForm);
+
+        renderAccount();
+        renderCatalog();
+        renderCart();
+        renderOrders();
+        renderAdmin();
+        renderDbStats();
+        renderActivity();
+        resetProductForm();
+        renderTechnicalSnapshot();
+        refreshCatalog();
+    </script>
+</body>
+
+</html>

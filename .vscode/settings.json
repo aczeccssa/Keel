@@ -3,5 +3,9 @@
     "**/.gradle/**": true,
     "**/build/**": true
   },
-  "java.configuration.updateBuildConfiguration": "automatic"
+  "editor.quickSuggestions": {
+    "comments": "off",
+    "strings": "off",
+    "other": "off"
+  }
 }

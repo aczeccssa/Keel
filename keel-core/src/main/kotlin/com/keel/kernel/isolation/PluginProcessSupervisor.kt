@@ -12,6 +12,7 @@ import com.keel.kernel.plugin.PluginEndpointDefinition
 import com.keel.kernel.plugin.PluginFailureRecord
 import com.keel.kernel.plugin.PluginGeneration
 import com.keel.kernel.plugin.PluginHealthState
+import com.keel.kernel.plugin.PluginNodeAssetMetadata
 import com.keel.kernel.plugin.PluginProcessState
 import com.keel.kernel.plugin.PluginRuntimeDiagnostics
 import com.keel.kernel.plugin.PluginRuntimeMode
@@ -33,6 +34,7 @@ import com.keel.jvm.runtime.PluginDisposedEvent
 import com.keel.jvm.runtime.PluginRouteInventoryItem
 import com.keel.jvm.runtime.PluginReadyEvent
 import com.keel.jvm.runtime.PluginRuntimeEvent
+import com.keel.jvm.runtime.RuntimeNodeAssetMetadata
 import com.keel.jvm.runtime.PluginSseClosedEvent
 import com.keel.jvm.runtime.PluginSseDataEvent
 import com.keel.jvm.runtime.PluginStoppingEvent
@@ -83,6 +85,16 @@ sealed interface PluginJvmConnectionInfo {
     val mode: JvmCommunicationMode
 }
 
+private fun RuntimeNodeAssetMetadata.toPluginNodeAssetMetadata(): PluginNodeAssetMetadata = PluginNodeAssetMetadata(
+    assetId = assetId,
+    address = address,
+    zone = zone,
+    region = region,
+    role = role,
+    roleDescription = roleDescription,
+    featured = featured
+)
+
 data class PluginJvmUdsConnectionInfo(
     val invokePath: Path,
     val adminPath: Path,
@@ -125,6 +137,7 @@ class PluginProcessSupervisor(
     private var processExitJob: Job? = null
     private var eventServer: ServerSocketChannel? = null
     private var controlFailureCount: Int = 0
+    private var recoveryGraceActive: Boolean = false
     private var eventChannelConnected: Boolean = false
     private var readyEventReceived: Boolean = false
     private var lastHealthLatencyMs: Long? = null
@@ -133,6 +146,11 @@ class PluginProcessSupervisor(
     private var droppedLogCount: Long = 0
     private var eventOverflowed: Boolean = false
     private var eventQueueDepth: Int = 0
+    private var lastProcessCpuLoadPercent: Double? = null
+    private var lastHeapUsedBytes: Long? = null
+    private var lastHeapMaxBytes: Long? = null
+    private var lastHeapUsedPercent: Double? = null
+    private var descriptorAssetMetadata: PluginNodeAssetMetadata? = descriptor.nodeAssetMetadata
     private var activeCommunicationMode: JvmCommunicationMode? = null
     private var fallbackActivated: Boolean = false
     private var lastFallbackReason: String? = null
@@ -148,6 +166,11 @@ class PluginProcessSupervisor(
     suspend fun start() {
         stopping = false
         terminalFailureReported = false
+        // 显式重置，避免依赖 stopProcess() 副作用的竞态窗口
+        controlFailureCount = 0
+        readyEventReceived = false
+        // 允许新进程在启动后有宽限期，避免在握手指引完成前的健康检查失败触发重启
+        recoveryGraceActive = true
         var lastError: Throwable? = null
         val strategy = descriptor.communicationStrategy
         repeat(strategy.maxAttempts) { attempt ->
@@ -314,7 +337,12 @@ class PluginProcessSupervisor(
             eventOverflowed = eventOverflowed,
             lastHealthLatencyMs = lastHealthLatencyMs,
             lastAdminLatencyMs = lastAdminLatencyMs,
-            lastEventAtEpochMs = lastEventAtEpochMs
+            lastEventAtEpochMs = lastEventAtEpochMs,
+            processCpuLoadPercent = lastProcessCpuLoadPercent,
+            heapUsedBytes = lastHeapUsedBytes,
+            heapMaxBytes = lastHeapMaxBytes,
+            heapUsedPercent = lastHeapUsedPercent,
+            assetMetadata = descriptorAssetMetadata ?: descriptor.nodeAssetMetadata
         )
     }
 
@@ -552,17 +580,25 @@ class PluginProcessSupervisor(
 
                 if (response == null) {
                     controlFailureCount += 1
-                    if (controlFailureCount > 1) {
+                    // 恢复宽限期内（进程刚启动），允许最多 2 次健康检查失败而不触发重启
+                    if (controlFailureCount > 1 && !recoveryGraceActive) {
                         reportTerminalFailure(
                             reason = "admin-lane-unavailable",
                             suggestTcpFallback = activeCommunicationMode == JvmCommunicationMode.UDS
                         )
                     }
                 } else {
+                    // 首次成功健康检查后关闭宽限期
+                    recoveryGraceActive = false
                     controlFailureCount = 0
                     lastHealthLatencyMs = System.currentTimeMillis() - startedAt
                     eventQueueDepth = response.eventQueueDepth
                     droppedLogCount = response.droppedLogCount
+                    lastProcessCpuLoadPercent = response.processCpuLoadPercent
+                    lastHeapUsedBytes = response.heapUsedBytes
+                    lastHeapMaxBytes = response.heapMaxBytes
+                    lastHeapUsedPercent = response.heapUsedPercent
+                    response.assetMetadata?.let { descriptorAssetMetadata = it.toPluginNodeAssetMetadata() }
                 }
                 recomputeHealth()
             }
@@ -623,6 +659,11 @@ class PluginProcessSupervisor(
         readyEventReceived = false
         controlFailureCount = 0
         eventQueueDepth = 0
+        lastProcessCpuLoadPercent = null
+        lastHeapUsedBytes = null
+        lastHeapMaxBytes = null
+        lastHeapUsedPercent = null
+        descriptorAssetMetadata = descriptor.nodeAssetMetadata
     }
 
     private fun captureOutput(stream: java.io.InputStream, error: Boolean) {

@@ -17,6 +17,7 @@ dependencies {
     implementation(project(":keel-contract"))
     implementation(project(":keel-core"))
     implementation(project(":keel-exposed-starter"))
+    testImplementation(project(":keel-samples"))
     testImplementation(project(":keel-openapi-runtime"))
 
     // Test dependencies

@@ -1,0 +1,88 @@
+:root {
+    --font-body: "Quicksand", system-ui, -apple-system, sans-serif;
+    --font-headline: "Newsreader", Georgia, "Times New Roman", serif;
+    --font-mono: ui-monospace, "SFMono-Regular", Menlo, Monaco, Consolas, monospace;
+
+    --bg: #f6f3ec;
+    --paper: rgba(255, 253, 249, 0.88);
+    --panel: rgba(255, 255, 255, 0.72);
+    --panel-strong: rgba(255, 255, 255, 0.94);
+    --ink: #111827;
+    --muted: #667085;
+    --line: rgba(17, 24, 39, 0.08);
+    --line-strong: rgba(17, 24, 39, 0.16);
+    --navy: #0f172a;
+    --navy-2: #1e293b;
+    --teal: #0f766e;
+    --teal-soft: rgba(15, 118, 110, 0.12);
+    --amber: #c56a1b;
+    --amber-soft: rgba(197, 106, 27, 0.14);
+    --red: #c62828;
+    --red-soft: rgba(198, 40, 40, 0.12);
+    --green: #13824f;
+    --green-soft: rgba(19, 130, 79, 0.14);
+
+    --shadow-sm: 0 2px 4px rgba(15, 23, 42, 0.04);
+    --shadow-md: 0 12px 24px -4px rgba(15, 23, 42, 0.06), 0 4px 10px -2px rgba(15, 23, 42, 0.04);
+    --shadow-lg: 0 24px 48px -12px rgba(15, 23, 42, 0.1), 0 12px 24px -6px rgba(15, 23, 42, 0.06);
+    --glass-highlight: inset 0 1px 0 0 rgba(255, 255, 255, 0.8), inset 0 0 0 1px rgba(255, 255, 255, 0.4);
+
+    --ease-smooth: cubic-bezier(0.4, 0, 0.2, 1);
+    --ease-spring: cubic-bezier(0.175, 0.885, 0.32, 1.1);
+
+    --radius-xl: 28px;
+    --radius-lg: 22px;
+    --radius-md: 16px;
+    --radius-sm: 12px;
+}
+
+*,
+*::before,
+*::after {
+    box-sizing: border-box;
+}
+
+html,
+body {
+    margin: 0;
+    min-height: 100%;
+}
+
+body {
+    font-family: var(--font-body);
+    color: var(--ink);
+    background: radial-gradient(circle at top left, rgba(15, 118, 110, 0.12), transparent 32%),
+        radial-gradient(circle at top right, rgba(197, 106, 27, 0.11), transparent 30%),
+        linear-gradient(180deg, #fbf9f4 0%, var(--bg) 100%);
+    overflow-y: hidden;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+}
+
+a {
+    color: inherit;
+    text-decoration: none;
+}
+
+button,
+input,
+select,
+textarea {
+    font: inherit;
+    color: inherit;
+}
+
+svg,
+img {
+    display: block;
+    max-width: 100%;
+}
+
+[hidden] {
+    display: none !important;
+}
+
+keel-observability-app {
+    display: block;
+    min-height: 100vh;
+}

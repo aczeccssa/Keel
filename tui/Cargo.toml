@@ -1,0 +1,11 @@
+[package]
+name = "keel-sample-launcher"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1"
+command-group = "5.0.1"
+crossterm = "0.29"
+nix = { version = "0.30", features = ["signal", "process"] }
+ratatui = { version = "0.26", features = ["crossterm"] }

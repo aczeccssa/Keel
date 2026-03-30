@@ -21,7 +21,6 @@ profile:
 exclude:
   - name: unused
   - name: UnusedImport
-  - name: DuplicatedCode
   - name: RemoveExplicitTypeArguments
   - name: UnstableApiUsage
   # More Interceptor
@@ -40,10 +39,10 @@ projectJDK: "23" #(Applied in CI/CD pipeline)
   # severityThresholds - configures maximum thresholds for different problem severities
   # testCoverageThresholds - configures minimum code coverage on a whole project and newly added code
   # Code Coverage is available in Ultimate and Ultimate Plus plans
-  #failureConditions:
-  #  severityThresholds:
-  #    any: 15
-  #    critical: 5
+failureConditions:
+  severityThresholds:
+    any: 200
+    critical: 20
   #  testCoverageThresholds:
   #    fresh: 70
   #    total: 50
@@ -51,4 +50,3 @@ projectJDK: "23" #(Applied in CI/CD pipeline)
 #Qodana supports other languages, for example, Python, JavaScript, TypeScript, Go, C#, PHP
 #For all supported languages see https://www.jetbrains.com/help/qodana/linters.html
 linter: jetbrains/qodana-jvm-community:2025.3
-

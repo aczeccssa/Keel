@@ -135,15 +135,15 @@ internal fun encodeResponseBody(body: Any?, responseType: KType): String? {
 internal fun serializer(type: KType): KSerializer<Any> = runtimeJson.serializersModule.serializer(type) as KSerializer<Any>
 
 internal fun buildRequestContext(call: ApplicationCall, pluginId: String, method: HttpMethod, rawPath: String): PluginRequestContext {
-    return object : PluginRequestContext {
-        override val pluginId: String = pluginId
-        override val method: String = method.value
-        override val rawPath: String = rawPath
-        override val pathParameters: Map<String, String> = call.parameters.entries().associate { it.key to it.value.first() }
-        override val queryParameters: Map<String, List<String>> = call.request.queryParameters.entries().associate { it.key to it.value }
-        override val requestHeaders: Map<String, List<String>> = call.request.headers.entries().associate { it.key to it.value }
-        override val requestId: String = call.request.headers["X-Request-Id"] ?: UUID.randomUUID().toString()
-    }
+    return DefaultPluginRequestContext(
+        pluginId = pluginId,
+        method = method.value,
+        rawPath = rawPath,
+        pathParameters = call.parameters.entries().associate { it.key to it.value.first() },
+        queryParameters = call.request.queryParameters.entries().associate { it.key to it.value },
+        requestHeaders = normalizeRequestHeaders(call.request.headers.entries().associate { it.key to it.value }),
+        requestId = call.request.headers["X-Request-Id"] ?: UUID.randomUUID().toString()
+    )
 }
 
 internal suspend fun respondPluginResult(

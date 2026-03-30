@@ -73,8 +73,8 @@ class KeelEngineStarterTest {
     @Test
     fun keelBuilderAndRunnerEntryPointsAreAvailable() {
         val builder = ::buildKeel
-        val runnerWithPort: (Int, KernelBuilder.() -> Unit) -> Unit = ::runKeel
-        val runnerWithoutPort: (KernelBuilder.() -> Unit) -> Unit = ::runKeel
+        val runnerWithPort: (Int, KernelBuilder.() -> Unit) -> Unit = { port, block -> runKeel(port, block) }
+        val runnerWithoutPort: (KernelBuilder.() -> Unit) -> Unit = { block -> runKeel(block = block) }
 
         assertNotNull(builder)
         assertNotNull(runnerWithPort)

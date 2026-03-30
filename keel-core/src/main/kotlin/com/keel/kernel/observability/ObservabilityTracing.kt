@@ -19,6 +19,7 @@ import io.opentelemetry.sdk.trace.export.SpanExporter
 import io.opentelemetry.sdk.trace.data.SpanData
 import io.opentelemetry.sdk.trace.data.StatusData
 import io.ktor.util.AttributeKey
+import java.net.InetAddress
 import java.util.concurrent.TimeUnit
 
 object ObservabilityTracing {
@@ -127,7 +128,8 @@ object ObservabilityTracing {
     }
 
     internal fun SpanData.toEvent(service: String): TraceSpanEvent {
-        val attributes = attributes.asMap().entries.associate { (key, value) -> key.key to value.toString() }
+        val attributes = attributes.asMap().entries.associate { (key, value) -> key.key to value.toString() }.toMutableMap()
+        normalizeTraceAttributes(attributes, service)
         val startMs = TimeUnit.NANOSECONDS.toMillis(startEpochNanos)
         val endMs = if (hasEnded()) TimeUnit.NANOSECONDS.toMillis(endEpochNanos) else null
         val durationMs = endMs?.let { it - startMs }
@@ -145,6 +147,45 @@ object ObservabilityTracing {
             edgeFrom = attributes[edgeFromKey.key],
             edgeTo = attributes[edgeToKey.key]
         )
+    }
+
+    private fun normalizeTraceAttributes(attributes: MutableMap<String, String>, service: String) {
+        val method = attributes["http.method"]
+        val route = attributes["http.route"]
+        if (!method.isNullOrBlank() && !route.isNullOrBlank()) {
+            attributes.putIfAbsent("keel.display.operation", "$method $route")
+        }
+
+        val protocol = when {
+            !attributes["keel.protocol"].isNullOrBlank() -> attributes["keel.protocol"]
+            !attributes["network.protocol.name"].isNullOrBlank() && !attributes["network.protocol.version"].isNullOrBlank() ->
+                "${attributes["network.protocol.name"]} / ${attributes["network.protocol.version"]}"
+            !attributes["network.protocol.name"].isNullOrBlank() -> attributes["network.protocol.name"]
+            !attributes["http.flavor"].isNullOrBlank() -> "HTTP / ${attributes["http.flavor"]}"
+            !method.isNullOrBlank() -> "HTTP"
+            !attributes["db.system"].isNullOrBlank() -> attributes["db.system"]?.uppercase()
+            !attributes["rpc.system"].isNullOrBlank() -> attributes["rpc.system"]
+            !attributes["messaging.system"].isNullOrBlank() -> attributes["messaging.system"]
+            !attributes["keel.jvm"].isNullOrBlank() -> attributes["keel.jvm"]
+            else -> null
+        }
+        protocol?.let { attributes.putIfAbsent("keel.protocol", it) }
+
+        val component = when {
+            !attributes["keel.component"].isNullOrBlank() -> attributes["keel.component"]
+            !attributes["component"].isNullOrBlank() -> attributes["component"]
+            !attributes["otel.library.name"].isNullOrBlank() -> attributes["otel.library.name"]
+            !attributes["keel.pluginId"].isNullOrBlank() -> attributes["keel.pluginId"]
+            !attributes["keel.jvm"].isNullOrBlank() -> "keel-${attributes["keel.jvm"]}"
+            else -> service
+        }
+        component?.let { attributes.putIfAbsent("keel.component", it) }
+
+        val host = attributes["server.address"]
+            ?: attributes["net.host.name"]
+            ?: attributes["host.name"]
+            ?: if (service == "kernel") runCatching { InetAddress.getLocalHost().hostName }.getOrNull() else null
+        host?.let { attributes.putIfAbsent("keel.host", it) }
     }
 
     private fun StatusData.toStatusName(): String = when (statusCode) {

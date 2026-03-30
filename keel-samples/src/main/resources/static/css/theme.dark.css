@@ -1,0 +1,251 @@
+/*
+# Design System: High-Tech Observability & Editorial Precision
+
+## 1. Overview & Creative North Star
+**Creative North Star: "The Digital Curator"**
+This design system moves away from the sterile, high-contrast "hacker" aesthetic typically associated with observability. Instead, it embraces the "Digital Curator"—a philosophy that treats technical data as high-end editorial content. We prioritize sophisticated, layered surfaces over rigid grids and replace aggressive lines with soft tonal transitions.
+
+By blending the authoritative elegance of a serif "Display" font with the surgical precision of technical sans-serif data, we create a "pro" environment that feels expensive, calm, and intentional. The interface doesn't just show data; it presents it with clarity and breathing room.
+
+---
+
+## 2. Colors: Tonal Depth & Atmospheric Accents
+The palette is rooted in a refined, neutral cream base, moving away from "yellowed" ivory toward a more professional, cool-tinted stone.
+
+### Palette Strategy
+- **Base Surface (`surface` #faf9f5):** Our foundational canvas. A neutral, sophisticated starting point.
+- **The Core (`primary` #050c1b):** A deep, midnight charcoal used for high-impact nodes and primary navigation, providing the "weight" to the layout.
+- **Success (`secondary` #006c49):** A vibrant emerald green. Used sparingly for "Running" statuses to ensure they pop against the neutral base.
+- **Attention (`error` #ba1a1a & `tertiary_fixed` #ffb95f):** Muted reds and ambers for warnings, ensuring they feel urgent but integrated, not jarring.
+
+### The "No-Line" Rule
+**Explicit Instruction:** Do not use 1px solid borders to section off major areas of the UI. Separation must be achieved through background shifts. For example:
+- A sidebar should be `surface_container_low`.
+- The main content area should be `surface`.
+- Nested cards should be `surface_container_lowest`.
+
+### Glass & Signature Textures
+- **Active Nodes:** Use a subtle inner glow (`box-shadow: inset 0 0 8px 0 rgba(111, 251, 190, 0.3)`) and a matching outer glow to denote "Running" states.
+- **CTA Gradients:** For primary actions, transition from `primary` (#050c1b) to `primary_container` (#1a2233) to give the button a physical, three-dimensional soul.
+
+---
+
+## 3. Typography: The Editorial/Technical Dialectic
+We employ a dual-typeface system to balance brand personality with data density.
+
+| Role | Token | Font | Size | Weight | Character |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **Branding/Logo** | `display-lg` | Newsreader | 3.5rem | 400 | Elegant, literary |
+| **Section Headers** | `headline-sm` | Newsreader | 1.5rem | 500 | Authoritative |
+| **Technical Data** | `body-md` | Inter | 0.875rem | 400 | Precise, readable |
+| **Status Labels** | `label-sm` | Inter | 0.6875rem | 700 | Compact, clear |
+
+*Design Note: Use Newsreader for storytelling and high-level summaries. Use Inter for all dynamic data, metrics, and technical labels.*
+
+---
+
+## 4. Elevation & Depth: Tonal Layering
+Traditional drop shadows are too "standard." We use **Tonal Layering** to define hierarchy.
+
+- **The Layering Principle:** Stack `surface-container` tiers to create depth. A `surface_container_highest` element should sit atop a `surface_container_low` section to indicate importance.
+- **Ambient Shadows:** When an element must float (like a tooltip or modal), use an ultra-diffused shadow: `box-shadow: 0 12px 40px rgba(26, 28, 26, 0.05)`. The shadow color is a 5% tint of the `on_surface` color, not pure black.
+- **Glassmorphism:** For top-tier nodes in the topology graph, use:
+- `background: rgba(255, 255, 255, 0.6)`
+- `backdrop-filter: blur(12px)`
+- **Ghost Border:** `outline: 1px solid rgba(117, 119, 124, 0.15)`. This is the only exception to the "No-Line" rule.
+
+---
+
+## 5. Components
+
+### The Topology Node
+The central component of this design system.
+- **Base:** `surface_container_lowest` with `xl` (0.75rem) rounded corners.
+- **Status:** Use a `secondary_fixed` (#6ffbbe) inner glow for running nodes.
+- **Connections:** Sleek, animated Bezier curves using `outline_variant` color. Lines should pulse slightly to show data flow.
+
+### Buttons & Chips
+- **Primary Button:** `primary` background with `on_primary` text. Use `full` (9999px) rounding for a modern, high-tech feel.
+- **Status Chips:** High-saturation backgrounds (`secondary_container` for "Running") with high-contrast text. No borders. Use `label-md` uppercase typography.
+
+### Input Fields & Data Containers
+- **Inputs:** Never use 4-sided borders. Use a `surface_container_high` background with a 2px bottom-accent in `primary_fixed` when focused.
+- **Lists:** Forbid divider lines. Separate list items using the `2` (0.5rem) spacing scale and subtle `surface_variant` hover states.
+
+### Custom Component: The "Metric Pulse"
+A small, circular indicator using `secondary` (emerald green) with a multi-layered outer glow animation to indicate real-time data streaming without cluttering the UI with text.
+
+---
+
+## 6. Do's and Don'ts
+
+### Do
+- **Do** use intentional asymmetry. A perfectly centered layout feels like a template; offset your data panels to create a custom "editorial" feel.
+- **Do** use the `12` (3rem) and `16` (4rem) spacing tokens between major sections to let the technical data breathe.
+- **Do** use monochromatic icons. Icons should be `on_surface_variant` and only take on color (`secondary` or `error`) when reflecting a specific state.
+
+### Don't
+- **Don't** use 100% black. Even for the deepest charcoal, use our `primary` (#050c1b). Pure black kills the sophisticated "creamy" atmosphere.
+- **Don't** use straight 90-degree lines for data connections. It feels like an engineering schematic; use curves to make it feel like an organic system.
+- **Don't** use high-contrast borders. If the background shift isn't enough, your hierarchy isn't strong enough. Re-evaluate your `surface` tiers.
+*/
+
+/* ─────────────────────────────────────────────
+   DARK THEME — Keel Design System Tokens
+   ───────────────────────────────────────────── */
+
+:root,
+[data-theme="dark"] {
+
+  /* ── Surface Tiers (Tonal Layering, dark-inverted) ── */
+  --color-surface:                      #111316;
+  --color-surface-bright:              #1a1c1f;
+  --color-surface-container-lowest:     #1a1c1f;
+  --color-surface-container-low:        #1e2124;
+  --color-surface-container:            #232629;
+  --color-surface-container-high:       #282c30;
+  --color-surface-container-highest:    #2d3136;
+
+  /* ── On-Surface (Text, light on dark) ── */
+  --color-on-surface:                  #e2e0da;
+  --color-on-surface-variant:          #bec2bb;
+  --color-outline:                      #757878;
+  --color-outline-variant:             #3f4340;
+
+  /* ── Primary (near-white on dark, so it pops) ── */
+  --color-primary:                     #dcdad4;
+  --color-on-primary:                  #0a0f18;
+  --color-primary-container:          #1a2233;
+  --color-on-primary-container:        #d6dce9;
+  --color-primary-fixed:               #6ffbbe;
+  --color-on-primary-fixed:            #002116;
+  --color-primary-fixed-dim:          #4ddba0;
+
+  /* ── Secondary (bright emerald for dark backgrounds) ── */
+  --color-secondary:                   #4edba4;
+  --color-on-secondary:                #003825;
+  --color-secondary-container:         #005339;
+  --color-on-secondary-container:       #a8f5cd;
+  --color-secondary-fixed:            #6ffbbe;
+  --color-on-secondary-fixed:          #002116;
+
+  /* ── Tertiary / Amber (brightened for dark) ── */
+  --color-tertiary:                    #ffb95f;
+  --color-on-tertiary:                 #4a2800;
+  --color-tertiary-container:          #6b3d00;
+  --color-on-tertiary-container:       #ffe4b8;
+  --color-tertiary-fixed:             #ffb95f;
+  --color-on-tertiary-fixed:          #3a1800;
+
+  /* ── Error (brightened for dark backgrounds) ── */
+  --color-error:                       #ffb4ab;
+  --color-on-error:                    #690005;
+  --color-error-container:             #93000a;
+  --color-on-error-container:          #ffdad6;
+
+  /* ── Semantic Aliases ── */
+  --color-success:                     #4edba4;
+  --color-warning:                     #ffb95f;
+  --color-info:                        #80d4f5;
+
+  /* ── Inverse ── */
+  --color-inverse-surface:             #e2e0da;
+  --color-inverse-on-surface:          #1e2122;
+
+  /* ── Glass & Special Effects ── */
+  --color-glass-bg:                    rgba(30, 32, 36, 0.72);
+  --color-glass-border:                rgba(117, 119, 124, 0.2);
+
+  /* ── Shadows (dark-tinted) ── */
+  --shadow-ambient:                    0 12px 40px rgba(0, 0, 0, 0.35);
+  --shadow-sm:                         0 2px 4px rgba(0, 0, 0, 0.18);
+  --shadow-md:                         0 12px 24px -4px rgba(0, 0, 0, 0.28), 0 4px 10px -2px rgba(0, 0, 0, 0.18);
+  --shadow-lg:                         0 24px 48px -12px rgba(0, 0, 0, 0.42), 0 12px 24px -6px rgba(0, 0, 0, 0.28);
+
+  /* ── Glassmorphism (dark variant) ── */
+  --glass-highlight:                   inset 0 1px 0 0 rgba(255, 255, 255, 0.06), inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+
+  /* ── Topology Node Glows (Running State, brighter for dark bg) ── */
+  --glow-running-inner:                inset 0 0 8px 0 rgba(111, 251, 190, 0.45);
+  --glow-running-outer:                0 0 16px 2px rgba(111, 251, 190, 0.35);
+  --glow-metric-pulse-1:               0 0 0 0 rgba(111, 251, 190, 0.6);
+  --glow-metric-pulse-2:               0 0 0 0 rgba(111, 251, 190, 0.4);
+  --glow-metric-pulse-3:               0 0 0 0 rgba(111, 251, 190, 0.2);
+
+  /* ── Typography (same fonts, adjusted weights for dark readability) ── */
+  --font-display:                      "Newsreader", Georgia, "Times New Roman", serif;
+  --font-headline:                     "Newsreader", Georgia, "Times New Roman", serif;
+  --font-body:                         "Quicksand", system-ui, -apple-system, sans-serif;
+  --font-mono:                         ui-monospace, "SFMono-Regular", Menlo, Monaco, Consolas, monospace;
+
+  /* ── Spacing Scale (same as light) ── */
+  --space-1:   0.25rem;   /* 4px */
+  --space-2:   0.5rem;    /* 8px */
+  --space-3:   0.75rem;   /* 12px */
+  --space-4:   1rem;      /* 16px */
+  --space-5:   1.25rem;   /* 20px */
+  --space-6:   1.5rem;    /* 24px */
+  --space-8:   2rem;      /* 32px */
+  --space-10:  2.5rem;    /* 40px */
+  --space-12:  3rem;      /* 48px */
+  --space-16:  4rem;      /* 64px */
+
+  /* ── Border Radius (same as light) ── */
+  --radius-xs:    0.25rem;   /* 4px  */
+  --radius-sm:    0.75rem;   /* 12px */
+  --radius-md:    1rem;      /* 16px */
+  --radius-lg:    1.375rem; /* 22px */
+  --radius-xl:    1.75rem;   /* 28px */
+  --radius-2xl:   2.125rem; /* 34px */
+  --radius-full:  9999px;
+
+  /* ── Motion (same easings, durations may feel longer on dark) ── */
+  --ease-smooth:  cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-spring:  cubic-bezier(0.175, 0.885, 0.32, 1.1);
+  --ease-bounce:  cubic-bezier(0.34, 1.56, 0.64, 1);
+  --duration-fast:     150ms;
+  --duration-normal:   250ms;
+  --duration-slow:     400ms;
+
+  /* ── OpenAPI App Compatibility ── */
+  --color-surface-container-low--openapi:   #1e2124;
+  --color-surface-container--openapi:        #232629;
+  --color-surface-container-high--openapi:   #282c30;
+  --color-surface-container-highest--openapi: #2d3136;
+  --color-surface-bright--openapi:           #1a1c1f;
+  --color-on-surface--openapi:               #e2e0da;
+  --color-on-surface-variant--openapi:       #bec2bb;
+  --color-outline--openapi:                  #757878;
+  --color-outline-variant--openapi:         #3f4340;
+  --color-primary--openapi:                  #dcdad4;
+  --color-on-primary--openapi:               #0a0f18;
+  --color-secondary--openapi:                #4edba4;
+  --color-on-secondary--openapi:             #003825;
+  --color-secondary-container--openapi:     #005339;
+  --color-on-secondary-container--openapi:  #a8f5cd;
+  --color-error--openapi:                    #ffb4ab;
+  --color-on-error--openapi:                 #690005;
+  --color-error-container--openapi:           #93000a;
+  --color-on-error-container--openapi:         #ffdad6;
+  --color-on-surface-variant-dim:             #9ba299;
+
+  /* ── style.css Backward-Compatible Aliases ── */
+  --bg:           #111316;
+  --paper:        rgba(30, 32, 36, 0.88);
+  --panel:        rgba(38, 41, 46, 0.72);
+  --panel-strong: rgba(46, 50, 56, 0.94);
+  --ink:          #e2e0da;
+  --muted:        #8a9186;
+  --line:         rgba(226, 224, 218, 0.08);
+  --line-strong:  rgba(226, 224, 218, 0.16);
+  --navy:         #1a2233;
+  --navy-2:       #232629;
+  --teal:         #4edba4;
+  --teal-soft:    rgba(78, 219, 164, 0.12);
+  --amber:        #ffb95f;
+  --amber-soft:   rgba(255, 185, 95, 0.14);
+  --red:          #ffb4ab;
+  --red-soft:     rgba(255, 180, 171, 0.12);
+  --green:        #4edba4;
+  --green-soft:   rgba(78, 219, 164, 0.14);
+}
