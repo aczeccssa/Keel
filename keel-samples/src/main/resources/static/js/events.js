@@ -23,7 +23,7 @@ export function downloadLogsJSON() {
 }
 
 export function downloadLogsText() {
-    const items = state.logs.items || [];
+    const items = state.logs.page?.items || [];
     const text = items.map((entry) => {
         let line = `${entry.timestamp ? new Date(entry.timestamp).toISOString() : ''} ${entry.level || 'INFO'} [${entry.source || ''}] ${entry.message || ''}`;
         if (entry.throwable) line += `\n${entry.throwable}`;

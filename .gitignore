@@ -38,11 +38,6 @@ bin/
 /nbdist/
 /.nb-gradle/
 
-### VS Code ###
-.vscode/*
-!.vscode/settings.json
-!.vscode/extensions.json
-
 ### Mac OS ###
 .DS_Store
 /cache/
@@ -50,7 +45,6 @@ bin/
 /.codex-trash/
 /.codex/
 /.claude/
-/.vscode/
 **/cache
 /CLAUDE.md
 **/build

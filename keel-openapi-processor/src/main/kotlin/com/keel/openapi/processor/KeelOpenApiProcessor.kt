@@ -163,8 +163,7 @@ class KeelOpenApiProcessor(
             return null
         }
 
-        val simpleName = classDecl.simpleName.asString()
-        val typeName = "${simpleName}InterceptorMetadata"
+        val typeName = generatedMetadataTypeName(className, "InterceptorMetadata")
         val packageName = "com.keel.generated"
         val fqn = "$packageName.$typeName"
         val routeEntries = routeInterceptors.joinToString(",\n") { route ->
@@ -238,6 +237,16 @@ class KeelOpenApiProcessor(
 
     private fun escape(value: String): String {
         return value.replace("\\", "\\\\").replace("\"", "\\\"")
+    }
+
+    private fun generatedMetadataTypeName(className: String, suffix: String): String {
+        val sanitized = className.map { char ->
+            when {
+                char.isLetterOrDigit() -> char
+                else -> '_'
+            }
+        }.joinToString("")
+        return "${sanitized}_${suffix}"
     }
 
     private data class GeneratedRouteMetadataDescriptor(

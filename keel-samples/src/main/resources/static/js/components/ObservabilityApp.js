@@ -9,12 +9,12 @@ import './PanelMetrics.js';
 import './PanelOpenApi.js';
 
 import { KeelElement } from './base/KeelElement.js';
-import { state, groupedTraces } from '../state.js';
+import { state } from '../state.js';
 import { TABS } from '../config.js';
 import { clamp } from '../utils.js';
-import { setActiveTab, hydrateHash, downloadLogsJSON, downloadLogsText } from '../events.js';
-import { refreshLogs, refreshMetrics, refreshOpenApiSpec, togglePlugin } from '../api.js';
-import { connectStream, startStreamPoll } from '../stream.js';
+import { setActiveTab, hydrateHash } from '../events.js';
+import { refreshLogs, refreshOpenApiSpec, refreshTraceSummaryList, refreshTraceTimelineAndDetail, togglePlugin } from '../api.js';
+import { connectAllStreams, disconnectAllStreams, reconnectAllStreams } from '../stream.js';
 import { renderChrome, renderLogsPanel, renderMetricsPanel, renderNodesPanel, renderOpenApiPanel, renderTopologyPanel, renderTracesPanel } from '../render.js';
 
 export class ObservabilityApp extends KeelElement {
@@ -24,13 +24,64 @@ export class ObservabilityApp extends KeelElement {
 
     template() {
         return `
-            <div class="app-shell">
+            <style>
+                .app-shell {
+                    display: grid;
+                    grid-template-columns: 240px minmax(0, 1fr);
+                    height: 100vh;
+                }
+                .main-shell {
+                    min-width: 0;
+                    display: flex;
+                    flex-direction: column;
+                    height: 100vh;
+                }
+                .content {
+                    padding: 24px 28px 24px;
+                    flex: 1 1 0;
+                    min-height: 0;
+                    overflow: hidden;
+                    display: flex;
+                    flex-direction: column;
+                }
+                .tab-panel {
+                    display: none;
+                    height: 100%;
+                    flex: 1 1 0;
+                    min-height: 0;
+                    flex-direction: column;
+                    overflow: hidden;
+                    animation: panel-enter 220ms var(--ease-smooth);
+                }
+                .tab-panel.is-active {
+                    display: flex;
+                }
+                @keyframes panel-enter {
+                    from {
+                        opacity: 0;
+                        transform: translateY(6px);
+                    }
+                    to {
+                        opacity: 1;
+                        transform: translateY(0);
+                    }
+                }
+                @media (max-width: 980px) {
+                    .app-shell {
+                        grid-template-columns: 1fr;
+                    }
+                    .content {
+                        padding: 20px;
+                    }
+                }
+            </style>
+            <div class="app-shell" data-ref="appShell">
                 <keel-sidebar data-ref="sidebar"></keel-sidebar>
 
-                <div class="main-shell">
+                <div class="main-shell" data-ref="mainShell">
                     <keel-topbar data-ref="topbar"></keel-topbar>
 
-                    <main class="content">
+                    <main class="content" data-ref="content">
                         <keel-panel-topology class="tab-panel" data-ref="topologyPanel"></keel-panel-topology>
                         <keel-panel-traces class="tab-panel" data-ref="tracesPanel"></keel-panel-traces>
                         <keel-panel-logs class="tab-panel" data-ref="logsPanel"></keel-panel-logs>
@@ -71,10 +122,9 @@ export class ObservabilityApp extends KeelElement {
             'keel:node-clear',
             'keel:trace-select',
             'keel:span-select',
+            'keel:traces-refresh',
             'keel:log-select',
             'keel:logs-refresh',
-            'keel:download-logs-json',
-            'keel:download-logs-text',
             'keel:topology-zoom-in',
             'keel:topology-zoom-out',
             'keel:topology-layout-reset',
@@ -111,15 +161,9 @@ export class ObservabilityApp extends KeelElement {
         if (type === 'keel:stream-toggle') {
             state.streamEnabled = !state.streamEnabled;
             if (state.streamEnabled) {
-                connectStream();
+                connectAllStreams();
             } else {
-                if (state.eventSource) state.eventSource.close();
-                state.eventSource = null;
-                if (state.streamIntervalId !== null) {
-                    clearInterval(state.streamIntervalId);
-                    state.streamIntervalId = null;
-                }
-                state.connectionState = 'Paused';
+                disconnectAllStreams();
             }
             renderChrome();
             return;
@@ -127,7 +171,9 @@ export class ObservabilityApp extends KeelElement {
         if (type === 'keel:refresh-interval-change') {
             state.refreshIntervalMs = detail.ms;
             state.refreshOverlayOpen = false;
-            startStreamPoll();
+            if (state.streamEnabled) {
+                reconnectAllStreams();
+            }
             this.renderChrome(state);
             return;
         }
@@ -154,36 +200,38 @@ export class ObservabilityApp extends KeelElement {
         }
         if (type === 'keel:trace-select') {
             state.selectedTraceId = detail.traceId;
-            const group = groupedTraces().find((item) => item.traceId === detail.traceId);
-            state.selectedSpanId = group && group.spans[0] ? group.spans[0].spanId : null;
-            renderTracesPanel();
+            state.selectedSpanId = detail.spanId || null;
+            await refreshTraceTimelineAndDetail();
             return;
         }
         if (type === 'keel:span-select') {
             state.selectedSpanId = detail.spanId;
-            renderTracesPanel();
+            await refreshTraceTimelineAndDetail();
+            return;
+        }
+        if (type === 'keel:traces-refresh') {
+            state.traceFilters.query = detail.query ?? state.traceFilters.query;
+            state.traceFilters.status = detail.status ?? state.traceFilters.status;
+            state.traceFilters.service = detail.service ?? state.traceFilters.service;
+            state.traceFilters.window = detail.window ?? state.traceFilters.window;
+            state.traceFilters.limit = detail.limit ?? state.traceFilters.limit;
+            if ('traceId' in detail) state.selectedTraceId = detail.traceId || null;
+            if ('spanId' in detail) state.selectedSpanId = detail.spanId || null;
+            await refreshTraceSummaryList({ refreshTimeline: true });
             return;
         }
         if (type === 'keel:log-select') {
-            state.selectedLogKey = detail.logKey;
+            state.selectedLogKey = state.selectedLogKey === detail.logKey ? null : detail.logKey;
             renderLogsPanel();
             return;
         }
         if (type === 'keel:logs-refresh') {
             state.logFilters.query = detail.query;
-            state.logFilters.level = detail.level;
-            state.logFilters.source = detail.source;
-            state.logFilters.window = detail.window;
+            state.logFilters.level = detail.level || '';
+            state.logFilters.window = detail.window || state.logFilters.window;
+            state.logFilters.page = detail.page || 1;
+            state.logFilters.pageSize = detail.pageSize || state.logFilters.pageSize;
             await refreshLogs();
-            await refreshMetrics();
-            return;
-        }
-        if (type === 'keel:download-logs-json') {
-            downloadLogsJSON();
-            return;
-        }
-        if (type === 'keel:download-logs-text') {
-            downloadLogsText();
             return;
         }
         if (type === 'keel:topology-zoom-in') {
@@ -230,6 +278,12 @@ export class ObservabilityApp extends KeelElement {
 
     renderChrome(appState) {
         this.ensureInitialized();
+        this.refs.appShell.style.gridTemplateColumns = '';
+        this.refs.sidebar.style.display = '';
+        this.refs.topbar.style.display = '';
+        this.refs.content.style.padding = '';
+        this.refs.content.style.overflow = '';
+
         this.refs.sidebar.render(appState);
         this.refs.topbar.render(appState);
         this.refs.overlay.render({

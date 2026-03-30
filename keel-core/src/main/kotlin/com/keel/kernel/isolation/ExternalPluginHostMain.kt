@@ -8,6 +8,7 @@ import com.keel.kernel.plugin.PluginApiException
 import com.keel.kernel.plugin.DefaultPluginRequestContext
 import com.keel.kernel.plugin.PluginDescriptor
 import com.keel.kernel.plugin.KeelInterceptorResult
+import com.keel.kernel.plugin.PluginNodeAssetMetadata
 import com.keel.kernel.plugin.decodeRequestBody
 import com.keel.kernel.plugin.encodeResponseBody
 import com.keel.kernel.plugin.executeKeelInterceptors
@@ -40,6 +41,7 @@ import com.keel.jvm.runtime.PluginJvmFrameCodec
 import com.keel.jvm.runtime.PluginJvmJson
 import com.keel.jvm.runtime.ReloadPrepareRequest
 import com.keel.jvm.runtime.ReloadPrepareResponse
+import com.keel.jvm.runtime.RuntimeNodeAssetMetadata
 import com.keel.jvm.runtime.SseCloseRequest
 import com.keel.jvm.runtime.SseCloseResponse
 import com.keel.jvm.runtime.SseOpenRequest
@@ -49,6 +51,7 @@ import com.keel.jvm.runtime.StaticFetchResponse
 import com.keel.jvm.runtime.ShutdownRequest
 import com.keel.jvm.runtime.ShutdownResponse
 import java.io.File
+import java.lang.management.ManagementFactory
 import java.net.StandardProtocolFamily
 import java.net.UnixDomainSocketAddress
 import java.nio.channels.ServerSocketChannel
@@ -100,26 +103,7 @@ data class ExternalPluginHostArgs(
 )
 
 fun parseExternalPluginHostArgs(args: Array<String>): ExternalPluginHostArgs {
-    val parsedArgs = args.associate {
-        val parts = it.removePrefix("--").split("=", limit = 2)
-        parts[0] to parts.getOrElse(1) { "" }
-    }
-    val commMode = parsedArgs["comm-mode"]?.let { JvmCommunicationMode.valueOf(it.uppercase()) } 
-        ?: JvmCommunicationMode.UDS
-
-    return ExternalPluginHostArgs(
-        pluginClass = requireNotNull(parsedArgs["plugin-class"]) { "Missing --plugin-class" },
-        commMode = commMode,
-        invokeSocketPath = parsedArgs["invoke-socket-path"]?.let { Path.of(it) },
-        adminSocketPath = parsedArgs["admin-socket-path"]?.let { Path.of(it) },
-        eventSocketPath = parsedArgs["event-socket-path"]?.let { Path.of(it) },
-        invokePort = parsedArgs["invoke-port"]?.toIntOrNull(),
-        adminPort = parsedArgs["admin-port"]?.toIntOrNull(),
-        eventPort = parsedArgs["event-port"]?.toIntOrNull(),
-        authToken = requireNotNull(parsedArgs["auth-token"]) { "Missing --auth-token" },
-        generation = parsedArgs["generation"]?.toLongOrNull() ?: 1L,
-        configPath = parsedArgs["config-path"]?.takeIf { it.isNotBlank() }?.let(::File)
-    )
+    return ExternalPluginHostArgsParser().parse(args)
 }
 
 object ExternalPluginHostMain {
@@ -603,6 +587,10 @@ object ExternalPluginHostMain {
             "health-request" -> {
                 val request = PluginJvmJson.instance.decodeFromString(HealthRequest.serializer(), payload)
                 val accepted = validateControlRequest(request.pluginId, request.generation, request.authToken, plugin.descriptor.pluginId, generation, authToken)
+                val processMxBean = ManagementFactory.getOperatingSystemMXBean()
+                val memoryMxBean = ManagementFactory.getMemoryMXBean()
+                val heapUsage = memoryMxBean.heapMemoryUsage
+                val heapMax = if (heapUsage.max > 0) heapUsage.max else heapUsage.committed
                 PluginJvmJson.instance.encodeToString(
                     HealthResponse.serializer(),
                     HealthResponse(
@@ -615,7 +603,12 @@ object ExternalPluginHostMain {
                         healthState = if (accepted && eventEmitter.connected()) PluginHealthState.HEALTHY.name else PluginHealthState.DEGRADED.name,
                         startedAtEpochMs = startedAt,
                         eventQueueDepth = eventEmitter.queueDepth(),
-                        droppedLogCount = eventEmitter.droppedLogCount()
+                        droppedLogCount = eventEmitter.droppedLogCount(),
+                        processCpuLoadPercent = processMxBean.readDoubleMetric("getProcessCpuLoad")?.takeIf { it >= 0.0 }?.times(100.0),
+                        heapUsedBytes = heapUsage.used,
+                        heapMaxBytes = heapMax,
+                        heapUsedPercent = memoryMxBean.memoryUsagePercent(),
+                        assetMetadata = plugin.descriptor.nodeAssetMetadata?.toRuntimeAssetMetadata()
                     )
                 )
             }
@@ -863,6 +856,7 @@ object ExternalPluginHostMain {
         inFlightInvokes.incrementAndGet()
         var scope: io.opentelemetry.context.Scope? = null
         var span: io.opentelemetry.api.trace.Span? = null
+        var responseStatus = 200
         try {
             val parentContext = ObservabilityTracing.extract(request.traceparent, request.tracestate)
             span = tracer.spanBuilder("plugin.handle")
@@ -871,9 +865,11 @@ object ExternalPluginHostMain {
                 .setAttribute("keel.jvm", "plugin")
                 .setAttribute("keel.edge.from", "kernel")
                 .setAttribute("keel.edge.to", plugin.descriptor.pluginId)
+                .setAttribute("http.method", request.method)
+                .setAttribute("http.route", request.rawPath)
+                .setAttribute("network.protocol.name", "HTTP")
                 .startSpan()
             scope = span?.makeCurrent()
-            val requestBody = decodeRequestBody(request.bodyJson, endpoint.requestType)
             val context = DefaultPluginRequestContext(
                 pluginId = request.pluginId,
                 method = request.method,
@@ -888,6 +884,7 @@ object ExternalPluginHostMain {
             val timeoutMs = endpoint.executionPolicy.timeoutMs ?: descriptor.callTimeoutMs
             val interception = withTimeoutOrNull(timeoutMs.milliseconds) {
                 executeKeelInterceptors(context, interceptors) {
+                    val requestBody = decodeRequestBody(request.bodyJson, endpoint.requestType)
                     endpoint.execute(context, requestBody)
                 }
             } ?: run {
@@ -929,6 +926,7 @@ object ExternalPluginHostMain {
                             )
                         )
                     )
+                    responseStatus = interception.status
                     return
                 }
             }
@@ -952,9 +950,11 @@ object ExternalPluginHostMain {
                         )
                     )
                 )
+                responseStatus = 413
                 return
             }
 
+            responseStatus = result.status
             PluginJvmFrameCodec.write(
                 channel,
                 PluginJvmJson.instance.encodeToString(
@@ -973,6 +973,7 @@ object ExternalPluginHostMain {
                 )
             )
         } catch (error: PluginApiException) {
+            responseStatus = error.status
             PluginJvmFrameCodec.write(
                 channel,
                 PluginJvmJson.instance.encodeToString(
@@ -990,6 +991,7 @@ object ExternalPluginHostMain {
                 )
             )
         } catch (error: Throwable) {
+            responseStatus = 500
             eventEmitter.emitCritical(
                 PluginFailureEvent(
                     pluginId = plugin.descriptor.pluginId,
@@ -1018,6 +1020,7 @@ object ExternalPluginHostMain {
                 )
             )
         } finally {
+            span?.setAttribute("http.status_code", responseStatus.toLong())
             scope?.close()
             span?.end()
             inFlightInvokes.decrementAndGet()
@@ -1295,3 +1298,50 @@ private class PluginEventEmitter(
         }
     }
 }
+
+private fun java.lang.management.MemoryMXBean.memoryUsagePercent(): Double? {
+    val usage = heapMemoryUsage ?: return null
+    val max = usage.max.takeIf { it > 0 } ?: usage.committed.takeIf { it > 0 } ?: return null
+    return ((usage.used.toDouble() / max.toDouble()) * 100.0).coerceIn(0.0, 100.0)
+}
+
+private fun Any.readDoubleMetric(methodName: String): Double? {
+    val method = findPublicMethod(javaClass, methodName) ?: return null
+    return runCatching {
+        when (val value = method.invoke(this)) {
+            is Double -> value
+            is Number -> value.toDouble()
+            else -> null
+        }
+    }.getOrNull()
+}
+
+private fun findPublicMethod(clazz: Class<*>, methodName: String): java.lang.reflect.Method? {
+    for (iface in clazz.interfaces) {
+        if (java.lang.reflect.Modifier.isPublic(iface.modifiers)) {
+            try {
+                return iface.getMethod(methodName)
+            } catch (_: Exception) {
+            }
+        }
+        findPublicMethod(iface, methodName)?.let { return it }
+    }
+    if (java.lang.reflect.Modifier.isPublic(clazz.modifiers)) {
+        try {
+            return clazz.getMethod(methodName)
+        } catch (_: Exception) {
+        }
+    }
+    clazz.superclass?.let { findPublicMethod(it, methodName) }?.let { return it }
+    return null
+}
+
+private fun PluginNodeAssetMetadata.toRuntimeAssetMetadata(): RuntimeNodeAssetMetadata = RuntimeNodeAssetMetadata(
+    assetId = assetId,
+    address = address,
+    zone = zone,
+    region = region,
+    role = role,
+    roleDescription = roleDescription,
+    featured = featured
+)

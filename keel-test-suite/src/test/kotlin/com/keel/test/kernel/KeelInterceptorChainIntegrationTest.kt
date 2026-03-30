@@ -22,6 +22,7 @@ import io.ktor.client.request.post
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.HttpStatusCode
+import io.ktor.http.contentType
 import io.ktor.server.application.call
 import io.ktor.server.application.createRouteScopedPlugin
 import io.ktor.server.application.install
@@ -89,6 +90,58 @@ class KeelInterceptorChainIntegrationTest {
         }
         assertEquals(HttpStatusCode.OK, adminAllowed.status)
         assertTrue(adminAllowed.bodyAsText().contains("\"chain\":\"admin\""))
+    }
+
+    @Test
+    fun generatedInterceptorMetadataAppendsDefaultsUnlessCleared() = testApplication {
+        val koin = startKoin {}.koin
+        val manager = UnifiedPluginManager(koin)
+        manager.registerPlugin(GeneratedMetadataPlugin())
+
+        application {
+            install(ContentNegotiation) { json() }
+            install(SSE)
+            routing { manager.mountRoutes(this) }
+            kotlinx.coroutines.runBlocking { manager.startPlugin("generated-metadata") }
+        }
+
+        val secureUnauthorized = client.get("/api/plugins/generated-metadata/secure")
+        assertEquals(HttpStatusCode.Unauthorized, secureUnauthorized.status)
+
+        val secureAuthorized = client.get("/api/plugins/generated-metadata/secure") {
+            header("X-User", "alice")
+        }
+        assertEquals(HttpStatusCode.OK, secureAuthorized.status)
+        assertTrue(secureAuthorized.bodyAsText().contains("\"principal\":\"alice\""))
+        assertTrue(secureAuthorized.bodyAsText().contains("\"chain\":\"default>route\""))
+
+        val publicResponse = client.get("/api/plugins/generated-metadata/public")
+        assertEquals(HttpStatusCode.OK, publicResponse.status)
+        assertTrue(publicResponse.bodyAsText().contains("\"principal\":null"))
+        assertTrue(publicResponse.bodyAsText().contains("\"chain\":\"public\""))
+    }
+
+    @Test
+    fun interceptorsRejectUnauthorizedBeforeParsingMalformedBodiesInProcess() = testApplication {
+        val koin = startKoin {}.koin
+        val manager = UnifiedPluginManager(koin)
+        manager.registerPlugin(DslInterceptorPlugin("dsl-in-process-body", PluginRuntimeMode.IN_PROCESS))
+
+        application {
+            install(ContentNegotiation) { json() }
+            install(SSE)
+            manager.installConfiguredPluginApplicationKtorPlugins(this)
+            routing { manager.mountRoutes(this) }
+            kotlinx.coroutines.runBlocking {
+                manager.startPlugin("dsl-in-process-body")
+            }
+        }
+
+        val inProcessUnauthorized = client.post("/api/plugins/dsl-in-process-body/secure-body") {
+            contentType(io.ktor.http.ContentType.Application.Json)
+            setBody("{")
+        }
+        assertEquals(HttpStatusCode.Unauthorized, inProcessUnauthorized.status)
     }
 
     @Test
@@ -329,6 +382,10 @@ class KeelInterceptorChainIntegrationTest {
                 PluginResult(body = chainService.snapshot(this))
             }
 
+            post<ChainPayload, ChainSnapshot>("/secure-body") {
+                PluginResult(body = chainService.snapshot(this))
+            }
+
             route("/public") {
                 noInterceptors()
                 get<ChainSnapshot> {
@@ -341,6 +398,40 @@ class KeelInterceptorChainIntegrationTest {
                 get<ChainSnapshot> {
                     PluginResult(body = chainService.snapshot(this))
                 }
+            }
+        }
+    }
+
+    class GeneratedMetadataPlugin : StandardKeelPlugin {
+        override val descriptor: PluginDescriptor = PluginDescriptor(
+            pluginId = "generated-metadata",
+            version = "1.0.0",
+            displayName = "generated-metadata",
+            defaultRuntimeMode = PluginRuntimeMode.IN_PROCESS
+        )
+
+        private lateinit var chainService: ChainService
+
+        override fun modules() = listOf(
+            module {
+                single { ChainService() }
+                single { GeneratedDefaultInterceptor(get()) }
+                single { GeneratedRouteInterceptor(get()) }
+                single { GeneratedPublicInterceptor(get()) }
+            }
+        )
+
+        override suspend fun onStart(context: PluginRuntimeContext) {
+            chainService = context.privateScope.get()
+        }
+
+        override fun endpoints() = pluginEndpoints(descriptor.pluginId) {
+            get<ChainSnapshot>("/secure") {
+                PluginResult(body = chainService.snapshot(this))
+            }
+
+            get<ChainSnapshot>("/public") {
+                PluginResult(body = chainService.snapshot(this))
             }
         }
     }
@@ -372,6 +463,49 @@ class KeelInterceptorChainIntegrationTest {
         }
     }
 
+    class GeneratedDefaultInterceptor(
+        private val chainService: ChainService
+    ) : KeelRequestInterceptor {
+        override suspend fun intercept(
+            context: KeelRequestContext,
+            next: suspend () -> KeelInterceptorResult
+        ): KeelInterceptorResult {
+            val user = context.requestHeaders["X-User"]?.firstOrNull()
+                ?: return KeelInterceptorResult.reject(401, "Unauthorized")
+            context.principal = user
+            context.tenant = "tenant-$user"
+            context.attributes["chain"] = appendChain(context.attributes["chain"], "default")
+            context.attributes["service"] = chainService.hashCode().toString()
+            return next()
+        }
+    }
+
+    class GeneratedRouteInterceptor(
+        private val chainService: ChainService
+    ) : KeelRequestInterceptor {
+        override suspend fun intercept(
+            context: KeelRequestContext,
+            next: suspend () -> KeelInterceptorResult
+        ): KeelInterceptorResult {
+            context.attributes["chain"] = appendChain(context.attributes["chain"], "route")
+            context.attributes["service"] = chainService.hashCode().toString()
+            return next()
+        }
+    }
+
+    class GeneratedPublicInterceptor(
+        private val chainService: ChainService
+    ) : KeelRequestInterceptor {
+        override suspend fun intercept(
+            context: KeelRequestContext,
+            next: suspend () -> KeelInterceptorResult
+        ): KeelInterceptorResult {
+            context.attributes["chain"] = appendChain(context.attributes["chain"], "public")
+            context.attributes["service"] = chainService.hashCode().toString()
+            return next()
+        }
+    }
+
     class AdminDslInterceptor(
         private val chainService: ChainService
     ) : KeelRequestInterceptor {
@@ -398,6 +532,11 @@ class KeelInterceptorChainIntegrationTest {
         val chain: String
     )
 
+    @Serializable
+    data class ChainPayload(
+        val value: String
+    )
+
     companion object {
         private val serviceHeaderPlugin = createRouteScopedPlugin("dsl-service-scope") {
             onCall { call ->
@@ -405,4 +544,36 @@ class KeelInterceptorChainIntegrationTest {
             }
         }
     }
+}
+
+class GeneratedMetadataInterceptorProvider : com.keel.kernel.plugin.KeelGeneratedInterceptorMetadataProvider {
+    override val pluginClassName: String =
+        "com.keel.test.kernel.KeelInterceptorChainIntegrationTest\$GeneratedMetadataPlugin"
+
+    override val pluginInterceptors: List<String> = listOf(
+        "com.keel.test.kernel.KeelInterceptorChainIntegrationTest\$GeneratedDefaultInterceptor"
+    )
+
+    override val routeInterceptors: List<com.keel.kernel.plugin.GeneratedKeelRouteInterceptorMetadata> = listOf(
+        com.keel.kernel.plugin.GeneratedKeelRouteInterceptorMetadata(
+            method = "GET",
+            path = "/secure",
+            interceptorClassNames = listOf(
+                "com.keel.test.kernel.KeelInterceptorChainIntegrationTest\$GeneratedRouteInterceptor"
+            )
+        ),
+        com.keel.kernel.plugin.GeneratedKeelRouteInterceptorMetadata(
+            method = "GET",
+            path = "/public",
+            clearDefaults = true,
+            interceptorClassNames = listOf(
+                "com.keel.test.kernel.KeelInterceptorChainIntegrationTest\$GeneratedPublicInterceptor"
+            )
+        )
+    )
+}
+
+private fun appendChain(current: Any?, segment: String): String {
+    val chain = current?.toString().orEmpty()
+    return if (chain.isBlank()) segment else "$chain>$segment"
 }

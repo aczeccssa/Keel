@@ -1,5 +1,5 @@
 import { KeelElement } from './base/KeelElement.js';
-import { openApiOperations } from '../state.js';
+import { openApiOperations, state } from '../state.js';
 import { escapeHtml } from '../utils.js';
 import { API_BASE } from '../config.js';
 
@@ -329,6 +329,7 @@ export class PanelOpenApi extends KeelElement {
     template() {
         return `
             <style>
+                @import url('https://fonts.googleapis.com/css2?family=Newsreader:ital,wght@0,400;0,600;0,700;1,600&family=Quicksand:wght@300..700&display=swap');
                 :host {
                     --color-surface: #faf9f5;
                     --color-primary: #050c1b;
@@ -341,81 +342,361 @@ export class PanelOpenApi extends KeelElement {
                     --color-outline: #75777c;
                     --color-on-surface-variant: #44474b;
                     --font-headline: "Newsreader", serif;
-                    --font-body: "Inter", sans-serif;
+                    --font-body: "Quicksand", system-ui, -apple-system, sans-serif;
                     --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
                     overflow: hidden;
                 }
-                * { box-sizing: border-box; margin: 0; padding: 0; }
-                button { background: none; border: none; cursor: pointer; font-family: inherit; }
-                a { text-decoration: none; color: inherit; }
-                .app-container { display: flex; flex: 1; align-items: stretch; overflow: hidden; height: 100%; font-family: var(--font-body); color: var(--color-primary); line-height: 1.5; gap: 1.5rem; }
-                .secondary-sidebar { width: 18rem; padding: 2rem; background: rgba(255, 255, 255, 0.7); border-radius: 1.5rem; backdrop-filter: blur(8px); overflow-y: auto; overflow-x: hidden; display: none; min-height: 0; max-height: 100%; flex: 0 0 18rem; }
-                @media (min-width: 1280px) { .secondary-sidebar { display: block; } }
-                .main-content { flex: 1; padding: 2rem; overflow-y: auto; overflow-x: hidden; background: rgba(255, 255, 255, 0.7); border-radius: 1.5rem; min-width: 0; min-height: 0; background-image: radial-gradient(circle, rgba(5, 12, 27, 0.08) 1px, transparent 1px); background-size: 24px 24px; background-origin: border-box; }
-                @media (min-width: 1024px) { .main-content { padding: 2rem; } }
-                .content-wrapper { max-width: 96rem; margin: 0 auto; }
-                .font-headline { font-family: var(--font-headline); }
-                .font-mono { font-family: var(--font-mono); }
-                .text-primary { color: var(--color-primary); }
-                .text-secondary { color: var(--color-secondary); }
-                .text-outline { color: var(--color-outline); }
-                .text-on-surface-variant { color: var(--color-on-surface-variant); }
-                .hide-scrollbar::-webkit-scrollbar { display: none; }
-                .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
-                .nav-group-title { font-size: 0.625rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.2em; color: var(--color-outline); margin-bottom: 1rem; }
-                .nav-button { display: flex; align-items: center; gap: 0.75rem; width: 100%; padding: 1rem; border-radius: 4rem; transition: all 0.2s; font-size: 0.875rem; font-weight: 500; text-transform: capitalize; }
-                .nav-button.active { background-color: #fcfcfc; color: #0f172a; box-shadow: rgba(15, 23, 42, 0.08) 0px 10px 28px; }
-                .nav-button:not(.active) { color: #475569; }
-                .nav-button:not(.active):hover { background-color: #f5f5f4; }
-                .search-container { display: flex; gap: 1rem; margin-bottom: 4rem; flex-direction: column; }
-                @media (min-width: 640px) { .search-container { flex-direction: row; } }
-                .search-input-wrapper { position: relative; flex: 1; }
-                .search-icon { position: absolute; left: 1rem; top: 50%; transform: translateY(-50%); color: var(--color-outline); width: 1.25rem; height: 1.25rem; pointer-events: none; }
-                .search-input { width: 100%; background: #fff; border: 1px solid #e5e7eb; border-radius: 0.75rem; padding: 1rem 1rem 1rem 3rem; font-family: inherit; font-size: 1rem; color: var(--color-primary); outline: none; transition: box-shadow 0.2s; }
-                .search-input:focus { box-shadow: 0 0 0 2px #e5e7eb; }
-                .btn-download { padding: 1rem 1.5rem; background: #fff; border: 1px solid #e5e7eb; border-radius: 0.75rem; font-weight: 700; font-size: 0.875rem; display: flex; align-items: center; gap: 0.5rem; transition: background 0.2s; }
-                .btn-download:hover { background: #f5f5f4; }
-                .endpoint-card { display: grid; grid-template-columns: 1fr; gap: 3rem; padding: 4rem 0; border-bottom: 1px solid rgba(229, 231, 235, 0.6); }
-                .endpoint-card:first-child { padding-top: 0; }
-                .endpoint-card:last-child { border-bottom: none; }
-                @media (min-width: 1024px) { .endpoint-card { grid-template-columns: 1fr 1fr; } }
-                .method-badge { padding: 0.25rem 0.75rem; font-size: 0.6875rem; font-weight: 700; border-radius: 9999px; text-transform: uppercase; letter-spacing: 0.1em; display: inline-block; }
-                .bg-get { background: var(--color-secondary-container); color: var(--color-on-secondary-container); }
-                .bg-post { background: var(--color-primary); color: #fff; }
-                .bg-put { background: #2563eb; color: #fff; }
-                .bg-delete { background: #dc2626; color: #fff; }
-                .bg-patch { background: #d97706; color: #fff; }
-                .bg-options, .bg-head, .bg-trace { background: #64748b; color: #fff; }
-                .schema-table-wrap { border: 1px solid #f5f5f4; background: var(--color-surface-container-low); border-radius: 12px; overflow: hidden; }
-                .schema-table { width: 100%; text-align: left; font-size: 0.875rem; border-collapse: collapse; }
-                .schema-table th,
-                .schema-table td { padding: 0.75rem 1rem; vertical-align: top; border-bottom: 1px solid rgba(229, 231, 235, 0.5); }
-                .schema-table th { font-weight: 600; font-size: 0.625rem; text-transform: uppercase; color: var(--color-on-surface-variant); background: rgba(229, 231, 235, 0.5); }
-                .schema-table tbody tr:last-child td { border-bottom: none; }
-                .schema-table tr:hover td { background: rgba(249, 250, 251, 0.5); }
-                .hightlight-code-block { border-radius: 0.75rem; background-color: #0f172a; position: relative; overflow: visible; }
-                .hightlight-code-block pre { margin: 0; padding: 1.5rem; overflow: visible; white-space: pre-wrap; word-break: break-word; font-family: var(--font-mono); font-size: 0.875rem; line-height: 1.5; color: #c5c8c6; }
-                .code-header { position: absolute; right: 1rem; top: 1rem; display: flex; align-items: center; gap: 0.5rem; color: rgba(255, 255, 255, 0.4); z-index: 10; }
-                .copy-btn { color: inherit; display: flex; align-items: center; }
-                .copy-btn:hover { color: #fff; }
-                .hl-key { color: #96CBFE; }
-                .hl-string { color: #A8FF60; }
-                .hl-number { color: #FF73FD; }
-                .hl-boolean { color: #99CC99; }
-                .hl-keyword { color: #C6C5FE; font-weight: bold; }
-                @keyframes popIn { 0% { opacity: 0; transform: translateY(20px); } 100% { opacity: 1; transform: translateY(0); } }
-                .animate-pop-in { animation: popIn 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
-                @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .5; } }
-                .animate-pulse { animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
-                .empty-panel, .error-panel { background:#fff; padding:2rem; border-radius:1rem; border:1px solid #f5f5f4; margin-bottom:2rem; }
-                .error-panel pre { margin-top: 1rem; white-space: pre-wrap; word-break: break-word; color: var(--color-on-surface-variant); }
-                .retry-btn, .clear-btn { color: var(--color-secondary); font-weight: 700; font-size: 14px; margin-top: 1rem; }
+                .openapi-app * {
+                    box-sizing: border-box;
+                    margin: 0;
+                    padding: 0;
+                }
+                .openapi-app button {
+                    background: none;
+                    border: none;
+                    cursor: pointer;
+                    font-family: inherit;
+                }
+                .openapi-app a {
+                    text-decoration: none;
+                    color: inherit;
+                }
+                .openapi-app {
+                    display: flex;
+                    flex: 1;
+                    align-items: stretch;
+                    overflow: hidden;
+                    height: 100%;
+                    font-family: var(--font-body);
+                    color: var(--color-primary);
+                    line-height: 1.5;
+                    gap: 1.5rem;
+                }
+                .openapi-app .secondary-sidebar {
+                    width: 18rem;
+                    padding: 2rem;
+                    background: rgba(255, 255, 255, 0.7);
+                    border-radius: 1.5rem;
+                    backdrop-filter: blur(8px);
+                    overflow-y: auto;
+                    overflow-x: hidden;
+                    display: none;
+                    min-height: 0;
+                    max-height: 100%;
+                    flex: 0 0 18rem;
+                }
+                @media (min-width: 1280px) {
+                    .openapi-app .secondary-sidebar {
+                        display: block;
+                    }
+                }
+                .openapi-app .main-content {
+                    flex: 1;
+                    padding: 2rem;
+                    overflow-y: auto;
+                    overflow-x: hidden;
+                    background: rgba(255, 255, 255, 0.7);
+                    border-radius: 1.5rem;
+                    min-width: 0;
+                    min-height: 0;
+                    background-image: radial-gradient(circle, rgba(5, 12, 27, 0.08) 1px, transparent 1px);
+                    background-size: 24px 24px;
+                    background-origin: border-box;
+                }
+                .openapi-app .content-wrapper {
+                    max-width: 96rem;
+                    margin: 0 auto;
+                }
+                .openapi-app .font-headline {
+                    font-family: var(--font-headline);
+                }
+                .openapi-app .font-mono {
+                    font-family: var(--font-mono);
+                }
+                .openapi-app .text-primary {
+                    color: var(--color-primary);
+                }
+                .openapi-app .text-secondary {
+                    color: var(--color-secondary);
+                }
+                .openapi-app .text-outline {
+                    color: var(--color-outline);
+                }
+                .openapi-app .text-on-surface-variant {
+                    color: var(--color-on-surface-variant);
+                }
+                .openapi-app .hide-scrollbar::-webkit-scrollbar {
+                    display: none;
+                }
+                .openapi-app .hide-scrollbar {
+                    -ms-overflow-style: none;
+                    scrollbar-width: none;
+                }
+                .openapi-app .nav-group-title {
+                    font-size: 0.625rem;
+                    font-weight: 700;
+                    text-transform: uppercase;
+                    letter-spacing: 0.2em;
+                    color: var(--color-outline);
+                    margin-bottom: 1rem;
+                }
+                .openapi-app .nav-button {
+                    display: flex;
+                    align-items: center;
+                    gap: 0.75rem;
+                    width: 100%;
+                    padding: 1rem;
+                    border-radius: 4rem;
+                    transition: all 0.2s;
+                    font-size: 0.875rem;
+                    font-weight: 500;
+                    text-transform: capitalize;
+                }
+                .openapi-app .nav-button.active {
+                    background-color: #fcfcfc;
+                    color: #0f172a;
+                    box-shadow: rgba(15, 23, 42, 0.08) 0 10px 28px;
+                }
+                .openapi-app .nav-button:not(.active) {
+                    color: #475569;
+                }
+                .openapi-app .nav-button:not(.active):hover {
+                    background-color: #f5f5f4;
+                }
+                .openapi-app .search-container {
+                    display: flex;
+                    gap: 1rem;
+                    margin-bottom: 4rem;
+                    flex-direction: column;
+                }
+                @media (min-width: 640px) {
+                    .openapi-app .search-container {
+                        flex-direction: row;
+                    }
+                }
+                .openapi-app .search-input-wrapper {
+                    position: relative;
+                    flex: 1;
+                }
+                .openapi-app .search-icon {
+                    position: absolute;
+                    left: 1rem;
+                    top: 50%;
+                    transform: translateY(-50%);
+                    color: var(--color-outline);
+                    width: 1.25rem;
+                    height: 1.25rem;
+                    pointer-events: none;
+                }
+                .openapi-app .search-input {
+                    width: 100%;
+                    background: #fff;
+                    border: 1px solid #e5e7eb;
+                    border-radius: 0.75rem;
+                    padding: 1rem 1rem 1rem 3rem;
+                    font-family: inherit;
+                    font-size: 1rem;
+                    color: var(--color-primary);
+                    outline: none;
+                    transition: box-shadow 0.2s;
+                }
+                .openapi-app .search-input:focus {
+                    box-shadow: 0 0 0 2px #e5e7eb;
+                }
+                .openapi-app .btn-download {
+                    padding: 1rem 1.5rem;
+                    background: #fff;
+                    border: 1px solid #e5e7eb;
+                    border-radius: 0.75rem;
+                    font-weight: 700;
+                    font-size: 0.875rem;
+                    display: flex;
+                    align-items: center;
+                    gap: 0.5rem;
+                    transition: background 0.2s;
+                }
+                .openapi-app .btn-download:hover {
+                    background: #f5f5f4;
+                }
+                .openapi-app .endpoint-card {
+                    display: grid;
+                    grid-template-columns: 1fr;
+                    gap: 3rem;
+                    padding: 4rem 0;
+                    border-bottom: 1px solid rgba(229, 231, 235, 0.6);
+                }
+                .openapi-app .endpoint-card:first-child {
+                    padding-top: 0;
+                }
+                .openapi-app .endpoint-card:last-child {
+                    border-bottom: none;
+                }
+                @media (min-width: 1024px) {
+                    .openapi-app .endpoint-card {
+                        grid-template-columns: 1fr 1fr;
+                    }
+                }
+                .openapi-app .method-badge {
+                    padding: 0.25rem 0.75rem;
+                    font-size: 0.6875rem;
+                    font-weight: 700;
+                    border-radius: 9999px;
+                    text-transform: uppercase;
+                    letter-spacing: 0.1em;
+                    display: inline-block;
+                }
+                .openapi-app .bg-get {
+                    background: var(--color-secondary-container);
+                    color: var(--color-on-secondary-container);
+                }
+                .openapi-app .bg-post {
+                    background: var(--color-primary);
+                    color: #fff;
+                }
+                .openapi-app .bg-put {
+                    background: #2563eb;
+                    color: #fff;
+                }
+                .openapi-app .bg-delete {
+                    background: #dc2626;
+                    color: #fff;
+                }
+                .openapi-app .bg-patch {
+                    background: #d97706;
+                    color: #fff;
+                }
+                .openapi-app .bg-options,
+                .openapi-app .bg-head,
+                .openapi-app .bg-trace {
+                    background: #64748b;
+                    color: #fff;
+                }
+                .openapi-app .schema-table-wrap {
+                    border: 1px solid #f5f5f4;
+                    background: var(--color-surface-container-low);
+                    border-radius: 12px;
+                    overflow: hidden;
+                }
+                .openapi-app .schema-table {
+                    width: 100%;
+                    text-align: left;
+                    font-size: 0.875rem;
+                    border-collapse: collapse;
+                }
+                .openapi-app .schema-table th,
+                .openapi-app .schema-table td {
+                    padding: 0.75rem 1rem;
+                    vertical-align: top;
+                    border-bottom: 1px solid rgba(229, 231, 235, 0.5);
+                }
+                .openapi-app .schema-table th {
+                    font-weight: 600;
+                    font-size: 0.625rem;
+                    text-transform: uppercase;
+                    color: var(--color-on-surface-variant);
+                    background: rgba(229, 231, 235, 0.5);
+                }
+                .openapi-app .schema-table tbody tr:last-child td {
+                    border-bottom: none;
+                }
+                .openapi-app .schema-table tr:hover td {
+                    background: rgba(249, 250, 251, 0.5);
+                }
+                .openapi-app .hightlight-code-block {
+                    border-radius: 0.75rem;
+                    background-color: #0f172a;
+                    position: relative;
+                    overflow: visible;
+                }
+                .openapi-app .hightlight-code-block pre {
+                    margin: 0;
+                    padding: 1.5rem;
+                    overflow: visible;
+                    white-space: pre-wrap;
+                    word-break: break-word;
+                    font-family: var(--font-mono);
+                    font-size: 0.875rem;
+                    line-height: 1.5;
+                    color: #c5c8c6;
+                }
+                .openapi-app .code-header {
+                    position: absolute;
+                    right: 1rem;
+                    top: 1rem;
+                    display: flex;
+                    align-items: center;
+                    gap: 0.5rem;
+                    color: rgba(255, 255, 255, 0.4);
+                    z-index: 10;
+                }
+                .openapi-app .copy-btn {
+                    color: inherit;
+                    display: flex;
+                    align-items: center;
+                }
+                .openapi-app .copy-btn:hover {
+                    color: #fff;
+                }
+                .openapi-app .hl-key { color: #96CBFE; }
+                .openapi-app .hl-string { color: #A8FF60; }
+                .openapi-app .hl-number { color: #FF73FD; }
+                .openapi-app .hl-boolean { color: #99CC99; }
+                .openapi-app .hl-keyword {
+                    color: #C6C5FE;
+                    font-weight: bold;
+                }
+                @keyframes openapi-popIn {
+                    0% {
+                        opacity: 0;
+                        transform: translateY(20px);
+                    }
+                    100% {
+                        opacity: 1;
+                        transform: translateY(0);
+                    }
+                }
+                .openapi-app .animate-pop-in {
+                    animation: openapi-popIn 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+                }
+                @keyframes openapi-pulse {
+                    0%, 100% {
+                        opacity: 1;
+                    }
+                    50% {
+                        opacity: 0.5;
+                    }
+                }
+                .openapi-app .animate-pulse {
+                    animation: openapi-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+                }
+                .openapi-app .empty-panel,
+                .openapi-app .error-panel {
+                    background: #fff;
+                    padding: 2rem;
+                    border-radius: 1rem;
+                    border: 1px solid #f5f5f4;
+                    margin-bottom: 2rem;
+                }
+                .openapi-app .error-panel pre {
+                    margin-top: 1rem;
+                    white-space: pre-wrap;
+                    word-break: break-word;
+                    color: var(--color-on-surface-variant);
+                }
+                .openapi-app .retry-btn,
+                .openapi-app .clear-btn {
+                    color: var(--color-secondary);
+                    font-weight: 700;
+                    font-size: 14px;
+                    margin-top: 1rem;
+                }
                 @media (max-width: 1279px) {
-                    .app-container { padding: 1rem; }
-                    .main-content { border-radius: 1.25rem; }
+                    .openapi-app .main-content {
+                        border-radius: 1.25rem;
+                    }
                 }
             </style>
-            <div class="app-container">
+            <div class="openapi-app">
                 <aside class="secondary-sidebar hide-scrollbar" data-ref="sidebar"></aside>
                 <main class="main-content">
                     <div class="content-wrapper" data-ref="content"></div>
@@ -450,7 +731,14 @@ export class PanelOpenApi extends KeelElement {
         this.refs.content.addEventListener('click', async (event) => {
             const downloadBtn = event.target.closest('[data-role="download-spec"]');
             if (downloadBtn) {
-                window.location.href = `${API_BASE}/_system/docs/openapi.json`;
+                const spec = state.openApiSpec;
+                if (!spec) return;
+                const blob = new Blob([JSON.stringify(spec, null, 2)], { type: 'application/json' });
+                const anchor = document.createElement('a');
+                anchor.href = URL.createObjectURL(blob);
+                anchor.download = 'keel-openapi.json';
+                anchor.click();
+                URL.revokeObjectURL(anchor.href);
                 return;
             }
 

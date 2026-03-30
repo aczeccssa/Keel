@@ -23,6 +23,149 @@ function svgIcon(name, className = 'nav-icon-svg') {
 export class SidebarShell extends KeelElement {
     template() {
         return `
+            <style>
+                .sidebar {
+                    height: 100vh;
+                    padding: 28px 18px;
+                    background: rgba(247, 244, 237, 0.86);
+                    backdrop-filter: blur(18px);
+                    border-right: 1px solid var(--line);
+                    display: flex;
+                    flex-direction: column;
+                    gap: 24px;
+                }
+                .brand {
+                    padding: 6px 10px;
+                }
+                .brand h1 {
+                    margin: 0;
+                    font-family: var(--font-headline);
+                    font-size: 28px;
+                    font-style: italic;
+                    font-weight: 700;
+                    letter-spacing: -0.03em;
+                }
+                .brand p {
+                    margin: 8px 0 0;
+                    color: var(--muted);
+                    font-size: 11px;
+                    font-weight: 700;
+                    letter-spacing: 0.16em;
+                    text-transform: uppercase;
+                }
+                .nav-list,
+                .meta-list {
+                    display: grid;
+                    gap: 8px;
+                }
+                .nav-link,
+                .meta-link {
+                    display: flex;
+                    align-items: center;
+                    justify-content: space-between;
+                    gap: 10px;
+                    padding: 14px 16px;
+                    border-radius: 999px;
+                    color: #475467;
+                    transition: all 250ms var(--ease-smooth);
+                }
+                .nav-link:hover,
+                .meta-link:hover {
+                    transform: translateX(4px);
+                    background: rgba(255, 255, 255, 0.7);
+                }
+                .nav-link.is-active {
+                    background: var(--panel-strong);
+                    color: var(--navy);
+                    box-shadow: 0 10px 28px rgba(15, 23, 42, 0.08);
+                }
+                .nav-link-label {
+                    display: flex;
+                    align-items: center;
+                    gap: 10px;
+                    min-width: 0;
+                    flex: 1;
+                }
+                .nav-icon {
+                    width: 30px;
+                    height: 30px;
+                    border-radius: 10px;
+                    background: rgba(15, 23, 42, 0.06);
+                    display: inline-flex;
+                    align-items: center;
+                    justify-content: center;
+                    font-size: 14px;
+                    font-weight: 800;
+                    flex-shrink: 0;
+                }
+                .nav-icon svg {
+                    width: 16px;
+                    height: 16px;
+                }
+                .nav-link.is-active .nav-icon {
+                    background: rgba(15, 118, 110, 0.12);
+                    color: var(--teal);
+                }
+                .nav-copy,
+                .meta-copy {
+                    min-width: 0;
+                    flex: 1;
+                }
+                .nav-copy strong,
+                .meta-copy strong {
+                    display: block;
+                    font-size: 12px;
+                    font-weight: 800;
+                    letter-spacing: 0.08em;
+                    text-transform: uppercase;
+                    white-space: nowrap;
+                    overflow: hidden;
+                    text-overflow: ellipsis;
+                }
+                .nav-copy span,
+                .meta-copy span {
+                    display: block;
+                    margin-top: 4px;
+                    color: var(--muted);
+                    font-size: 11px;
+                    white-space: nowrap;
+                    overflow: hidden;
+                    text-overflow: ellipsis;
+                }
+                .sidebar-footer {
+                    margin-top: auto;
+                    display: grid;
+                    gap: 12px;
+                }
+                .meta-link {
+                    padding: 10px 12px;
+                }
+                .sidebar-cta {
+                    width: 100%;
+                    border: 0;
+                    padding: 14px 18px;
+                    border-radius: 999px;
+                    background: var(--navy);
+                    color: #f8fafc;
+                    cursor: pointer;
+                    font-size: 11px;
+                    font-weight: 800;
+                    letter-spacing: 0.18em;
+                    text-transform: uppercase;
+                    transition: background 200ms ease;
+                }
+                .sidebar-cta:hover {
+                    background: var(--navy-2);
+                }
+                @media (max-width: 980px) {
+                    .sidebar {
+                        height: auto;
+                        padding: 18px;
+                        border-right: 0;
+                        border-bottom: 1px solid var(--line);
+                    }
+                }
+            </style>
             <aside class="sidebar">
                 <div class="brand">
                     <h1>Keel Precision</h1>
@@ -78,7 +221,7 @@ export class SidebarShell extends KeelElement {
                 <span class="meta-copy"><strong>${nodes} Nodes</strong><span>Shared node selection</span></span>
             </a>
             <a class="meta-link" href="#logs" data-tab-id="logs">
-                <span class="meta-copy"><strong>${appState.logs.total || 0} Logs</strong><span>Structured explorer</span></span>
+                <span class="meta-copy"><strong>${appState.logs.summary?.totalMatched || appState.logs.page?.total || 0} Logs</strong><span>Structured explorer</span></span>
             </a>
             <a class="meta-link" href="#metrics" data-tab-id="metrics">
                 <span class="meta-copy"><strong>${appState.metrics ? formatPercent(appState.metrics.kernel.processCpuLoad) : 'n/a'}</strong><span>Kernel CPU</span></span>

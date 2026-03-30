@@ -28,6 +28,17 @@ sealed interface PluginRuntimeEvent : PluginJvmMessage {
 }
 
 @Serializable
+data class RuntimeNodeAssetMetadata(
+    val assetId: String? = null,
+    val address: String? = null,
+    val zone: String? = null,
+    val region: String? = null,
+    val role: String? = null,
+    val roleDescription: String? = null,
+    val featured: Boolean = false
+)
+
+@Serializable
 data class PluginEndpointInventoryItem(
     val endpointId: String,
     val method: String,
@@ -135,7 +146,12 @@ data class HealthResponse(
     val healthState: String,
     val startedAtEpochMs: Long,
     val eventQueueDepth: Int,
-    val droppedLogCount: Long
+    val droppedLogCount: Long,
+    val processCpuLoadPercent: Double? = null,
+    val heapUsedBytes: Long? = null,
+    val heapMaxBytes: Long? = null,
+    val heapUsedPercent: Double? = null,
+    val assetMetadata: RuntimeNodeAssetMetadata? = null
 ) : PluginJvmControlResponse
 
 @Serializable

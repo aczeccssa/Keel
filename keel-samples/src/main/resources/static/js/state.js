@@ -2,32 +2,61 @@ import { LOG_LIMIT } from './config.js';
 
 let appShell = null;
 
+function initialTabConnectionStates() {
+    return {
+        topology: 'connecting',
+        traces: 'connecting',
+        logs: 'connecting',
+        nodes: 'connecting',
+        metrics: 'connecting',
+        openapi: 'connecting'
+    };
+}
+
 export const state = {
     activeTab: 'topology',
     topology: [],
     traces: [],
+    traceDashboard: null,
+    traceSummary: null,
+    traceListSnapshot: null,
+    traceTimelineSnapshot: null,
+    traceSpanDetailSnapshot: null,
+    traceSliceVersions: { summary: 0, list: 0, timeline: 0, detail: 0 },
     flows: [],
     panels: [],
     metrics: null,
+    latencyHistogram: null,
     plugins: [],
     nodeSummaries: [],
-    logs: { items: [], total: 0, limit: LOG_LIMIT },
-    logFilters: { query: '', level: '', source: '', window: '1h' },
+    nodeDashboard: null,
+    nodeOverview: { recentTraceCount: 0, recentFlowCount: 0, droppedLogCount: 0 },
+    logs: {
+        page: { items: [], total: 0, limit: LOG_LIMIT, page: 1, pageSize: LOG_LIMIT, totalPages: 0, hasPrev: false, hasNext: false },
+        histogram: { windowStartEpochMs: 0, windowEndEpochMs: 0, bucketSizeMs: 0, buckets: [] },
+        summary: { totalMatched: 0, showingCount: 0, availableLevels: [], activeWindow: '1h' },
+        availableLevels: []
+    },
+    logFilters: { query: '', level: '', window: '1h', page: 1, pageSize: LOG_LIMIT },
     openApiSpec: null,
     openApiLoadState: 'idle',
     openApiError: '',
+    openApiMeta: { generatedAtEpochMs: 0, source: '' },
     openApiFilters: { query: '', tag: '' },
     selectedOpenApiOpKey: null,
     metricsHistory: [],
     selectedNodeId: null,
     selectedTraceId: null,
     selectedSpanId: null,
+    traceFilters: { query: '', status: 'all', service: '', window: '1h', limit: 40 },
     selectedLogKey: null,
     streamEnabled: true,
     refreshIntervalMs: 5_000,
     refreshOverlayOpen: false,
     streamIntervalId: null,
     connectionState: 'Booting',
+    tabConnectionStates: initialTabConnectionStates(),
+    tabEventSources: {},
     zoom: 1,
     panX: 0,
     panY: 0,
@@ -58,43 +87,22 @@ export function selectedNode() {
     return state.topology.find((node) => node.id === state.selectedNodeId) || null;
 }
 
-export function groupedTraces() {
-    const map = new Map();
-    state.traces.forEach((trace) => {
-        const current = map.get(trace.traceId) || [];
-        current.push(trace);
-        map.set(trace.traceId, current);
-    });
-    return [...map.entries()].map(([traceId, spans]) => {
-        const ordered = [...spans].sort((a, b) => (a.startEpochMs || 0) - (b.startEpochMs || 0));
-        const start = ordered[0] ? ordered[0].startEpochMs : 0;
-        const end = Math.max(...ordered.map((span) => span.endEpochMs || (span.startEpochMs || 0)));
-        const errors = ordered.filter((span) => String(span.status).toUpperCase() === 'ERROR').length;
-        return {
-            traceId,
-            spans: ordered,
-            startEpochMs: start,
-            endEpochMs: end,
-            durationMs: Math.max(end - start, 0),
-            operation: ordered[0] ? ordered[0].operation : traceId,
-            service: ordered[0] ? ordered[0].service : 'unknown',
-            errorCount: errors,
-            spanCount: ordered.length
-        };
-    }).sort((a, b) => (b.startEpochMs || 0) - (a.startEpochMs || 0));
+export function selectedTraceSnapshot() {
+    return state.traceDashboard || null;
 }
 
-export function selectedTraceGroup() {
-    const groups = groupedTraces();
-    if (!groups.length) return null;
-    const match = groups.find((group) => group.traceId === state.selectedTraceId);
-    return match || groups[0];
+export function selectedTraceTimeline() {
+    const dashboard = selectedTraceSnapshot();
+    if (!dashboard || !dashboard.timeline) return null;
+    if (dashboard.timeline.traceId === state.selectedTraceId || !state.selectedTraceId) return dashboard.timeline;
+    return null;
 }
 
-export function selectedSpan() {
-    const group = selectedTraceGroup();
-    if (!group) return null;
-    return group.spans.find((span) => span.spanId === state.selectedSpanId) || group.spans[0] || null;
+export function selectedTraceSpan() {
+    const dashboard = selectedTraceSnapshot();
+    if (!dashboard || !dashboard.spanDetail) return null;
+    if (dashboard.spanDetail.spanId === state.selectedSpanId || !state.selectedSpanId) return dashboard.spanDetail;
+    return null;
 }
 
 export function logKey(item) {
@@ -102,22 +110,37 @@ export function logKey(item) {
 }
 
 export function selectedLog() {
-    if (!state.logs.items || !state.logs.items.length) return null;
-    const match = state.logs.items.find((item) => logKey(item) === state.selectedLogKey);
-    return match || state.logs.items[0];
+    const items = state.logs.page?.items || [];
+    if (!items.length || !state.selectedLogKey) return null;
+    return items.find((item) => logKey(item) === state.selectedLogKey) || null;
 }
 
 export function refreshSelectionDefaults() {
-    const groups = groupedTraces();
-    if (groups.length && !groups.some((group) => group.traceId === state.selectedTraceId)) {
-        state.selectedTraceId = groups[0].traceId;
+    const traceIds = (state.traceListSnapshot?.traces || []).map((trace) => trace.traceId);
+    if (traceIds.length && !traceIds.includes(state.selectedTraceId)) {
+        state.selectedTraceId = state.traceListSnapshot?.selectedTraceId || traceIds[0] || null;
     }
-    const selectedGroup = selectedTraceGroup();
-    if (selectedGroup && !selectedGroup.spans.some((span) => span.spanId === state.selectedSpanId)) {
-        state.selectedSpanId = selectedGroup.spans[0] ? selectedGroup.spans[0].spanId : null;
+    if (!traceIds.length) state.selectedTraceId = null;
+
+    const spanIds = state.traceTimelineSnapshot?.timeline?.spans ? state.traceTimelineSnapshot.timeline.spans.map((span) => span.spanId) : [];
+    if (spanIds.length && !spanIds.includes(state.selectedSpanId)) {
+        state.selectedSpanId = state.traceSpanDetailSnapshot?.selectedSpanId || spanIds[0] || null;
     }
-    if (state.logs.items && state.logs.items.length && !state.logs.items.some((item) => logKey(item) === state.selectedLogKey)) {
-        state.selectedLogKey = logKey(state.logs.items[0]);
+    if (!spanIds.length) state.selectedSpanId = null;
+
+    state.traceDashboard = {
+        summary: state.traceSummary?.summary || state.traceDashboard?.summary || null,
+        filters: state.traceListSnapshot?.filters || state.traceDashboard?.filters || state.traceFilters,
+        traces: state.traceListSnapshot?.traces || state.traceDashboard?.traces || [],
+        selectedTraceId: state.traceListSnapshot?.selectedTraceId || state.traceTimelineSnapshot?.selectedTraceId || state.selectedTraceId,
+        selectedSpanId: state.traceSpanDetailSnapshot?.selectedSpanId || state.selectedSpanId,
+        timeline: state.traceTimelineSnapshot?.timeline || null,
+        spanDetail: state.traceSpanDetailSnapshot?.spanDetail || null
+    };
+
+    const logItems = state.logs.page?.items || [];
+    if (state.selectedLogKey && !logItems.some((item) => logKey(item) === state.selectedLogKey)) {
+        state.selectedLogKey = null;
     }
 }
 
@@ -150,6 +173,8 @@ export function openApiOperations(spec = state.openApiSpec) {
 export function rememberMetrics(snapshot) {
     const cpu = Number(snapshot.kernel.processCpuLoad || 0);
     const heap = Number(snapshot.kernel.heapUsedPercent || 0);
-    state.metricsHistory.push({ cpu, heap, timestamp: Date.now() });
+    const flowCount = Number(snapshot.traffic?.recentFlowCount || 0);
+    const traceCount = Number(snapshot.traffic?.recentTraceCount || 0);
+    state.metricsHistory.push({ cpu, heap, flowCount, traceCount, timestamp: Date.now() });
     if (state.metricsHistory.length > 24) state.metricsHistory.shift();
 }

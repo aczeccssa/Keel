@@ -12,6 +12,7 @@ import com.keel.kernel.plugin.PluginEndpointDefinition
 import com.keel.kernel.plugin.PluginFailureRecord
 import com.keel.kernel.plugin.PluginGeneration
 import com.keel.kernel.plugin.PluginHealthState
+import com.keel.kernel.plugin.PluginNodeAssetMetadata
 import com.keel.kernel.plugin.PluginProcessState
 import com.keel.kernel.plugin.PluginRuntimeDiagnostics
 import com.keel.kernel.plugin.PluginRuntimeMode
@@ -33,6 +34,7 @@ import com.keel.jvm.runtime.PluginDisposedEvent
 import com.keel.jvm.runtime.PluginRouteInventoryItem
 import com.keel.jvm.runtime.PluginReadyEvent
 import com.keel.jvm.runtime.PluginRuntimeEvent
+import com.keel.jvm.runtime.RuntimeNodeAssetMetadata
 import com.keel.jvm.runtime.PluginSseClosedEvent
 import com.keel.jvm.runtime.PluginSseDataEvent
 import com.keel.jvm.runtime.PluginStoppingEvent
@@ -82,6 +84,16 @@ import kotlinx.serialization.json.jsonPrimitive
 sealed interface PluginJvmConnectionInfo {
     val mode: JvmCommunicationMode
 }
+
+private fun RuntimeNodeAssetMetadata.toPluginNodeAssetMetadata(): PluginNodeAssetMetadata = PluginNodeAssetMetadata(
+    assetId = assetId,
+    address = address,
+    zone = zone,
+    region = region,
+    role = role,
+    roleDescription = roleDescription,
+    featured = featured
+)
 
 data class PluginJvmUdsConnectionInfo(
     val invokePath: Path,
@@ -133,6 +145,11 @@ class PluginProcessSupervisor(
     private var droppedLogCount: Long = 0
     private var eventOverflowed: Boolean = false
     private var eventQueueDepth: Int = 0
+    private var lastProcessCpuLoadPercent: Double? = null
+    private var lastHeapUsedBytes: Long? = null
+    private var lastHeapMaxBytes: Long? = null
+    private var lastHeapUsedPercent: Double? = null
+    private var descriptorAssetMetadata: PluginNodeAssetMetadata? = descriptor.nodeAssetMetadata
     private var activeCommunicationMode: JvmCommunicationMode? = null
     private var fallbackActivated: Boolean = false
     private var lastFallbackReason: String? = null
@@ -314,7 +331,12 @@ class PluginProcessSupervisor(
             eventOverflowed = eventOverflowed,
             lastHealthLatencyMs = lastHealthLatencyMs,
             lastAdminLatencyMs = lastAdminLatencyMs,
-            lastEventAtEpochMs = lastEventAtEpochMs
+            lastEventAtEpochMs = lastEventAtEpochMs,
+            processCpuLoadPercent = lastProcessCpuLoadPercent,
+            heapUsedBytes = lastHeapUsedBytes,
+            heapMaxBytes = lastHeapMaxBytes,
+            heapUsedPercent = lastHeapUsedPercent,
+            assetMetadata = descriptorAssetMetadata ?: descriptor.nodeAssetMetadata
         )
     }
 
@@ -563,6 +585,11 @@ class PluginProcessSupervisor(
                     lastHealthLatencyMs = System.currentTimeMillis() - startedAt
                     eventQueueDepth = response.eventQueueDepth
                     droppedLogCount = response.droppedLogCount
+                    lastProcessCpuLoadPercent = response.processCpuLoadPercent
+                    lastHeapUsedBytes = response.heapUsedBytes
+                    lastHeapMaxBytes = response.heapMaxBytes
+                    lastHeapUsedPercent = response.heapUsedPercent
+                    response.assetMetadata?.let { descriptorAssetMetadata = it.toPluginNodeAssetMetadata() }
                 }
                 recomputeHealth()
             }
@@ -623,6 +650,11 @@ class PluginProcessSupervisor(
         readyEventReceived = false
         controlFailureCount = 0
         eventQueueDepth = 0
+        lastProcessCpuLoadPercent = null
+        lastHeapUsedBytes = null
+        lastHeapMaxBytes = null
+        lastHeapUsedPercent = null
+        descriptorAssetMetadata = descriptor.nodeAssetMetadata
     }
 
     private fun captureOutput(stream: java.io.InputStream, error: Boolean) {

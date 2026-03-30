@@ -66,10 +66,14 @@ internal fun mergeGeneratedInterceptorMetadata(
         val generatedRoute = generatedRoutes["${endpoint.method.value.uppercase()} ${normalizeGeneratedRoutePath(endpoint.path)}"]
         when {
             generatedRoute != null -> {
+                val generatedRouteInterceptors = resolveInterceptorClasses(
+                    plugin.javaClass.classLoader,
+                    generatedRoute.interceptorClassNames
+                )
                 val generatedInterceptors = if (generatedRoute.clearDefaults) {
-                    emptyList()
+                    generatedRouteInterceptors
                 } else {
-                    resolveInterceptorClasses(plugin.javaClass.classLoader, generatedRoute.interceptorClassNames)
+                    generatedPluginInterceptors + generatedRouteInterceptors
                 }
                 endpoint.copy(
                     interceptors = generatedInterceptors,

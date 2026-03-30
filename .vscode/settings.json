@@ -2,5 +2,10 @@
   "files.watcherExclude": {
     "**/.gradle/**": true,
     "**/build/**": true
+  },
+  "editor.quickSuggestions": {
+    "comments": "off",
+    "strings": "off",
+    "other": "off"
   }
 }

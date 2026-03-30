@@ -41,12 +41,32 @@ class KeelOpenApiProcessorIntegrationTest {
 
         assertTrue(result.output.contains("BUILD SUCCESSFUL"), "Expected successful build, but got:\n${result.output}")
         assertTrue(
-            fixtureDir.resolve("build/generated/ksp/main/kotlin/com/keel/generated/FixturePluginInterceptorMetadata.kt").isFile,
+            fixtureDir.resolve("build/generated/ksp/main/kotlin/com/keel/generated/fixture_FixturePlugin_InterceptorMetadata.kt").isFile,
             "Expected generated interceptor metadata source to exist"
         )
         assertTrue(
             fixtureDir.resolve("build/generated/ksp/main/resources/META-INF/services/com.keel.kernel.plugin.KeelGeneratedInterceptorMetadataProvider").isFile,
             "Expected generated interceptor metadata service file to exist"
+        )
+    }
+
+    @Test
+    fun `build passes when annotated plugins share the same simple name`() {
+        val fixtureDir = createSimpleNameCollisionFixtureProject()
+
+        val result = GradleRunner.create()
+            .withProjectDir(fixtureDir)
+            .withArguments("compileKotlin", "--stacktrace")
+            .build()
+
+        assertTrue(result.output.contains("BUILD SUCCESSFUL"), "Expected successful build, but got:\n${result.output}")
+        assertTrue(
+            fixtureDir.resolve("build/generated/ksp/main/kotlin/com/keel/generated/pkg_one_FixturePlugin_InterceptorMetadata.kt").isFile,
+            "Expected first generated interceptor metadata source to exist"
+        )
+        assertTrue(
+            fixtureDir.resolve("build/generated/ksp/main/kotlin/com/keel/generated/pkg_two_FixturePlugin_InterceptorMetadata.kt").isFile,
+            "Expected second generated interceptor metadata source to exist"
         )
     }
 
@@ -135,6 +155,53 @@ class KeelOpenApiProcessorIntegrationTest {
             """
         }
         projectDir.writeFile("src/main/kotlin/fixture/Fixture.kt", source)
+        return projectDir
+    }
+
+    private fun createSimpleNameCollisionFixtureProject(): File {
+        val projectDir = createFixtureProject(useLegacyKeelApi = false)
+        projectDir.writeFile(
+            "src/main/kotlin/pkg/one/FixturePlugin.kt",
+            """
+            package pkg.one
+
+            import com.keel.kernel.plugin.KeelInterceptorResult
+            import com.keel.kernel.plugin.KeelRequestContext
+            import com.keel.kernel.plugin.KeelRequestInterceptor
+            import com.keel.openapi.annotations.KeelInterceptors
+
+            @KeelInterceptors(FixtureInterceptor::class)
+            class FixturePlugin
+
+            class FixtureInterceptor : KeelRequestInterceptor {
+                override suspend fun intercept(
+                    context: KeelRequestContext,
+                    next: suspend () -> KeelInterceptorResult
+                ): KeelInterceptorResult = next()
+            }
+            """
+        )
+        projectDir.writeFile(
+            "src/main/kotlin/pkg/two/FixturePlugin.kt",
+            """
+            package pkg.two
+
+            import com.keel.kernel.plugin.KeelInterceptorResult
+            import com.keel.kernel.plugin.KeelRequestContext
+            import com.keel.kernel.plugin.KeelRequestInterceptor
+            import com.keel.openapi.annotations.KeelInterceptors
+
+            @KeelInterceptors(FixtureInterceptor::class)
+            class FixturePlugin
+
+            class FixtureInterceptor : KeelRequestInterceptor {
+                override suspend fun intercept(
+                    context: KeelRequestContext,
+                    next: suspend () -> KeelInterceptorResult
+                ): KeelInterceptorResult = next()
+            }
+            """
+        )
         return projectDir
     }
 

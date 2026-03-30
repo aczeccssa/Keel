@@ -1,6 +1,6 @@
-# keel-sample TUI Launcher
+# keel-samples TUI Launcher
 
-A TUI launcher for monitoring and managing the `keel-sample` process, built with `ratatui` + `crossterm`.
+A TUI launcher for monitoring and managing the `keel-samples` process, built with `ratatui` + `crossterm`.
 
 ## Features
 
@@ -54,7 +54,7 @@ cargo run
 Top of `src/main.rs`:
 
 - `PROC_PROGRAM` — launch program (default `./gradlew`)
-- `PROC_ARGS` — launch arguments (default `[":keel-sample:run"]`)
+- `PROC_ARGS` — launch arguments (default `[":keel-samples:run"]`)
 - `MAX_LOG_LINES` — max log lines kept (default 2000)
 - `STOP_TIMEOUT` — graceful shutdown timeout (default 3s)
 - `POLL_INTERVAL` — event poll interval (default 50ms)

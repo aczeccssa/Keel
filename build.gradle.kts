@@ -3,9 +3,13 @@ import org.gradle.api.artifacts.ProjectDependency
 import org.gradle.api.publish.PublishingExtension
 import org.gradle.api.publish.maven.MavenPublication
 import org.jetbrains.dokka.gradle.DokkaExtension
+import io.gitlab.arturbosch.detekt.Detekt
+import io.gitlab.arturbosch.detekt.extensions.DetektExtension
 
 plugins {
     alias(libs.plugins.dokka)
+    alias(libs.plugins.detekt)
+    alias(libs.plugins.kover)
     alias(libs.plugins.kotlin.jvm) apply false
     alias(libs.plugins.kotlin.serialization) apply false
     alias(libs.plugins.ksp) apply false
@@ -63,6 +67,31 @@ subprojects {
     tasks.withType<Test>().configureEach {
         useJUnit()
     }
+}
+
+subprojects {
+    apply(plugin = "io.gitlab.arturbosch.detekt")
+
+    extensions.configure<DetektExtension>("detekt") {
+        buildUponDefaultConfig = true
+        allRules = false
+        config.setFrom(rootProject.files("detekt.yml"))
+        ignoreFailures = true
+    }
+
+    tasks.withType<Detekt>().configureEach {
+        jvmTarget = "22"
+        reports {
+            sarif.required.set(true)
+            html.required.set(true)
+            xml.required.set(true)
+            md.required.set(false)
+        }
+    }
+}
+
+tasks.named("detekt").configure {
+    dependsOn(subprojects.map { "${it.path}:detekt" })
 }
 
 subprojects {

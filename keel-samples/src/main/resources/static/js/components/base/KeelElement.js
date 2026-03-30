@@ -1,66 +1,31 @@
-let sharedCssTextPromise = null;
-let sharedConstructableSheetPromise = null;
-
-function getSharedStylesheetLink() {
-    return document.querySelector('link[href$="css/style.css"]');
-}
-
-function readCssTextFromLink(link) {
-    return new Promise((resolve) => {
-        const resolveFromSheet = () => {
-            try {
-                const cssText = Array.from(link.sheet?.cssRules || []).map((rule) => rule.cssText).join('\n');
-                resolve(cssText);
-            } catch {
-                resolve('');
-            }
-        };
-
-        if (link.sheet) {
-            resolveFromSheet();
-            return;
-        }
-
-        link.addEventListener('load', resolveFromSheet, { once: true });
-        link.addEventListener('error', () => resolve(''), { once: true });
-    });
-}
-
-function getSharedCssText() {
-    if (!sharedCssTextPromise) {
-        const link = getSharedStylesheetLink();
-        sharedCssTextPromise = link ? readCssTextFromLink(link) : Promise.resolve('');
-    }
-    return sharedCssTextPromise;
-}
-
-function getSharedConstructableSheet() {
-    if (!sharedConstructableSheetPromise) {
-        sharedConstructableSheetPromise = getSharedCssText().then((cssText) => {
-            const sheet = new CSSStyleSheet();
-            sheet.replaceSync(cssText);
-            return sheet;
-        }).catch(() => null);
-    }
-    return sharedConstructableSheetPromise;
-}
-
-async function applySharedStyles(root) {
-    if ('adoptedStyleSheets' in Document.prototype && 'replaceSync' in CSSStyleSheet.prototype) {
-        const sheet = await getSharedConstructableSheet();
-        if (sheet && !root.adoptedStyleSheets.includes(sheet)) {
-            root.adoptedStyleSheets = [...root.adoptedStyleSheets, sheet];
-        }
-        return;
+const SHADOW_BASE_RESET = `
+    *, *::before, *::after {
+        box-sizing: border-box;
     }
 
-    const cssText = await getSharedCssText();
-    if (!cssText || root.querySelector('[data-shared-style]')) return;
-    const style = document.createElement('style');
-    style.dataset.sharedStyle = 'true';
-    style.textContent = cssText;
-    root.prepend(style);
-}
+    button,
+    input,
+    select,
+    textarea {
+        font: inherit;
+        color: inherit;
+    }
+
+    a {
+        color: inherit;
+        text-decoration: none;
+    }
+
+    svg,
+    img {
+        display: block;
+        max-width: 100%;
+    }
+
+    [hidden] {
+        display: none !important;
+    }
+`;
 
 export class KeelElement extends HTMLElement {
     constructor() {
@@ -84,12 +49,13 @@ export class KeelElement extends HTMLElement {
                     min-height: 0;
                     ${this.hostStyles()}
                 }
+
+                ${SHADOW_BASE_RESET}
             </style>
             ${this.template()}
         `;
         this.refs = collectRefs(this.shadowRoot);
         this.afterMount();
-        void applySharedStyles(this.shadowRoot);
         this._initialized = true;
     }
 

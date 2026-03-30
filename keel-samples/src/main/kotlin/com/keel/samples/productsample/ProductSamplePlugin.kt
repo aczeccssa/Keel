@@ -98,7 +98,7 @@ class ProductSamplePlugin : StandardKeelPlugin {
                 }
                 PluginResult(body = upsertProduct(request.copy(productId = productId)).toDto())
             }
-
+            
             delete<ProductMutationResult>(
                 "/products/{productId}",
                 doc = OpenApiDoc(summary = "Archive a product from the commerce sample", tags = listOf("commerce", "products", "admin"), errorStatuses = setOf(404), responseEnvelope = true)

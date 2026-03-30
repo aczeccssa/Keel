@@ -3,7 +3,48 @@ import { tableHtml } from '../../render.js';
 
 export class KeelDataTable extends KeelElement {
     template() {
-        return `<div data-ref="wrap"></div>`;
+        return `
+            <style>
+                :host {
+                    min-width: 0;
+                }
+                .table-wrap {
+                    width: 100%;
+                    overflow-x: auto;
+                    -webkit-overflow-scrolling: touch;
+                }
+                .table-wrap::-webkit-scrollbar {
+                    height: 4px;
+                }
+                .table-wrap::-webkit-scrollbar-thumb {
+                    background: rgba(15, 23, 42, 0.15);
+                    border-radius: 999px;
+                }
+                table {
+                    width: 100%;
+                    border-collapse: collapse;
+                    text-align: left;
+                }
+                th,
+                td {
+                    padding: 14px 16px;
+                    border-bottom: 1px solid rgba(17, 24, 39, 0.06);
+                    vertical-align: top;
+                    color: var(--ink);
+                }
+                th {
+                    color: var(--muted);
+                    font-size: 10px;
+                    font-weight: 800;
+                    letter-spacing: 0.12em;
+                    text-transform: uppercase;
+                }
+                tbody tr:last-child td {
+                    border-bottom: 0;
+                }
+            </style>
+            <div class="table-wrap" data-ref="wrap"></div>
+        `;
     }
 
     afterMount() {
@@ -19,7 +60,7 @@ export class KeelDataTable extends KeelElement {
 
     render({ headers = [], rows = [], emptyHtml = '', wrapClass = '' } = {}) {
         this.ensureInitialized();
-        this.refs.wrap.className = wrapClass;
+        this.refs.wrap.className = ['table-wrap', wrapClass].filter(Boolean).join(' ');
         this.refs.wrap.innerHTML = rows.length ? tableHtml(headers, rows) : emptyHtml;
     }
 }

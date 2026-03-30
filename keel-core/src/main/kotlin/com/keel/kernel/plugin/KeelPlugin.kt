@@ -122,7 +122,8 @@ data class PluginDescriptor(
     val healthCheckIntervalMs: Long = 10000,
     val maxConcurrentCalls: Int = 128,
     val eventLogRingBufferSize: Int = 4096,
-    val criticalEventQueueSize: Int = 256
+    val criticalEventQueueSize: Int = 256,
+    val nodeAssetMetadata: PluginNodeAssetMetadata? = null
 ) {
     init {
         require(pluginId.isNotBlank()) { "pluginId must not be blank" }

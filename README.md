@@ -111,7 +111,12 @@ After startup, these endpoints are useful:
 - `http://localhost:8080/api/plugins/helloworld`
 - `http://localhost:8080/api/plugins/helloworld/version`
 - `http://localhost:8080/api/plugins/dbdemo/notes`
-- `http://localhost:8080/api/plugins/observability/topology`
+- `http://localhost:8080/api/plugins/observability/topology` (SSE)
+- `http://localhost:8080/api/plugins/observability/traces` (SSE)
+- `http://localhost:8080/api/plugins/observability/logs` (SSE)
+- `http://localhost:8080/api/plugins/observability/nodes` (SSE)
+- `http://localhost:8080/api/plugins/observability/metrics` (SSE)
+- `http://localhost:8080/api/plugins/observability/openapi` (SSE)
 - `http://localhost:8080/api/plugins/observability/ui`
 - `http://localhost:8080/api/_system/health`
 - `http://localhost:8080/api/_system/plugins`
@@ -387,7 +392,7 @@ The sample application demonstrates three plugin styles already present in the r
 
 - `helloworld`: minimal plugin endpoints and typed responses
 - `dbdemo`: Exposed-backed CRUD-style plugin module
-- `observability`: topology, traces, flows, UI assets, and streaming-oriented behavior
+- `observability`: six tab-grouped SSE endpoints for topology, traces, logs, nodes, metrics, and OpenAPI plus the static UI
 
 These samples are the best starting point if you want to understand how Keel is intended to be used in practice.
 

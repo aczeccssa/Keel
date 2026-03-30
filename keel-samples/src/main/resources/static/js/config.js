@@ -10,7 +10,7 @@ export const TABS = [
     { id: "openapi", label: "OpenAPI", note: "Contract explorer" }
 ];
 export const VIEWBOX = 1000;
-export const LOG_LIMIT = 80;
+export const LOG_LIMIT = 20;
 export const REFRESH_DEBOUNCE_MS = 220;
 export const SNAPSHOT_WINDOW_MS = 60 * 60 * 1000;
 export const REFRESH_INTERVALS = [
