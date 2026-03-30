@@ -104,7 +104,8 @@ internal class PluginLifecycleCoordinator(
     suspend fun stopPluginLocked(
         entry: ManagedPlugin,
         normalizeProcessState: (ManagedPlugin) -> Unit,
-        recordFailure: (ManagedPlugin, String, String) -> Unit
+        recordFailure: (ManagedPlugin, String, String) -> Unit,
+        force: Boolean = false
     ) {
         when (entry.lifecycleState) {
             PluginLifecycleState.REGISTERED -> {
@@ -133,8 +134,11 @@ internal class PluginLifecycleCoordinator(
                 }.getOrThrow()
             }
             PluginRuntimeMode.EXTERNAL_JVM -> {
-                entry.supervisor?.stop()
-                awaitDrain(entry, entry.config.stopTimeoutMs)
+                entry.supervisor?.stop(force = force)
+                // Skip drain wait when forcing — no graceful shutdown needed before restart
+                if (!force) {
+                    awaitDrain(entry, entry.config.stopTimeoutMs)
+                }
             }
         }
         entry.supervisor = null
@@ -221,7 +225,7 @@ internal class PluginLifecycleCoordinator(
             }
             if (entry.recoveryAttempts >= policy.maxRestarts) {
                 runCatching {
-                    stopPluginLocked(entry, normalizeProcessState, recordFailure)
+                    stopPluginLocked(entry, normalizeProcessState, recordFailure, force = true)
                 }.onFailure { stopError ->
                     logger.warn("Failed to stop plugin while exhausting recovery budget pluginId=${entry.plugin.descriptor.pluginId}: ${stopError.message}")
                 }
@@ -241,7 +245,7 @@ internal class PluginLifecycleCoordinator(
                 entry.stickyCommunicationMode = JvmCommunicationMode.TCP
             }
             runCatching {
-                stopPluginLocked(entry, normalizeProcessState, recordFailure)
+                stopPluginLocked(entry, normalizeProcessState, recordFailure, force = true)
                 startPluginLocked(entry, normalizeProcessState, recordFailure, resetRecoveryBudget = false)
             }.onFailure { error ->
                 recordFailure(entry, "recovery", "Recovery attempt failed: ${error.message ?: reason}")
