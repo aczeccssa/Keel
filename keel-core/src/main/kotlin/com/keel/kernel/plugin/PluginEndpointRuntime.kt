@@ -134,7 +134,7 @@ internal fun encodeResponseBody(body: Any?, responseType: KType): String? {
 @Suppress("UNCHECKED_CAST")
 internal fun serializer(type: KType): KSerializer<Any> = runtimeJson.serializersModule.serializer(type) as KSerializer<Any>
 
-internal fun buildRequestContext(call: ApplicationCall, pluginId: String, method: HttpMethod, rawPath: String): PluginRequestContext {
+internal fun buildRequestContext(call: ApplicationCall, pluginId: String, method: HttpMethod, rawPath: String): KeelRequestContext {
     return DefaultPluginRequestContext(
         pluginId = pluginId,
         method = method.value,

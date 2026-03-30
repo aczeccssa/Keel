@@ -32,7 +32,7 @@ data class DefaultPluginRequestContext(
     override val attributes: MutableMap<String, Any?> = linkedMapOf(),
     override var principal: Any? = null,
     override var tenant: Any? = null
-) : PluginRequestContext
+) : KeelRequestContext
 
 data class GeneratedKeelRouteInterceptorMetadata(
     val method: String,
@@ -90,7 +90,7 @@ internal fun mergeGeneratedInterceptorMetadata(
 }
 
 internal suspend fun executeKeelInterceptors(
-    context: PluginRequestContext,
+    context: KeelRequestContext,
     interceptors: List<KeelRequestInterceptor>,
     terminal: suspend () -> PluginResult<Any?>
 ): KeelInterceptorResult {

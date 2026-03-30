@@ -2,6 +2,7 @@ package com.keel.kernel.observability
 
 import com.keel.kernel.logging.KeelLoggerService
 import com.keel.kernel.logging.LogEntry
+import com.keel.kernel.logging.LogLevel
 import com.keel.kernel.plugin.PluginNodeAssetMetadata
 import com.keel.kernel.plugin.PluginRuntimeSnapshot
 import kotlinx.coroutines.CoroutineScope
@@ -38,6 +39,7 @@ class ObservabilityHub(
     private val memoryMxBean = ManagementFactory.getMemoryMXBean()
     private val threadMxBean = ManagementFactory.getThreadMXBean()
     private val runtimeMxBean = ManagementFactory.getRuntimeMXBean()
+    private val logger = KeelLoggerService.getInstance()
 
     private var pollJob: Job? = null
     private var logJob: Job? = null
@@ -570,7 +572,9 @@ class ObservabilityHub(
             if (java.lang.reflect.Modifier.isPublic(iface.modifiers)) {
                 try {
                     return iface.getMethod(methodName)
-                } catch (e: Exception) {}
+                } catch (e: ReflectiveOperationException) {
+                    logger.log(LogLevel.DEBUG, "ObservabilityHub", "No such method '$methodName' on interface ${iface.name}: ${e.message}")
+                }
             }
             findPublicMethod(iface, methodName)?.let { return it }
         }
@@ -578,7 +582,9 @@ class ObservabilityHub(
         if (java.lang.reflect.Modifier.isPublic(clazz.modifiers)) {
             try {
                 return clazz.getMethod(methodName)
-            } catch (e: Exception) {}
+            } catch (e: ReflectiveOperationException) {
+                logger.log(LogLevel.DEBUG, "ObservabilityHub", "No such method '$methodName' on class ${clazz.name}: ${e.message}")
+            }
         }
         // Try superclass
         clazz.superclass?.let { findPublicMethod(it, methodName) }?.let { return it }

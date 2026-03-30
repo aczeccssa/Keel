@@ -2,10 +2,10 @@ package com.keel.samples.observability
 
 import com.keel.kernel.logging.KeelLoggerService
 import com.keel.kernel.observability.KeelObservability
+import com.keel.kernel.plugin.KeelRequestContext
 import com.keel.kernel.plugin.PluginDescriptor
 import com.keel.kernel.plugin.PluginEndpointBuilders.pluginEndpoints
 import com.keel.kernel.plugin.PluginInitContext
-import com.keel.kernel.plugin.PluginRequestContext
 import com.keel.kernel.plugin.PluginRouteDefinition
 import com.keel.kernel.plugin.PluginRuntimeContext
 import com.keel.kernel.plugin.PluginSseSession
@@ -23,6 +23,10 @@ import kotlinx.coroutines.isActive
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.io.IOException
+import kotlin.time.Duration.Companion.hours
+import kotlin.time.Duration.Companion.minutes
+import kotlin.time.Duration.Companion.hours
+import kotlin.time.Duration.Companion.minutes
 
 @KeelApiPlugin(
     pluginId = "observability",
@@ -177,27 +181,29 @@ class ObservabilityPlugin : StandardKeelPlugin {
         send(ServerSentEvent(data = json.encodeToString(payload), event = "snapshot"))
     }
 
-    private fun PluginRequestContext.queryParam(name: String): String? =
+    private fun KeelRequestContext.queryParam(name: String): String? =
         queryParameters[name]?.firstOrNull()?.takeIf { it.isNotBlank() }
 
-    private fun PluginRequestContext.streamIntervalMs(): Long =
+    private fun KeelRequestContext.streamIntervalMs(): Long =
         queryParam("intervalMs")?.toLongOrNull()?.coerceIn(1_000L, 300_000L) ?: 5_000L
 
-    private fun PluginRequestContext.serverUrl(): String {
-        val scheme = requestHeaders["X-Forwarded-Proto"]?.firstOrNull()?.ifBlank { null } ?: "http"
-        val host = requestHeaders["Host"]?.firstOrNull()?.ifBlank { null } ?: "localhost:8080"
+    private fun KeelRequestContext.serverUrl(
+        defaultScheme: String = "http",
+        defaultHost: String = "localhost:8080"
+    ): String {
+        val scheme = requestHeaders["X-Forwarded-Proto"]?.firstOrNull()?.ifBlank { null } ?: defaultScheme
+        val host = requestHeaders["Host"]?.firstOrNull()?.ifBlank { null } ?: defaultHost
         return "$scheme://$host"
     }
 
     private fun sinceFromWindow(windowKey: String): Long {
-        val now = System.currentTimeMillis()
-        val durationMs = when (windowKey) {
-            "15m" -> 15 * 60 * 1000L
-            "6h" -> 6 * 60 * 60 * 1000L
-            "24h" -> 24 * 60 * 60 * 1000L
-            else -> 60 * 60 * 1000L
+        val duration = when (windowKey) {
+            "15m" -> 15.minutes
+            "6h"  -> 6.hours
+            "24h" -> 24.hours
+            else  -> 1.hours
         }
-        return now - durationMs
+        return System.currentTimeMillis() - duration.inWholeMilliseconds
     }
 
     private companion object {

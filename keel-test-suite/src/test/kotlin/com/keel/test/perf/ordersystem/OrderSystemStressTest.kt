@@ -197,7 +197,9 @@ class OrderSystemStressTest {
                                     items = listOf(OrderItemRequest(product.id, 1))
                                 ))
                                 successfulOrders.incrementAndGet()
-                            } catch (_: Exception) {}
+                            } catch (_: Exception) {
+                                // Intentionally ignored — we don't want test failures from external process noise
+                            }
                         }
                     }
                 }

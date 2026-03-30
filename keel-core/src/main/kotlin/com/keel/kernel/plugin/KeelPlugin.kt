@@ -161,8 +161,6 @@ interface KeelRequestContext {
     var tenant: Any?
 }
 
-interface PluginRequestContext : KeelRequestContext
-
 data class PluginResult<T>(
     val status: Int = 200,
     val headers: Map<String, List<String>> = emptyMap(),
@@ -318,11 +316,11 @@ data class PluginEndpointDefinition<Req : Any, Res : Any>(
     val executionPolicy: EndpointExecutionPolicy = EndpointExecutionPolicy(),
     val interceptors: List<KClass<out KeelRequestInterceptor>> = emptyList(),
     val interceptorSource: InterceptorMetadataSource = InterceptorMetadataSource.NONE,
-    val handler: suspend PluginRequestContext.(Req?) -> PluginResult<Res>
+    val handler: suspend KeelRequestContext.(Req?) -> PluginResult<Res>
 ) : PluginRouteDefinition {
     @Suppress("UNCHECKED_CAST")
-    suspend fun execute(context: PluginRequestContext, request: Any?): PluginResult<Any?> {
-        val result = (handler as suspend PluginRequestContext.(Any?) -> PluginResult<Any?>)
+    suspend fun execute(context: KeelRequestContext, request: Any?): PluginResult<Any?> {
+        val result = (handler as suspend KeelRequestContext.(Any?) -> PluginResult<Any?>)
             .invoke(context, request)
         return result
     }
@@ -342,7 +340,7 @@ data class PluginStaticResourceDefinition(
 ) : PluginRouteDefinition
 
 class PluginSseSession internal constructor(
-    val request: PluginRequestContext,
+    val request: KeelRequestContext,
     private val sender: suspend (ServerSentEvent) -> Unit
 ) {
     suspend fun send(event: ServerSentEvent) {
@@ -395,7 +393,7 @@ class PluginEndpointDsl internal constructor(
         path: String = "",
         doc: OpenApiDoc = OpenApiDoc(),
         executionPolicy: EndpointExecutionPolicy = EndpointExecutionPolicy(),
-        noinline handler: suspend PluginRequestContext.() -> PluginResult<Res>
+        noinline handler: suspend KeelRequestContext.() -> PluginResult<Res>
     ) {
         val resolvedPath = resolvePath(path)
         endpoints += PluginEndpointDefinition(
@@ -416,7 +414,7 @@ class PluginEndpointDsl internal constructor(
         path: String = "",
         doc: OpenApiDoc = OpenApiDoc(),
         executionPolicy: EndpointExecutionPolicy = EndpointExecutionPolicy(),
-        noinline handler: suspend PluginRequestContext.(Req) -> PluginResult<Res>
+        noinline handler: suspend KeelRequestContext.(Req) -> PluginResult<Res>
     ) {
         val resolvedPath = resolvePath(path)
         endpoints += PluginEndpointDefinition<Req, Res>(
@@ -437,7 +435,7 @@ class PluginEndpointDsl internal constructor(
         path: String = "",
         doc: OpenApiDoc = OpenApiDoc(),
         executionPolicy: EndpointExecutionPolicy = EndpointExecutionPolicy(),
-        noinline handler: suspend PluginRequestContext.() -> PluginResult<Res>
+        noinline handler: suspend KeelRequestContext.() -> PluginResult<Res>
     ) {
         val resolvedPath = resolvePath(path)
         endpoints += PluginEndpointDefinition(
@@ -458,7 +456,7 @@ class PluginEndpointDsl internal constructor(
         path: String = "",
         doc: OpenApiDoc = OpenApiDoc(),
         executionPolicy: EndpointExecutionPolicy = EndpointExecutionPolicy(),
-        noinline handler: suspend PluginRequestContext.(Req) -> PluginResult<Res>
+        noinline handler: suspend KeelRequestContext.(Req) -> PluginResult<Res>
     ) {
         val resolvedPath = resolvePath(path)
         endpoints += PluginEndpointDefinition<Req, Res>(
@@ -479,7 +477,7 @@ class PluginEndpointDsl internal constructor(
         path: String = "",
         doc: OpenApiDoc = OpenApiDoc(),
         executionPolicy: EndpointExecutionPolicy = EndpointExecutionPolicy(),
-        noinline handler: suspend PluginRequestContext.() -> PluginResult<Res>
+        noinline handler: suspend KeelRequestContext.() -> PluginResult<Res>
     ) {
         val resolvedPath = resolvePath(path)
         endpoints += PluginEndpointDefinition(
