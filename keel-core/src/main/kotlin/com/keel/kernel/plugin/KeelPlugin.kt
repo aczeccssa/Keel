@@ -8,6 +8,7 @@ import io.ktor.server.application.BaseRouteScopedPlugin
 import io.ktor.server.routing.Route
 import io.ktor.sse.ServerSentEvent
 import com.keel.openapi.runtime.OpenApiDoc
+import kotlin.reflect.KClass
 import kotlin.reflect.KType
 import kotlin.reflect.typeOf
 import org.koin.core.module.Module
@@ -121,7 +122,8 @@ data class PluginDescriptor(
     val healthCheckIntervalMs: Long = 10000,
     val maxConcurrentCalls: Int = 128,
     val eventLogRingBufferSize: Int = 4096,
-    val criticalEventQueueSize: Int = 256
+    val criticalEventQueueSize: Int = 256,
+    val nodeAssetMetadata: PluginNodeAssetMetadata? = null
 ) {
     init {
         require(pluginId.isNotBlank()) { "pluginId must not be blank" }
@@ -146,7 +148,7 @@ data class EndpointExecutionPolicy(
     }
 }
 
-interface PluginRequestContext {
+interface KeelRequestContext {
     val pluginId: String
     val method: String
     val rawPath: String
@@ -154,6 +156,9 @@ interface PluginRequestContext {
     val queryParameters: Map<String, List<String>>
     val requestHeaders: Map<String, List<String>>
     val requestId: String
+    val attributes: MutableMap<String, Any?>
+    var principal: Any?
+    var tenant: Any?
 }
 
 data class PluginResult<T>(
@@ -161,6 +166,43 @@ data class PluginResult<T>(
     val headers: Map<String, List<String>> = emptyMap(),
     val body: T? = null
 )
+
+interface KeelRequestInterceptor {
+    suspend fun intercept(
+        context: KeelRequestContext,
+        next: suspend () -> KeelInterceptorResult
+    ): KeelInterceptorResult
+}
+
+sealed interface KeelInterceptorResult {
+    data class Proceed(
+        val result: PluginResult<Any?>
+    ) : KeelInterceptorResult
+
+    data class Reject(
+        val status: Int,
+        val message: String,
+        val headers: Map<String, List<String>> = emptyMap()
+    ) : KeelInterceptorResult {
+        fun toPluginResult(): PluginResult<Any?> = PluginResult(status = status, headers = headers, body = null)
+    }
+
+    companion object {
+        fun proceed(result: PluginResult<Any?>): KeelInterceptorResult = Proceed(result)
+
+        fun reject(
+            status: Int,
+            message: String,
+            headers: Map<String, List<String>> = emptyMap()
+        ): KeelInterceptorResult = Reject(status = status, message = message, headers = headers)
+    }
+}
+
+enum class InterceptorMetadataSource {
+    NONE,
+    DSL,
+    GENERATED
+}
 
 class PluginApiException(
     val status: Int,
@@ -272,11 +314,13 @@ data class PluginEndpointDefinition<Req : Any, Res : Any>(
     val responseType: KType,
     val doc: OpenApiDoc = OpenApiDoc(),
     val executionPolicy: EndpointExecutionPolicy = EndpointExecutionPolicy(),
-    val handler: suspend PluginRequestContext.(Req?) -> PluginResult<Res>
+    val interceptors: List<KClass<out KeelRequestInterceptor>> = emptyList(),
+    val interceptorSource: InterceptorMetadataSource = InterceptorMetadataSource.NONE,
+    val handler: suspend KeelRequestContext.(Req?) -> PluginResult<Res>
 ) : PluginRouteDefinition {
     @Suppress("UNCHECKED_CAST")
-    suspend fun execute(context: PluginRequestContext, request: Any?): PluginResult<Any?> {
-        val result = (handler as suspend PluginRequestContext.(Any?) -> PluginResult<Any?>)
+    suspend fun execute(context: KeelRequestContext, request: Any?): PluginResult<Any?> {
+        val result = (handler as suspend KeelRequestContext.(Any?) -> PluginResult<Any?>)
             .invoke(context, request)
         return result
     }
@@ -296,7 +340,7 @@ data class PluginStaticResourceDefinition(
 ) : PluginRouteDefinition
 
 class PluginSseSession internal constructor(
-    val request: PluginRequestContext,
+    val request: KeelRequestContext,
     private val sender: suspend (ServerSentEvent) -> Unit
 ) {
     suspend fun send(event: ServerSentEvent) {
@@ -314,24 +358,42 @@ object PluginEndpointBuilders {
 class PluginEndpointDsl internal constructor(
     pluginId: String,
     private val basePath: String = "",
-    @PublishedApi internal val endpoints: MutableList<PluginRouteDefinition> = mutableListOf()
+    @PublishedApi internal val endpoints: MutableList<PluginRouteDefinition> = mutableListOf(),
+    @PublishedApi internal var inheritedInterceptors: List<KClass<out KeelRequestInterceptor>> = emptyList(),
+    @PublishedApi internal var inheritedInterceptorSource: InterceptorMetadataSource = InterceptorMetadataSource.NONE
 ) {
     @PublishedApi
     internal val pluginIdValue: String = pluginId
+
+    fun interceptors(vararg interceptors: KClass<out KeelRequestInterceptor>) {
+        inheritedInterceptors = interceptors.toList()
+        inheritedInterceptorSource = InterceptorMetadataSource.DSL
+    }
+
+    fun noInterceptors() {
+        inheritedInterceptors = emptyList()
+        inheritedInterceptorSource = InterceptorMetadataSource.DSL
+    }
 
     fun route(
         path: String,
         block: PluginEndpointDsl.() -> Unit
     ) {
         val combinedPath = joinPaths(basePath, path)
-        PluginEndpointDsl(pluginIdValue, combinedPath, endpoints).apply(block)
+        PluginEndpointDsl(
+            pluginIdValue,
+            combinedPath,
+            endpoints,
+            inheritedInterceptors = inheritedInterceptors,
+            inheritedInterceptorSource = inheritedInterceptorSource
+        ).apply(block)
     }
 
     inline fun <reified Res : Any> get(
         path: String = "",
         doc: OpenApiDoc = OpenApiDoc(),
         executionPolicy: EndpointExecutionPolicy = EndpointExecutionPolicy(),
-        noinline handler: suspend PluginRequestContext.() -> PluginResult<Res>
+        noinline handler: suspend KeelRequestContext.() -> PluginResult<Res>
     ) {
         val resolvedPath = resolvePath(path)
         endpoints += PluginEndpointDefinition(
@@ -342,6 +404,8 @@ class PluginEndpointDsl internal constructor(
             responseType = typeOf<Res>(),
             doc = doc,
             executionPolicy = executionPolicy,
+            interceptors = inheritedInterceptors,
+            interceptorSource = inheritedInterceptorSource,
             handler = { _: Unit? -> handler() }
         )
     }
@@ -350,7 +414,7 @@ class PluginEndpointDsl internal constructor(
         path: String = "",
         doc: OpenApiDoc = OpenApiDoc(),
         executionPolicy: EndpointExecutionPolicy = EndpointExecutionPolicy(),
-        noinline handler: suspend PluginRequestContext.(Req) -> PluginResult<Res>
+        noinline handler: suspend KeelRequestContext.(Req) -> PluginResult<Res>
     ) {
         val resolvedPath = resolvePath(path)
         endpoints += PluginEndpointDefinition<Req, Res>(
@@ -361,6 +425,8 @@ class PluginEndpointDsl internal constructor(
             responseType = typeOf<Res>(),
             doc = doc,
             executionPolicy = executionPolicy,
+            interceptors = inheritedInterceptors,
+            interceptorSource = inheritedInterceptorSource,
             handler = { request -> handler(requireNotNull(request)) }
         )
     }
@@ -369,7 +435,7 @@ class PluginEndpointDsl internal constructor(
         path: String = "",
         doc: OpenApiDoc = OpenApiDoc(),
         executionPolicy: EndpointExecutionPolicy = EndpointExecutionPolicy(),
-        noinline handler: suspend PluginRequestContext.() -> PluginResult<Res>
+        noinline handler: suspend KeelRequestContext.() -> PluginResult<Res>
     ) {
         val resolvedPath = resolvePath(path)
         endpoints += PluginEndpointDefinition(
@@ -380,6 +446,8 @@ class PluginEndpointDsl internal constructor(
             responseType = typeOf<Res>(),
             doc = doc,
             executionPolicy = executionPolicy,
+            interceptors = inheritedInterceptors,
+            interceptorSource = inheritedInterceptorSource,
             handler = { _: Unit? -> handler() }
         )
     }
@@ -388,7 +456,7 @@ class PluginEndpointDsl internal constructor(
         path: String = "",
         doc: OpenApiDoc = OpenApiDoc(),
         executionPolicy: EndpointExecutionPolicy = EndpointExecutionPolicy(),
-        noinline handler: suspend PluginRequestContext.(Req) -> PluginResult<Res>
+        noinline handler: suspend KeelRequestContext.(Req) -> PluginResult<Res>
     ) {
         val resolvedPath = resolvePath(path)
         endpoints += PluginEndpointDefinition<Req, Res>(
@@ -399,6 +467,8 @@ class PluginEndpointDsl internal constructor(
             responseType = typeOf<Res>(),
             doc = doc,
             executionPolicy = executionPolicy,
+            interceptors = inheritedInterceptors,
+            interceptorSource = inheritedInterceptorSource,
             handler = { request -> handler(requireNotNull(request)) }
         )
     }
@@ -407,7 +477,7 @@ class PluginEndpointDsl internal constructor(
         path: String = "",
         doc: OpenApiDoc = OpenApiDoc(),
         executionPolicy: EndpointExecutionPolicy = EndpointExecutionPolicy(),
-        noinline handler: suspend PluginRequestContext.() -> PluginResult<Res>
+        noinline handler: suspend KeelRequestContext.() -> PluginResult<Res>
     ) {
         val resolvedPath = resolvePath(path)
         endpoints += PluginEndpointDefinition(
@@ -418,6 +488,8 @@ class PluginEndpointDsl internal constructor(
             responseType = typeOf<Res>(),
             doc = doc,
             executionPolicy = executionPolicy,
+            interceptors = inheritedInterceptors,
+            interceptorSource = inheritedInterceptorSource,
             handler = { _: Unit? -> handler() }
         )
     }

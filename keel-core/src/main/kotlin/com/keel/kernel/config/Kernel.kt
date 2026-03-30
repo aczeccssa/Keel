@@ -9,47 +9,28 @@ import com.keel.kernel.hotreload.PluginDevelopmentSource
 import com.keel.kernel.hotreload.PluginSourceInference
 import com.keel.kernel.loader.DefaultPluginLoader
 import com.keel.kernel.logging.KeelLoggerService
-import com.keel.kernel.logging.LogLevel
 import com.keel.kernel.observability.ObservabilityConfig
 import com.keel.kernel.observability.ObservabilityHub
 import com.keel.kernel.observability.ObservabilityTracing
-import com.keel.kernel.observability.KeelObservability
 import com.keel.kernel.plugin.KeelPlugin
 import com.keel.kernel.plugin.PluginRuntimeMode
 import com.keel.kernel.plugin.UnifiedPluginManager
-import com.keel.kernel.routing.DocRouteInstaller
 import com.keel.kernel.routing.GatewayInterceptor
-import com.keel.kernel.routing.LogRouteInstaller
-import com.keel.kernel.routing.UnifiedSystemRouteInstaller
-import com.lestere.opensource.ApplicationMode
-import com.lestere.opensource.logger.SoulLogger
-import com.lestere.opensource.logger.SoulLoggerPlugin
-import io.ktor.serialization.kotlinx.json.json
 import io.ktor.server.application.Application
 import io.ktor.server.application.ApplicationCallPipeline
-import io.ktor.server.application.ApplicationStarted
-import io.ktor.server.application.ApplicationStopping
 import io.ktor.server.application.call
-import io.ktor.server.application.install
-import io.ktor.server.http.content.staticResources
 import io.ktor.server.request.httpMethod
 import io.ktor.server.request.path
-import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.server.routing.Route
-import io.ktor.server.routing.routing
-import io.ktor.server.sse.SSE
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
-import kotlinx.serialization.json.Json
 import io.opentelemetry.context.Context
 import java.io.File
 import org.koin.core.Koin
 import org.koin.core.KoinApplication
 import org.koin.core.context.startKoin
-import org.koin.dsl.module
 
 class Kernel(
     private val koin: Koin,
@@ -80,6 +61,8 @@ class Kernel(
     )
     private val gatewayInterceptor = GatewayInterceptor(pluginManager)
     private var serverPort: Int = serverConfig.port
+    private val applicationInstaller = KernelApplicationInstaller(serverConfig, pluginManager, observabilityHub, koin)
+    private val routeInstaller = KernelRouteInstaller(pluginManager, pluginLoader, devHotReloadEngine, customRouting)
 
     private var hotReloaderInitialized = false
     private val configHotReloader: ConfigHotReloader by lazy {
@@ -120,47 +103,9 @@ class Kernel(
         }
         
         val engine = KeelEngineStarter.start(serverConfig) {
-            install(ContentNegotiation) {
-                json(Json {
-                    prettyPrint = true
-                    isLenient = true
-                })
-            }
-            install(SSE)
-            install(SoulLoggerPlugin) {
-                if (ConfigHotReloader.isDevelopmentMode()) {
-                    mode = ApplicationMode.DEVELOPMENT
-                    level = SoulLogger.Level.DEBUG
-                } else {
-                    mode = ApplicationMode.PRODUCTION
-                    level = SoulLogger.Level.INFO
-                }
-            }
-            serverConfig.installConfiguredGlobalKtorPlugins(this)
-            pluginManager.installConfiguredPluginApplicationKtorPlugins(this)
-
-            val loggerService = KeelLoggerService.initialize()
-            if (ConfigHotReloader.isDevelopmentMode()) {
-                loggerService.setLevel(LogLevel.DEBUG)
-            }
-
-            koin.loadModules(listOf(
-                module {
-                    single<KeelObservability> { observabilityHub }
-                }
-            ))
-            observabilityHub.setPluginSnapshotProvider { pluginManager.getRuntimeSnapshots() }
-
+            applicationInstaller.install(this)
             configureApplication(this)
-
-            routing {
-                pluginManager.mountRoutes(this)
-                UnifiedSystemRouteInstaller.install(this, pluginManager, pluginLoader, devHotReloadEngine)
-                LogRouteInstaller.install(this)
-                DocRouteInstaller.install(this)
-                staticResources("/", "static")
-                customRouting?.invoke(this)
-            }
+            routeInstaller.install(this)
         }
         engine.start(wait = true)
     }
@@ -170,6 +115,7 @@ class Kernel(
             val span = observabilityTracing.tracer.spanBuilder("http.request")
                 .setAttribute("http.method", call.request.httpMethod.value)
                 .setAttribute("http.route", call.request.path())
+                .setAttribute("network.protocol.name", call.request.local.scheme.uppercase())
                 .setAttribute("keel.jvm", "kernel")
                 .startSpan()
             val scope = span.makeCurrent()
@@ -182,45 +128,26 @@ class Kernel(
                 }
                 proceed()
             } finally {
+                call.response.status()?.value?.let { span.setAttribute("http.status_code", it.toLong()) }
                 scope.close()
                 span.end()
             }
         }
 
-        app.monitor.subscribe(ApplicationStarted) {
-            logger.info("Kernel started")
-            BannerPrinter.print(port = serverPort, enablePluginHotReload = enablePluginHotReload)
-            kotlinx.coroutines.runBlocking {
-                pluginManager.startEnabledPlugins()
-            }
-            pluginDevelopmentSources.forEach { source ->
-                pluginManager.registerPluginSource(source)
-                devHotReloadEngine.registerSource(source)
-            }
-            observabilityHub.start(kernelScope)
-
-            if (ConfigHotReloader.isDevelopmentMode()) {
-                hotReloaderInitialized = true
-                configHotReloader.startWatching()
-                logger.info("Hot-reloader started (development mode: ${ConfigHotReloader.isDevelopmentMode()})")
-                if (moduleWatchDirectories.isNotEmpty()) {
-                    logger.info("Watching module directories: ${moduleWatchDirectories.joinToString(", ")}")
-                }
-            }
-        }
-
-        app.monitor.subscribe(ApplicationStopping) {
-            logger.info("Kernel stopping")
-            if (hotReloaderInitialized) {
-                configHotReloader.stopWatching()
-            }
-            kotlinx.coroutines.runBlocking {
-                pluginManager.stopAll()
-            }
-            observabilityHub.shutdown()
-            kernelScope.cancel()
-            KeelLoggerService.getInstance().shutdown()
-        }
+        KernelLifecycleHooks(
+            logger = logger,
+            serverPort = { serverPort },
+            enablePluginHotReload = enablePluginHotReload,
+            pluginManager = pluginManager,
+            pluginDevelopmentSources = pluginDevelopmentSources,
+            devHotReloadEngine = devHotReloadEngine,
+            observabilityHub = observabilityHub,
+            kernelScope = kernelScope,
+            configHotReloader = { configHotReloader },
+            onHotReloaderStarted = { hotReloaderInitialized = true },
+            isHotReloaderInitialized = { hotReloaderInitialized },
+            moduleWatchDirectories = moduleWatchDirectories
+        ).install(app)
 
         logger.info("Kernel configured")
     }
@@ -408,9 +335,7 @@ class KernelBuilder {
 
 fun buildKeel(block: KernelBuilder.() -> Unit): Kernel = KernelBuilder().apply(block).build()
 
-fun runKeel(block: KernelBuilder.() -> Unit): Unit = buildKeel(block).run()
-
-fun runKeel(port: Int, block: KernelBuilder.() -> Unit): Unit = buildKeel(block).run(port)
+fun runKeel(port: Int? = null, block: KernelBuilder.() -> Unit): Unit = buildKeel(block).run(port)
 
 private fun locateRepoRoot(start: File): File {
     return generateSequence(start) { it.parentFile }

@@ -20,6 +20,7 @@ dependencies {
     implementation(project(":keel-openapi-annotations"))
     implementation(project(":keel-openapi-runtime"))
     implementation(libs.ktor.server.core)
+    implementation(libs.ktor.server.cors)
     implementation(libs.ktor.server.sse)
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.kotlinx.serialization.json)

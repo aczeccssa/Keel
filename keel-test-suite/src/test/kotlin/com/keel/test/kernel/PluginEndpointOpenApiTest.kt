@@ -18,7 +18,6 @@ import io.ktor.server.sse.SSE
 import io.ktor.sse.ServerSentEvent
 import io.ktor.utils.io.ClosedWriteChannelException
 import kotlinx.coroutines.flow.MutableSharedFlow
-import kotlinx.coroutines.flow.collect
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import kotlin.test.AfterTest
@@ -111,7 +110,7 @@ class PluginEndpointOpenApiTest {
 
             staticResources(
                 path = "/ui",
-                basePackage = "observability-ui",
+                basePackage = "static",
                 doc = OpenApiDoc(summary = "Static UI"),
                 index = "index.html"
             )

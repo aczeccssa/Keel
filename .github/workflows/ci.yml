@@ -25,7 +25,7 @@ jobs:
           cache: gradle
 
       - name: Build and Test
-        run: ./gradlew build dokkaGenerate
+        run: ./gradlew build dokkaGenerate detekt koverVerify --console=plain
 
       - name: Performance Benchmarks (CI Gate)
         run: ./gradlew :keel-test-suite:test --tests "com.keel.test.perf.*" --info

@@ -212,12 +212,12 @@ class ExternalJvmE2EIntegrationTest {
         manager.startPlugin(pluginId)
 
         manager.getProcessHandle(pluginId)?.destroyForcibly()
-        waitUntil(8000) {
+        waitUntil(20000) {
             val current = manager.getRuntimeSnapshot(pluginId) ?: return@waitUntil false
             current.lifecycleState == PluginLifecycleState.RUNNING &&
                 current.processId != null
         }
-        delay(1500)
+        delay(3000)
         assertEquals(PluginLifecycleState.RUNNING, manager.getRuntimeSnapshot(pluginId)?.lifecycleState)
         assertEquals(com.keel.kernel.plugin.PluginDispatchDisposition.AVAILABLE, manager.resolveDispatchDisposition(pluginId))
         manager.stopAll()

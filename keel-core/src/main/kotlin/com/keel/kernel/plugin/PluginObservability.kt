@@ -1,11 +1,24 @@
 package com.keel.kernel.plugin
 
+import kotlinx.serialization.Serializable
+
 enum class PluginChannelHealth {
     UNKNOWN,
     HEALTHY,
     DEGRADED,
     UNREACHABLE
 }
+
+@Serializable
+data class PluginNodeAssetMetadata(
+    val assetId: String? = null,
+    val address: String? = null,
+    val zone: String? = null,
+    val region: String? = null,
+    val role: String? = null,
+    val roleDescription: String? = null,
+    val featured: Boolean = false
+)
 
 data class PluginFailureRecord(
     val timestamp: Long,
@@ -26,7 +39,12 @@ data class PluginRuntimeDiagnostics(
     val lastHealthLatencyMs: Long? = null,
     val lastAdminLatencyMs: Long? = null,
     val lastEventAtEpochMs: Long? = null,
-    val inflightInvocations: Int = 0
+    val inflightInvocations: Int = 0,
+    val processCpuLoadPercent: Double? = null,
+    val heapUsedBytes: Long? = null,
+    val heapMaxBytes: Long? = null,
+    val heapUsedPercent: Double? = null,
+    val assetMetadata: PluginNodeAssetMetadata? = null
 )
 
 data class PluginRuntimeSnapshot(

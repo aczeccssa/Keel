@@ -1,0 +1,68 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Run Keel Samples Development",
+            "type": "shell",
+            "command": "./gradlew",
+            "args": [
+                ":keel-samples:run"
+            ],
+            "options": {
+                "env": {
+                    "KEEL_ENV": "development",
+                    "KEEL_PORT": "8080"
+                }
+            },
+            "windows": {
+                "command": ".\\gradlew.bat"
+            },
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared",
+                "clear": true
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "Build Keel Console For Sample",
+            "type": "shell",
+            "command": "make",
+            "args": ["-C", "tui", "build"],
+            "group": "none",
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared"
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "Run Keel Console For Sample",
+            "type": "shell",
+            "command": "tui/target/release/keel-sample-launcher",
+            "group": "none",
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared",
+                "clear": true
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "Run Keel Console For Sample (Rebuild First)",
+            "type": "shell",
+            "command": "make -C tui build && tui/target/release/keel-sample-launcher",
+            "group": "none",
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared",
+                "clear": true
+            },
+            "problemMatcher": []
+        }
+    ]
+}
