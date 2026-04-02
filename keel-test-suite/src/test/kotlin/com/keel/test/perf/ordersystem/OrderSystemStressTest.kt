@@ -97,7 +97,7 @@ class OrderSystemStressTest {
                                     items = listOf(OrderItemRequest(product.id, 1))
                                 ))
                                 successCount.incrementAndGet()
-                            } catch (e: Exception) {
+                            } catch (@Suppress("SwallowedException") e: Exception) {
                                 failCount.incrementAndGet()
                             }
                         }
@@ -144,9 +144,9 @@ class OrderSystemStressTest {
                                 items = listOf(OrderItemRequest(product.id, 1))
                             ))
                             successCount.incrementAndGet()
-                        } catch (e: InsufficientStockException) {
+                        } catch (@Suppress("SwallowedException") e: InsufficientStockException) {
                             failCount.incrementAndGet()
-                        } catch (e: Exception) {
+                        } catch (@Suppress("SwallowedException") e: Exception) {
                             failCount.incrementAndGet()
                         }
                     }

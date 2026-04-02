@@ -26,6 +26,7 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 
 object LogRouteInstaller {
+    @Suppress("TooGenericExceptionCaught")
     fun install(route: Route) {
         with(route) {
             systemApi {
@@ -66,7 +67,8 @@ object LogRouteInstaller {
                             )
                             call.respond(KeelResponse.success(data = data, message = "Log level set to ${level.name}"))
                         } catch (e: Exception) {
-                            call.respond(KeelResponse.failure<Unit>(400, "Invalid request: ${e.message}"))
+                            val msg = e.message ?: "Invalid request body"
+                            call.respond(KeelResponse.failure<Unit>(400, "Invalid request: $msg"))
                         }
                     }
 
@@ -113,14 +115,14 @@ object LogRouteInstaller {
                             for (event in merged) {
                                 send(event)
                             }
-                        } catch (e: kotlinx.coroutines.CancellationException) {
-                            // Client disconnected normally
-                        } catch (e: io.ktor.util.cio.ChannelWriteException) {
-                            // Ignored, client closed connection
-                        } catch (e: io.ktor.utils.io.ClosedWriteChannelException) {
-                            // Ignored, client closed connection
-                        } catch (e: java.io.IOException) {
-                            // Ignored, broken pipe or connection reset
+                        } catch (_: kotlinx.coroutines.CancellationException) {
+                            // Client SSE connection closed — stream naturally terminating.
+                        } catch (_: io.ktor.util.cio.ChannelWriteException) {
+                            // Client closed write channel — stream naturally terminating.
+                        } catch (_: io.ktor.utils.io.ClosedWriteChannelException) {
+                            // Client closed write channel — stream naturally terminating.
+                        } catch (_: java.io.IOException) {
+                            // Broken pipe or connection reset — stream naturally terminating.
                         } finally {
                             logJob.cancel()
                             heartbeatJob.cancel()

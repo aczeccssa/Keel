@@ -213,6 +213,7 @@ object ExternalPluginHostMain {
             }
         }
 
+        @Suppress("TooGenericExceptionCaught") // Intentionally broad: plugin isolation boundary.
         fun run() {
             prepareSockets()
             try {
@@ -990,7 +991,7 @@ object ExternalPluginHostMain {
                     )
                 )
             )
-        } catch (error: Throwable) {
+        } catch (@Suppress("TooGenericExceptionCaught") error: Throwable) {
             responseStatus = 500
             eventEmitter.emitCritical(
                 PluginFailureEvent(
@@ -1209,7 +1210,7 @@ private class PluginEventEmitter(
                             PluginJvmFrameCodec.write(it, encodeEvent(event))
                         }
                     }
-                } catch (error: Throwable) {
+                } catch (@Suppress("TooGenericExceptionCaught") error: Throwable) {
                     connected.set(false)
                     if (!isActive) break
                     logger.warn("EventEmitter failed to connect/write, retrying in 1s: ${error.message}")

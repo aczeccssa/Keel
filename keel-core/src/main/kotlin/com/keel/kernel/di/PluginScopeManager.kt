@@ -66,7 +66,7 @@ class PluginScopeManager(
             if (handle != null) {
                 logger.info("Closed Koin scope for plugin: $pluginId")
             }
-        } catch (e: Exception) {
+        } catch (e: IllegalStateException) {
             logger.warn("Failed to close scope for plugin $pluginId: ${e.message}")
         }
     }

@@ -103,7 +103,7 @@ class KeelEngineStarterTest {
                                 applicationProvider: () -> Application
                             ): ApplicationEngine {
                                 capturedPort.set(configuration.connectors.single().port)
-                                throw IllegalStateException("stop after capture")
+                                error("stop after capture")
                             }
                         }
                     )

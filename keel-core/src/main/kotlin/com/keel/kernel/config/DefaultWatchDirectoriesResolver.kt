@@ -78,7 +78,7 @@ internal object DefaultWatchDirectoriesResolver {
     }
 
     private fun resolveCallerClass(): Class<*>? {
-        val stackTrace = Throwable().stackTrace
+        val stackTrace = Throwable("Stack trace capture for caller resolution").stackTrace
         for (frame in stackTrace) {
             val className = frame.className
             if (

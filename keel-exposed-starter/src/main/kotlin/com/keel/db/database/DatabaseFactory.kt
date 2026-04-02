@@ -248,7 +248,7 @@ class DatabaseFactory private constructor(
         (dataSource as? HikariDataSource)?.let { ds ->
             try {
                 ds.close()
-            } catch (e: Exception) {
+            } catch (@Suppress("TooGenericExceptionCaught") e: RuntimeException) {
                 logger.warn("Error closing data source", e)
             }
         }

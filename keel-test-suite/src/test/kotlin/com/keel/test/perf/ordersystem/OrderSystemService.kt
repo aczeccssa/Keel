@@ -98,8 +98,8 @@ class OrderSystemService(
             OrderStatus.PENDING -> OrderStatus.CONFIRMED
             OrderStatus.CONFIRMED -> OrderStatus.SHIPPED
             OrderStatus.SHIPPED -> OrderStatus.COMPLETED
-            OrderStatus.COMPLETED -> throw IllegalStateException("Order already completed")
-            OrderStatus.CANCELLED -> throw IllegalStateException("Cannot advance cancelled order")
+            OrderStatus.COMPLETED -> error("Order already completed")
+            OrderStatus.CANCELLED -> error("Cannot advance cancelled order")
         }
         repo.updateOrderStatus(orderId, next)
         return next

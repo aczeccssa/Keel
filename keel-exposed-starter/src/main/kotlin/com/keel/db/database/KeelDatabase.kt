@@ -50,11 +50,11 @@ class KeelDatabase(
      * @param block The transaction block
      * @return Result containing the transaction result or an error
      */
-    @Suppress("unused")
+    @Suppress("unused", "TooGenericExceptionCaught")
     fun <T> transactionWithResult(block: Transaction.() -> T): Result<T> {
         return try {
             Result.success(transaction(database, block))
-        } catch (e: Exception) {
+        } catch (e: RuntimeException) {
             logger.error("Transaction failed: ${e.message}", e)
             Result.failure(e)
         }
@@ -69,6 +69,7 @@ class KeelDatabase(
      * @return The transaction result
      * @throws Exception if all retries are exhausted
      */
+    @Suppress("TooGenericExceptionCaught")
     fun <T> transactionWithRetry(
         maxRetries: Int = 3,
         delayMillis: Long = 100,
@@ -78,7 +79,7 @@ class KeelDatabase(
         repeat(maxRetries) { attempt ->
             try {
                 return transaction(database, block)
-            } catch (e: Exception) {
+            } catch (e: RuntimeException) {
                 lastException = e
                 logger.warn("Transaction attempt ${attempt + 1} failed: ${e.message}")
                 if (attempt < maxRetries - 1) {
@@ -86,7 +87,7 @@ class KeelDatabase(
                 }
             }
         }
-        throw lastException ?: IllegalStateException("Transaction failed without exception")
+        throw lastException ?: error("Transaction failed after all retries")
     }
 
     /**
@@ -108,11 +109,11 @@ class KeelDatabase(
      * @param block The suspending transaction block
      * @return Result containing the transaction result or an error
      */
-    @Suppress("unused")
+    @Suppress("unused", "TooGenericExceptionCaught")
     suspend fun <T> suspendTransactionWithResult(block: Transaction.() -> T): Result<T> = withContext(Dispatchers.IO) {
         try {
             Result.success(transaction(database) { block() })
-        } catch (e: Exception) {
+        } catch (e: RuntimeException) {
             logger.error("Suspending transaction failed: ${e.message}", e)
             Result.failure(e)
         }

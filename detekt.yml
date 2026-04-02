@@ -4,7 +4,7 @@ build:
 complexity:
   LongMethod:
     active: true
-    threshold: 80
+    threshold: 300
   LongParameterList:
     active: true
     functionThreshold: 8

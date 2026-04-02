@@ -743,7 +743,8 @@ class UnifiedPluginManager(
                 }
                 entry.invokeLimiter.release()
             }
-        } catch (error: TimeoutCancellationException) {
+        } catch (@Suppress("SwallowedException") error: TimeoutCancellationException) {
+            logger.warn("Plugin call timed out pluginId=${entry.plugin.descriptor.pluginId} endpoint=${endpoint.endpointId}")
             respondPluginResult(
                 call = call,
                 result = PluginResult(status = HttpStatusCode.GatewayTimeout.value, body = null),
@@ -759,7 +760,7 @@ class UnifiedPluginManager(
                 responseEnvelope = responseEnvelope,
                 errorMessage = error.message
             )
-        } catch (error: Exception) {
+        } catch (@Suppress("TooGenericExceptionCaught") error: Exception) {
             logger.error("Plugin endpoint failed pluginId=${entry.plugin.descriptor.pluginId} endpoint=${endpoint.endpointId}", error)
             respondPluginResult(
                 call = call,
