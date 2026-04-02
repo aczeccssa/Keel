@@ -538,6 +538,7 @@ internal fun joinPaths(basePath: String, path: String): String {
     }
 }
 
+@OptIn(io.ktor.util.InternalAPI::class)
 fun buildEndpointId(pluginId: String, method: HttpMethod, path: String): String {
     val normalizedPath = path.takeIf { it.isNotBlank() }?.let {
         if (it.startsWith("/")) it else "/$it"
