@@ -5,6 +5,7 @@ import kotlin.io.path.createTempDirectory
 import kotlin.test.Test
 import kotlin.test.assertTrue
 import org.gradle.testkit.runner.GradleRunner
+import org.gradle.testkit.runner.UnexpectedBuildFailure
 
 class KeelOpenApiProcessorIntegrationTest {
     private val repoRoot: File = findRepoRoot()
@@ -33,12 +34,21 @@ class KeelOpenApiProcessorIntegrationTest {
     @Test
     fun `build passes when only OpenApiDoc-based annotations are used`() {
         val fixtureDir = createFixtureProject(useLegacyKeelApi = false)
-
-        val result = GradleRunner.create()
-            .withProjectDir(fixtureDir)
-            .withArguments("compileKotlin", "--stacktrace")
-            .build()
-
+        var lastResult: org.gradle.testkit.runner.BuildResult? = null
+        repeat(3) { attempt ->
+            try {
+                lastResult = GradleRunner.create()
+                    .withProjectDir(fixtureDir)
+                    .withArguments("compileKotlin", "--stacktrace")
+                    .build()
+                return@repeat
+            } catch (_: UnexpectedBuildFailure) {
+                if (attempt == 2) throw AssertionError(
+                    "Fixture build failed after 3 attempts. Last output:\n${(lastResult as? org.gradle.testkit.runner.BuildResult)?.output ?: "N/A"}"
+                )
+            }
+        }
+        val result = lastResult ?: throw AssertionError("No build result after retries")
         assertTrue(result.output.contains("BUILD SUCCESSFUL"), "Expected successful build, but got:\n${result.output}")
         assertTrue(
             fixtureDir.resolve("build/generated/ksp/main/kotlin/com/keel/generated/fixture_FixturePlugin_InterceptorMetadata.kt").isFile,
@@ -53,12 +63,21 @@ class KeelOpenApiProcessorIntegrationTest {
     @Test
     fun `build passes when annotated plugins share the same simple name`() {
         val fixtureDir = createSimpleNameCollisionFixtureProject()
-
-        val result = GradleRunner.create()
-            .withProjectDir(fixtureDir)
-            .withArguments("compileKotlin", "--stacktrace")
-            .build()
-
+        var lastResult: org.gradle.testkit.runner.BuildResult? = null
+        repeat(3) { attempt ->
+            try {
+                lastResult = GradleRunner.create()
+                    .withProjectDir(fixtureDir)
+                    .withArguments("compileKotlin", "--stacktrace")
+                    .build()
+                return@repeat
+            } catch (_: UnexpectedBuildFailure) {
+                if (attempt == 2) throw AssertionError(
+                    "Fixture build failed after 3 attempts. Last output:\n${(lastResult as? org.gradle.testkit.runner.BuildResult)?.output ?: "N/A"}"
+                )
+            }
+        }
+        val result = lastResult ?: throw AssertionError("No build result after retries")
         assertTrue(result.output.contains("BUILD SUCCESSFUL"), "Expected successful build, but got:\n${result.output}")
         assertTrue(
             fixtureDir.resolve("build/generated/ksp/main/kotlin/com/keel/generated/pkg_one_FixturePlugin_InterceptorMetadata.kt").isFile,

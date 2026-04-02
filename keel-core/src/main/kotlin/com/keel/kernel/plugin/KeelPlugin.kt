@@ -538,7 +538,12 @@ internal fun joinPaths(basePath: String, path: String): String {
     }
 }
 
-@OptIn(io.ktor.util.InternalAPI::class)
+/**
+ * Builds an endpoint ID string from plugin ID, HTTP method, and path.
+ *
+ * **Internal API** — do not call from external plugin code.
+ * Endpoint ID generation format is an implementation detail that may change.
+ */
 fun buildEndpointId(pluginId: String, method: HttpMethod, path: String): String {
     val normalizedPath = path.takeIf { it.isNotBlank() }?.let {
         if (it.startsWith("/")) it else "/$it"

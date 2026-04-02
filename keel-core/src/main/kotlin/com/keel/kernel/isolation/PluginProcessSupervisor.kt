@@ -412,12 +412,13 @@ class PluginProcessSupervisor(
         timeoutMs: Long
     ): T {
         var lastError: Throwable? = null
-        repeat(3) { attempt ->
+        val maxAttempts = descriptor.communicationStrategy.maxAttempts
+        repeat(maxAttempts) { attempt ->
             try {
                 return sendInvokeMessage(message, serializer, timeoutMs)
             } catch (error: Throwable) {
                 lastError = error
-                if (!shouldRetryInvokeSend(error) || attempt == 2 || process?.isAlive != true) {
+                if (!shouldRetryInvokeSend(error) || attempt == maxAttempts - 1 || process?.isAlive != true) {
                     throw error
                 }
                 delay(25L * (attempt + 1))
@@ -666,6 +667,8 @@ class PluginProcessSupervisor(
         lastHeapMaxBytes = null
         lastHeapUsedPercent = null
         descriptorAssetMetadata = descriptor.nodeAssetMetadata
+        // Force-stop resets recoveryGraceActive so the next start gets a clean grace period.
+        if (force) recoveryGraceActive = false
     }
 
     private fun captureOutput(stream: java.io.InputStream, error: Boolean) {
