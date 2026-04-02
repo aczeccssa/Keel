@@ -28,6 +28,7 @@ class GatewayInterceptor(
      * @return true if the call was blocked (plugin disabled), false otherwise.
      */
     suspend fun intercept(call: ApplicationCall): Boolean {
+        // Ktor's call.request.path() already URL-decodes the path, so no additional decoding is needed here.
         val path = call.request.path()
         val pluginId = extractPluginId(path)
 

@@ -90,7 +90,7 @@ class ConfigHotReloader private constructor(
                         watchLoop(watcher)
                     }
                 }
-            } catch (error: Exception) {
+            } catch (error: java.io.IOException) {
                 logger.error("Error starting hot reloader: ${error.message}", error)
                 _isWatching.value = false
             }
@@ -114,7 +114,7 @@ class ConfigHotReloader private constructor(
         watchers.forEach { watcher ->
             try {
                 watcher.close()
-            } catch (error: Exception) {
+            } catch (error: java.io.IOException) {
                 logger.warn("Error closing watcher", error)
             }
         }
@@ -184,7 +184,7 @@ class ConfigHotReloader private constructor(
                 break
             } catch (_: ClosedWatchServiceException) {
                 break
-            } catch (error: Exception) {
+            } catch (error: java.io.IOException) {
                 logger.error("Error in watch loop: ${error.message}", error)
             }
         }
@@ -197,7 +197,11 @@ class ConfigHotReloader private constructor(
                 if (cont.isActive) {
                     cont.resume(key)
                 }
-            } catch (error: Exception) {
+            } catch (error: InterruptedException) {
+                if (cont.isActive) {
+                    cont.resumeWithException(error)
+                }
+            } catch (error: ClosedWatchServiceException) {
                 if (cont.isActive) {
                     cont.resumeWithException(error)
                 }

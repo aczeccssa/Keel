@@ -7,6 +7,8 @@ import org.koin.core.scope.Scope
 internal fun normalizeRequestHeaders(headers: Map<String, List<String>>): Map<String, List<String>> {
     val normalized = linkedMapOf<String, List<String>>()
     headers.forEach { (key, values) ->
+        // HTTP header names are case-insensitive; store three forms so that any lookup
+        // style (original / lowercase / Title-Case) will succeed.
         normalized.putIfAbsent(key, values)
         normalized.putIfAbsent(key.lowercase(), values)
         normalized.putIfAbsent(

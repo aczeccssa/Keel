@@ -38,6 +38,7 @@ data class KeelResponse<T>(
          * Create a failure response.
          */
         fun <T> failure(code: Int, message: String): KeelResponse<T> {
+            require(code in 100..599) { "HTTP status code must be in range 100-599, got: $code" }
             return KeelResponse(code = code, message = message)
         }
     }

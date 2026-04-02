@@ -191,7 +191,7 @@ class PluginProcessSupervisor(
                 startHealthChecks()
                 watchProcessExit()
                 return
-            } catch (error: Throwable) {
+            } catch (@Suppress("TooGenericExceptionCaught") error: Throwable) {
                 lastError = error
                 recordFailure("start", error.message ?: "Failed to start isolated plugin")
                 logger.warn("Failed to start isolated plugin ${descriptor.pluginId} attempt=${attempt + 1}: ${error.message}")
@@ -412,18 +412,19 @@ class PluginProcessSupervisor(
         timeoutMs: Long
     ): T {
         var lastError: Throwable? = null
-        repeat(3) { attempt ->
+        val maxAttempts = descriptor.communicationStrategy.maxAttempts
+        repeat(maxAttempts) { attempt ->
             try {
                 return sendInvokeMessage(message, serializer, timeoutMs)
-            } catch (error: Throwable) {
+            } catch (@Suppress("TooGenericExceptionCaught") error: Throwable) {
                 lastError = error
-                if (!shouldRetryInvokeSend(error) || attempt == 2 || process?.isAlive != true) {
+                if (!shouldRetryInvokeSend(error) || attempt == maxAttempts - 1 || process?.isAlive != true) {
                     throw error
                 }
                 delay(25L * (attempt + 1))
             }
         }
-        throw lastError ?: IllegalStateException("Invoke channel failed without an exception")
+        error(lastError?.message ?: "Invoke channel failed without an exception")
     }
 
     private fun shouldRetryInvokeSend(error: Throwable): Boolean {
@@ -463,7 +464,7 @@ class PluginProcessSupervisor(
                             handleEventPayload(payload)
                         }
                     }
-                } catch (error: Throwable) {
+                } catch (@Suppress("TooGenericExceptionCaught") error: Throwable) {
                     if (!isActive || process == null) {
                         break
                     }
@@ -521,10 +522,10 @@ class PluginProcessSupervisor(
         val deadline = System.currentTimeMillis() + config.startupTimeoutMs
         while (System.currentTimeMillis() < deadline) {
             if (process?.isAlive != true) {
-                throw IllegalStateException("Isolated plugin process exited before JVM lanes became ready")
+                error("Isolated plugin process exited before JVM lanes became ready")
             }
             
-            val connection = currentConnectionInfo ?: throw IllegalStateException("Connection info lost during startup")
+            val connection = currentConnectionInfo ?: error("Connection info lost during startup")
             val lanesReady = when (connection) {
                 is PluginJvmUdsConnectionInfo -> connection.adminPath.exists() && readyEventReceived
                 is PluginJvmTcpConnectionInfo -> readyEventReceived // TCP ports are bound by kernel first, then sub-jvm connects back for event lane
@@ -553,7 +554,7 @@ class PluginProcessSupervisor(
             }
             delay(100)
         }
-        throw IllegalStateException("Timed out waiting for isolated plugin ${descriptor.pluginId} handshake")
+        error("Timed out waiting for isolated plugin ${descriptor.pluginId} handshake")
     }
 
     private fun startHealthChecks() {
@@ -666,6 +667,8 @@ class PluginProcessSupervisor(
         lastHeapMaxBytes = null
         lastHeapUsedPercent = null
         descriptorAssetMetadata = descriptor.nodeAssetMetadata
+        // Force-stop resets recoveryGraceActive so the next start gets a clean grace period.
+        if (force) recoveryGraceActive = false
     }
 
     private fun captureOutput(stream: java.io.InputStream, error: Boolean) {
@@ -705,7 +708,7 @@ class PluginProcessSupervisor(
         serializer: KSerializer<T>,
         timeoutMs: Long
     ): T = withContext(Dispatchers.IO) {
-        val connection = currentConnectionInfo ?: throw IllegalStateException("Connection info unavailable")
+        val connection = currentConnectionInfo ?: error("Connection info unavailable")
         withTimeout(timeoutMs.milliseconds) {
             val channel = when (connection) {
                 is PluginJvmUdsConnectionInfo -> {

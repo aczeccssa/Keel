@@ -90,7 +90,7 @@ class DefaultPluginLoader : PluginLoader {
             discoveredPlugins[pluginId] = discovered
             logger.info("Discovered plugin: $pluginId v$version from ${jarFile.name}")
             discovered
-        } catch (e: Exception) {
+        } catch (e: java.io.IOException) {
             logger.error("Failed to discover plugin from ${jarFile.name}: ${e.message}", e)
             null
         }
@@ -140,7 +140,7 @@ class DefaultPluginLoader : PluginLoader {
                 plugin
             }
         } else {
-            throw IllegalStateException("Failed to load plugin: ${discovered.pluginId}")
+            error("Failed to load plugin: ${discovered.pluginId}")
         }
     }
 
@@ -181,7 +181,7 @@ class DefaultPluginLoader : PluginLoader {
         return try {
             val serviceLoader = ServiceLoader.load(KeelPlugin::class.java, classLoader)
             serviceLoader.firstOrNull()
-        } catch (e: Exception) {
+        } catch (e: ClassNotFoundException) {
             logger.debug("No SPI plugin found for ${discovered.pluginId}: ${e.message}")
             null
         }
@@ -197,12 +197,17 @@ class DefaultPluginLoader : PluginLoader {
             val plugin = clazz.getDeclaredConstructor().newInstance()
             @Suppress("UNCHECKED_CAST")
             plugin as? KeelPlugin
-        } catch (e: Exception) {
+        } catch (e: java.lang.reflect.InvocationTargetException) {
+            val cause = e.cause ?: e
+            logger.error("Failed to load main class ${discovered.mainClass}: ${cause.message}", cause)
+            null
+        } catch (e: ClassNotFoundException) {
             logger.error("Failed to load main class ${discovered.mainClass}: ${e.message}", e)
             null
         }
     }
 
+    @Suppress("TooGenericExceptionCaught") // Plugin code can throw any exception on close().
     override suspend fun unloadPlugin(pluginId: String) {
         val plugin = loadedPlugins.remove(pluginId)
         val classLoader = pluginClassLoaders.remove(pluginId)
@@ -210,7 +215,7 @@ class DefaultPluginLoader : PluginLoader {
         if (plugin != null) {
             try {
                 (plugin as? AutoCloseable)?.close()
-            } catch (e: Exception) {
+            } catch (e: RuntimeException) {
                 logger.warn("Error closing plugin $pluginId: ${e.message}", e)
             }
         }
@@ -218,7 +223,7 @@ class DefaultPluginLoader : PluginLoader {
         if (classLoader is AutoCloseable) {
             try {
                 classLoader.close()
-            } catch (e: Exception) {
+            } catch (e: java.io.IOException) {
                 logger.warn("Error closing classloader for $pluginId: ${e.message}", e)
             }
         }
