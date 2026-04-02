@@ -667,6 +667,8 @@ class PluginProcessSupervisor(
         lastHeapMaxBytes = null
         lastHeapUsedPercent = null
         descriptorAssetMetadata = descriptor.nodeAssetMetadata
+        // Force-stop resets recoveryGraceActive so the next start gets a clean grace period.
+        if (force) recoveryGraceActive = false
     }
 
     private fun captureOutput(stream: java.io.InputStream, error: Boolean) {
