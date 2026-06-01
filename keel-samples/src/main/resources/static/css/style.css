@@ -1,7 +1,7 @@
 :root {
     --font-body: "Quicksand", system-ui, -apple-system, sans-serif;
     --font-headline: "Newsreader", Georgia, "Times New Roman", serif;
-    --font-mono: ui-monospace, "SFMono-Regular", Menlo, Monaco, Consolas, monospace;
+    --font-mono: "Maple Mono", ui-monospace, "SFMono-Regular", Menlo, Monaco, Consolas, monospace;
 
     --bg: #f6f3ec;
     --paper: rgba(255, 253, 249, 0.88);
