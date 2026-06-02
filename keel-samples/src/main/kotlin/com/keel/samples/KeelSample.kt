@@ -1,12 +1,18 @@
 package com.keel.samples
 
 import com.keel.kernel.config.runKeel
+import com.keel.samples.aigateway.account.AccountPlugin
+import com.keel.samples.aigateway.airelay.AIRelayPlugin
+import com.keel.samples.aigateway.riskcontrol.RiskControlPlugin
+import com.keel.samples.aigateway.token.TokenPlugin
 import com.keel.samples.authsample.AuthSamplePlugin
 import com.keel.samples.observability.ObservabilityPlugin
 import com.keel.samples.ordersample.OrderSamplePlugin
 import com.keel.samples.productsample.ProductSamplePlugin
 import io.ktor.server.http.content.*
 import io.ktor.server.plugins.cors.routing.CORS
+import io.ktor.server.response.respondRedirect
+import io.ktor.server.routing.get
 
 /**
  * Sample application demonstrating the Keel framework.
@@ -46,6 +52,10 @@ import io.ktor.server.plugins.cors.routing.CORS
  */
 fun main() = runKeel {
     // Mount Plugins
+    plugin(AccountPlugin())
+    plugin(TokenPlugin())
+    plugin(RiskControlPlugin())
+    plugin(AIRelayPlugin())
     plugin(AuthSamplePlugin())
     plugin(ProductSamplePlugin())
     plugin(OrderSamplePlugin())
@@ -63,8 +73,23 @@ fun main() = runKeel {
         }
     }
 
-    // Global: Register global static resources
+    // Global: Register static resources under an explicit sub-path.
+    //
+    // We deliberately avoid `staticResources("/", "static")` here. Mounting a wildcard on the root
+    // path swallows every GET that is not matched by an earlier route and falls through Ktor's
+    // default no-op fallback, which silently hangs the connection and blocks all subsequent
+    // /api/* traffic on the same worker. Static files are served under `/static/*` instead,
+    // and `/` redirects users to the Observability UI as a stable landing target.
     routing {
-        staticResources("/", "static")
+        staticResources("/static", "static")
+        get("/") {
+            call.respondRedirect("/api/plugins/observability/ui/")
+        }
+        get("/index") {
+            call.respondRedirect("/api/plugins/observability/ui/")
+        }
+        get("/index.html") {
+            call.respondRedirect("/api/plugins/observability/ui/")
+        }
     }
 }

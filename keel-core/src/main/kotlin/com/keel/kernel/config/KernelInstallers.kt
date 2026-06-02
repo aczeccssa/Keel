@@ -84,7 +84,12 @@ internal class KernelRouteInstaller(
             UnifiedSystemRouteInstaller.install(this, pluginManager, pluginLoader, devHotReloadEngine)
             LogRouteInstaller.install(this)
             DocRouteInstaller.install(this)
-            staticResources("/", "static")
+            // Root-level static resources are intentionally NOT mounted here.
+            // A wildcard `staticResources("/", ...)` would swallow every GET that is not matched by
+            // an earlier route and return an empty body (Ktor's default static fallback is a no-op),
+            // which hangs clients and queues subsequent /api/* requests on the same connection.
+            // Host applications must mount their own static bundle under an explicit sub-path
+            // (e.g. `staticResources("/static", "static")` or via a plugin's `staticResources("/ui", ...)`).
             customRouting?.invoke(this)
         }
     }
