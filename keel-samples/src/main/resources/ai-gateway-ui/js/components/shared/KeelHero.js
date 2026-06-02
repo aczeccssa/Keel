@@ -1,11 +1,12 @@
 import { KeelElement } from '../base/KeelElement.js';
 
 /**
- * Headline strip used at the top of every panel. Renders a small uppercase label,
- * a large editorial title, and an optional meta-slot (count, last-updated, etc).
+ * Brutalist section header: a hazard-red marker, a monospace label, and a massive Archivo Black
+ * title. This is the SINGLE page title (the topbar shows only a system breadcrumb), so it never
+ * duplicates.
  */
 export class KeelHero extends KeelElement {
-    hostStyles() { return 'display:block;margin-bottom:6px;'; }
+    hostStyles() { return 'display:block;margin-bottom:8px;'; }
 
     template() {
         return `
@@ -15,23 +16,26 @@ export class KeelHero extends KeelElement {
                     align-items: flex-end;
                     justify-content: space-between;
                     gap: 24px;
-                    padding: 8px 0 24px;
-                    border-bottom: 1px solid var(--line);
-                    margin-bottom: 28px;
+                    padding: 0 0 18px;
+                    border-bottom: 2px solid var(--ink);
+                    margin-bottom: 26px;
                 }
-                .hero-meta { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+                .hero-meta { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
                 .hero-label {
-                    font-size: 10px;
-                    font-weight: 800;
-                    text-transform: uppercase;
-                    letter-spacing: 0.18em;
-                    color: var(--muted);
+                    display: inline-flex; align-items: center; gap: 9px;
+                    font-family: var(--font-mono);
+                    font-size: 11px; font-weight: 800; letter-spacing: 0.18em; text-transform: uppercase;
+                    color: var(--ink);
+                }
+                .hero-label::before {
+                    content: ""; width: 13px; height: 13px; background: var(--teal); flex-shrink: 0;
                 }
                 .hero-title {
                     font-family: var(--font-headline);
-                    font-size: clamp(28px, 4vw, 42px);
-                    line-height: 0.95;
-                    letter-spacing: -0.04em;
+                    font-size: clamp(34px, 5vw, 56px);
+                    line-height: 0.86;
+                    letter-spacing: -0.045em;
+                    text-transform: uppercase;
                     color: var(--ink);
                     margin: 0;
                 }

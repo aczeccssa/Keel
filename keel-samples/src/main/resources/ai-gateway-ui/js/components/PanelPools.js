@@ -21,7 +21,7 @@ export class PanelPools extends KeelElement {
                     background: var(--panel-strong);
                     border-radius: var(--radius-lg);
                     box-shadow: var(--shadow-sm);
-                    border: 1px solid rgba(17, 24, 39, 0.04);
+                    border: 2px solid var(--ink);
                     overflow: hidden;
                 }
                 .chain-header {
@@ -72,7 +72,7 @@ export class PanelPools extends KeelElement {
                     align-items: center;
                     gap: 4px;
                     padding: 4px 10px;
-                    border-radius: 999px;
+                    border-radius: 0;
                     font-size: 10px;
                     font-weight: 800;
                     text-transform: uppercase;
@@ -81,7 +81,7 @@ export class PanelPools extends KeelElement {
                 .btn-reset {
                     padding: 6px 14px;
                     border: 1px solid var(--line-strong);
-                    border-radius: 999px;
+                    border-radius: 0;
                     background: transparent;
                     color: var(--ink);
                     font-size: 10px;

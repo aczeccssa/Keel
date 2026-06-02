@@ -14,7 +14,7 @@ export class PanelPlayground extends KeelElement {
                     background: var(--panel-strong);
                     border-radius: var(--radius-lg);
                     box-shadow: var(--shadow-sm);
-                    border: 1px solid rgba(17, 24, 39, 0.04);
+                    border: 2px solid var(--ink);
                     display: flex;
                     flex-direction: column;
                     overflow: hidden;
@@ -22,7 +22,7 @@ export class PanelPlayground extends KeelElement {
                 .pane-header {
                     padding: 18px 24px;
                     background: var(--color-surface-container-low, #f3f1ed);
-                    border-bottom: 1px solid var(--line);
+                    border-bottom: 2px solid var(--ink);
                     display: flex;
                     justify-content: space-between;
                     align-items: center;
@@ -52,14 +52,14 @@ export class PanelPlayground extends KeelElement {
                     resize: vertical;
                 }
                 .field input:focus, .field select:focus, .field textarea:focus {
-                    outline: none; box-shadow: 0 2px 0 0 var(--teal); background: var(--color-surface-container-lowest, #fff);
+                    outline: none; box-shadow: var(--shadow-sm); background: var(--color-surface-container-lowest, #fff);
                 }
                 .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
                 .toggle-row { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; }
                 .toggle-row input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--teal); }
                 .toggle-row label { font-size: 12px; font-weight: 700; color: var(--ink); }
                 .btn-send {
-                    width: 100%; padding: 14px 0; border: 0; border-radius: 999px;
+                    width: 100%; padding: 14px 0; border: 0; border-radius: 0;
                     background: var(--navy); color: #f8fafc; font-size: 12px; font-weight: 800;
                     letter-spacing: 0.14em; text-transform: uppercase; cursor: pointer;
                     margin-top: 12px; transition: background 200ms ease;
@@ -68,7 +68,7 @@ export class PanelPlayground extends KeelElement {
                 .btn-send:disabled { opacity: 0.5; cursor: not-allowed; }
                 .response-meta {
                     font-size: 11px; color: var(--muted); margin-bottom: 16px;
-                    padding-bottom: 16px; border-bottom: 1px solid var(--line);
+                    padding-bottom: 16px; border-bottom: 2px solid var(--ink);
                     font-weight: 600;
                 }
                 .response-area {
@@ -83,7 +83,7 @@ export class PanelPlayground extends KeelElement {
                 .response-area.streaming { color: var(--teal); }
                 .status-badge {
                     padding: 4px 12px;
-                    border-radius: 999px;
+                    border-radius: 0;
                     font-size: 10px;
                     font-weight: 800;
                     text-transform: uppercase;

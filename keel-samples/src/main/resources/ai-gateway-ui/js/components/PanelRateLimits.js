@@ -15,7 +15,7 @@ export class PanelRateLimits extends KeelElement {
                     border-radius: var(--radius-lg);
                     padding: 28px;
                     box-shadow: var(--shadow-sm);
-                    border: 1px solid rgba(17, 24, 39, 0.04);
+                    border: 2px solid var(--ink);
                 }
                 .section-title {
                     font-family: var(--font-headline);
@@ -26,25 +26,25 @@ export class PanelRateLimits extends KeelElement {
                 }
                 .toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
                 .btn-primary {
-                    padding: 10px 20px; border: 0; border-radius: 999px;
+                    padding: 10px 20px; border: 0; border-radius: 0;
                     background: var(--navy); color: #f8fafc; font-size: 11px; font-weight: 800;
                     letter-spacing: 0.14em; text-transform: uppercase; cursor: pointer; transition: background 200ms ease;
                 }
                 .btn-primary:hover { background: var(--navy-2); }
                 .btn-ghost {
-                    padding: 8px 16px; border: 1px solid var(--line-strong); border-radius: 999px;
+                    padding: 8px 16px; border: 1px solid var(--line-strong); border-radius: 0;
                     background: transparent; color: var(--ink); font-size: 10px; font-weight: 700;
                     letter-spacing: 0.08em; text-transform: uppercase; cursor: pointer; transition: all 150ms ease;
                 }
                 .btn-ghost:hover { background: var(--panel-strong); }
                 .btn-danger-ghost {
-                    padding: 8px 16px; border: 1px solid var(--red); border-radius: 999px;
+                    padding: 8px 16px; border: 1px solid var(--red); border-radius: 0;
                     background: transparent; color: var(--red); font-size: 10px; font-weight: 700;
                     letter-spacing: 0.08em; text-transform: uppercase; cursor: pointer;
                 }
                 .btn-danger-ghost:hover { background: var(--red-soft); }
                 .btn-sm {
-                    padding: 5px 12px; border: 1px solid var(--red); border-radius: 999px;
+                    padding: 5px 12px; border: 1px solid var(--red); border-radius: 0;
                     background: transparent; color: var(--red); font-size: 9px; font-weight: 700;
                     text-transform: uppercase; letter-spacing: 0.06em; cursor: pointer;
                 }
@@ -59,7 +59,7 @@ export class PanelRateLimits extends KeelElement {
                     transition: all 150ms ease;
                 }
                 .field input:focus, .field select:focus {
-                    outline: none; box-shadow: 0 2px 0 0 var(--teal); background: var(--color-surface-container-lowest, #fff);
+                    outline: none; box-shadow: var(--shadow-sm); background: var(--color-surface-container-lowest, #fff);
                 }
                 .form-actions { display: flex; gap: 12px; }
                 .summary-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
@@ -67,7 +67,7 @@ export class PanelRateLimits extends KeelElement {
                     background: var(--color-surface-container-lowest, #fff);
                     border-radius: var(--radius-sm);
                     padding: 18px 20px;
-                    border: 1px solid rgba(17, 24, 39, 0.04);
+                    border: 2px solid var(--ink);
                 }
                 .summary-label {
                     font-size: 10px; font-weight: 800; text-transform: uppercase;

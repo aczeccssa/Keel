@@ -33,312 +33,167 @@ class AiProxyApp extends KeelElement {
         return `
             <style>
                 :host {
-                    --font-display: "Newsreader", Georgia, "Times New Roman", serif;
-                    --font-headline: "Newsreader", Georgia, "Times New Roman", serif;
-                    --font-body: "Quicksand", system-ui, -apple-system, sans-serif;
-                    --font-mono: ui-monospace, "SFMono-Regular", Menlo, Monaco, Consolas, monospace;
+                    --font-headline: "Archivo Black", "Helvetica Neue", Arial, sans-serif;
+                    --font-body: "Archivo", "Helvetica Neue", Arial, sans-serif;
+                    --font-mono: "JetBrains Mono", ui-monospace, monospace;
                 }
                 .app-shell {
                     display: grid;
-                    grid-template-columns: 260px minmax(0, 1fr);
+                    grid-template-columns: 280px minmax(0, 1fr);
                     height: 100vh;
                 }
                 .sidebar {
                     height: 100vh;
-                    padding: 28px 18px;
-                    background: rgba(247, 244, 237, 0.86);
-                    backdrop-filter: blur(18px);
-                    border-right: 1px solid var(--line);
+                    padding: 0;
+                    background: var(--paper);
+                    border-right: 2px solid var(--ink);
                     display: flex;
                     flex-direction: column;
-                    gap: 24px;
                     overflow-y: auto;
                 }
-                .brand { padding: 6px 10px; }
+                .brand {
+                    padding: 26px 22px 22px;
+                    border-bottom: 2px solid var(--ink);
+                    background: var(--ink);
+                    color: var(--paper);
+                }
                 .brand h1 {
                     margin: 0;
                     font-family: var(--font-headline);
-                    font-size: 28px;
-                    font-style: italic;
-                    font-weight: 700;
-                    letter-spacing: -0.03em;
-                }
-                .brand p {
-                    margin: 8px 0 0;
-                    color: var(--muted);
-                    font-size: 11px;
-                    font-weight: 700;
-                    letter-spacing: 0.16em;
+                    font-size: 30px;
+                    line-height: 0.9;
+                    letter-spacing: -0.04em;
                     text-transform: uppercase;
                 }
-                .nav-list { display: grid; gap: 6px; }
+                .brand p {
+                    margin: 10px 0 0;
+                    color: var(--teal);
+                    font-family: var(--font-mono);
+                    font-size: 10px;
+                    font-weight: 700;
+                    letter-spacing: 0.2em;
+                    text-transform: uppercase;
+                }
+                .nav-list { display: flex; flex-direction: column; }
                 .nav-link {
                     display: flex;
                     align-items: center;
-                    gap: 12px;
-                    padding: 12px 14px;
-                    border-radius: 999px;
-                    color: #475467;
+                    gap: 13px;
+                    padding: 15px 22px;
+                    color: var(--ink);
                     cursor: pointer;
-                    transition: all 250ms var(--ease-smooth);
                     text-decoration: none;
+                    border-bottom: 1px solid var(--ink);
+                    background: var(--paper);
+                    transition: background 120ms var(--ease-smooth), color 120ms;
+                    position: relative;
                 }
-                .nav-link:hover {
-                    transform: translateX(4px);
-                    background: rgba(255, 255, 255, 0.7);
+                .nav-link:hover { background: var(--ink); color: var(--paper); }
+                .nav-link:hover .nav-icon { border-color: var(--paper); color: var(--paper); }
+                .nav-link.is-active { background: var(--teal); color: var(--paper); }
+                .nav-link.is-active::before {
+                    content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 6px; background: var(--ink);
                 }
-                .nav-link.is-active {
-                    background: var(--panel-strong);
-                    color: var(--navy);
-                    box-shadow: 0 10px 28px rgba(15, 23, 42, 0.08);
-                }
+                .nav-link.is-active .nav-icon { border-color: var(--paper); color: var(--paper); }
                 .nav-icon {
-                    width: 30px;
-                    height: 30px;
-                    border-radius: 10px;
-                    background: rgba(15, 23, 42, 0.06);
-                    display: inline-flex;
-                    align-items: center;
-                    justify-content: center;
+                    width: 30px; height: 30px;
+                    border: 2px solid var(--ink);
+                    display: inline-flex; align-items: center; justify-content: center;
                     flex-shrink: 0;
+                    transition: border-color 120ms, color 120ms;
                 }
-                .nav-icon svg { width: 16px; height: 16px; }
-                .nav-link.is-active .nav-icon {
-                    background: rgba(15, 118, 110, 0.12);
-                    color: var(--teal);
-                }
+                .nav-icon svg { width: 15px; height: 15px; }
                 .nav-copy { min-width: 0; flex: 1; }
                 .nav-copy strong {
                     display: block;
-                    font-size: 12px;
-                    font-weight: 800;
-                    letter-spacing: 0.08em;
-                    text-transform: uppercase;
-                    white-space: nowrap;
-                    overflow: hidden;
-                    text-overflow: ellipsis;
+                    font-family: var(--font-mono);
+                    font-size: 12px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase;
+                    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
                 }
                 .nav-copy span {
-                    display: block;
-                    margin-top: 2px;
-                    color: var(--muted);
-                    font-size: 11px;
+                    display: block; margin-top: 3px;
+                    font-family: var(--font-mono);
+                    font-size: 9.5px; letter-spacing: 0.04em; opacity: 0.7; text-transform: uppercase;
                 }
-                .sidebar-footer {
-                    margin-top: auto;
-                    display: grid;
-                    gap: 10px;
-                }
+                .sidebar-footer { margin-top: auto; border-top: 2px solid var(--ink); padding: 16px 18px; display: grid; gap: 12px; }
                 .user-pill {
-                    display: flex;
-                    align-items: center;
-                    gap: 10px;
-                    padding: 10px 14px;
-                    border-radius: 999px;
-                    background: var(--panel-strong);
-                    border: 1px solid rgba(17, 24, 39, 0.06);
-                    font-size: 11px;
-                    font-weight: 700;
-                    color: var(--ink);
+                    display: flex; align-items: center; gap: 10px;
+                    padding: 10px 14px; background: var(--paper); border: 2px solid var(--ink);
+                    font-family: var(--font-mono); font-size: 11px; font-weight: 700; color: var(--ink);
+                    text-transform: uppercase; letter-spacing: 0.05em;
+                    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
                 }
-                .user-dot {
-                    width: 8px;
-                    height: 8px;
-                    border-radius: 999px;
-                    background: var(--green);
-                }
+                .user-dot { width: 9px; height: 9px; background: var(--green); flex-shrink: 0; }
                 .logout-btn {
-                    width: 100%;
-                    border: 0;
-                    padding: 12px 18px;
-                    border-radius: 999px;
-                    background: var(--navy);
-                    color: #f8fafc;
-                    cursor: pointer;
-                    font-size: 11px;
-                    font-weight: 800;
-                    letter-spacing: 0.18em;
-                    text-transform: uppercase;
-                    transition: background 200ms ease;
+                    width: 100%; border: 2px solid var(--ink); padding: 12px 18px;
+                    background: var(--ink); color: var(--paper); cursor: pointer;
+                    font-family: var(--font-mono); font-size: 11px; font-weight: 800; letter-spacing: 0.14em; text-transform: uppercase;
+                    transition: background 120ms, color 120ms;
                 }
-                .logout-btn:hover { background: var(--navy-2); }
-                .main-shell {
-                    min-width: 0;
-                    display: flex;
-                    flex-direction: column;
-                    height: 100vh;
-                    overflow: hidden;
-                }
+                .logout-btn:hover { background: var(--teal); border-color: var(--teal); }
+                .main-shell { min-width: 0; display: flex; flex-direction: column; height: 100vh; overflow: hidden; background: var(--bg); }
                 .topbar {
-                    flex-shrink: 0;
-                    display: flex;
-                    align-items: center;
-                    justify-content: space-between;
-                    gap: 16px;
-                    padding: 22px 28px 16px;
-                    background: rgba(246, 243, 236, 0.82);
-                    backdrop-filter: blur(18px);
-                    border-bottom: 1px solid rgba(17, 24, 39, 0.04);
-                    z-index: 10;
+                    flex-shrink: 0; display: flex; align-items: center; justify-content: space-between; gap: 16px;
+                    padding: 14px 28px; background: var(--paper); border-bottom: 2px solid var(--ink); z-index: 10;
                 }
-                .topbar h2 {
-                    margin: 0;
-                    font-family: var(--font-headline);
-                    font-size: clamp(24px, 3vw, 32px);
-                    line-height: 0.95;
-                    letter-spacing: -0.04em;
+                .topbar-sys { display: flex; align-items: center; gap: 10px; font-family: var(--font-mono); font-size: 12px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink); }
+                .sys-cross { color: var(--teal); font-weight: 800; font-size: 16px; }
+                .topbar-actions { display: flex; align-items: center; gap: 14px; }
+                .sys-stat { display: inline-flex; align-items: center; gap: 7px; font-family: var(--font-mono); font-size: 10px; font-weight: 700; letter-spacing: 0.12em; color: var(--muted); }
+                .sys-dot { width: 8px; height: 8px; background: var(--green); }
+                .refresh-btn {
+                    border: 2px solid var(--ink); background: var(--paper); color: var(--ink); cursor: pointer;
+                    padding: 8px 16px; font-family: var(--font-mono); font-size: 10px; font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase;
+                    transition: background 120ms, color 120ms;
                 }
-                .topbar-label {
-                    color: var(--muted);
-                    font-size: 10px;
-                    font-weight: 800;
-                    letter-spacing: 0.14em;
-                    text-transform: uppercase;
-                    margin-bottom: 6px;
-                }
-                .topbar-actions {
-                    display: flex;
-                    align-items: center;
-                    gap: 10px;
-                }
-                .content {
-                    padding: 28px 32px;
-                    flex: 1 1 0;
-                    min-height: 0;
-                    overflow-y: auto;
-                    overflow-x: hidden;
-                }
+                .refresh-btn:hover { background: var(--ink); color: var(--paper); }
+                .content { padding: 30px 32px 60px; flex: 1 1 0; min-height: 0; overflow-y: auto; overflow-x: hidden; }
                 .panel { display: none; }
                 .panel.is-active { display: block; }
-                /* Tab-switch animation is driven by GSAP in _renderState; we keep a CSS fallback
-                   for environments where GSAP didn't load (e.g. offline dev). */
-                @keyframes panel-enter {
-                    from { opacity: 0; transform: translateY(6px); }
-                    to { opacity: 1; transform: translateY(0); }
-                }
-                .panel.fallback-enter { animation: panel-enter 220ms var(--ease-smooth); }
+                @keyframes panel-enter { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+                .panel.fallback-enter { animation: panel-enter 200ms var(--ease-smooth); }
                 /* Login overlay */
                 .login-overlay {
-                    position: fixed;
-                    inset: 0;
-                    background: var(--bg);
-                    display: flex;
-                    align-items: center;
-                    justify-content: center;
-                    z-index: 1000;
+                    position: fixed; inset: 0; background: var(--bg);
+                    background-image:
+                        repeating-linear-gradient(0deg, transparent, transparent 39px, rgba(11,11,11,0.04) 39px, rgba(11,11,11,0.04) 40px),
+                        repeating-linear-gradient(90deg, transparent, transparent 39px, rgba(11,11,11,0.04) 39px, rgba(11,11,11,0.04) 40px);
+                    display: flex; align-items: center; justify-content: center; z-index: 1000;
                 }
-                .login-card {
-                    background: var(--panel-strong);
-                    border-radius: var(--radius-xl);
-                    padding: 48px;
-                    width: 420px;
-                    box-shadow: var(--shadow-lg);
-                    border: 1px solid rgba(17, 24, 39, 0.06);
-                }
+                .login-card { background: var(--paper); padding: 44px; width: 440px; border: 2px solid var(--ink); box-shadow: var(--shadow-lg); }
                 .login-card h2 {
-                    margin: 0 0 6px;
-                    font-family: var(--font-headline);
-                    font-size: 32px;
-                    font-style: italic;
-                    font-weight: 700;
-                    letter-spacing: -0.03em;
+                    margin: 0 0 6px; font-family: var(--font-headline); font-size: 38px; line-height: 0.9;
+                    letter-spacing: -0.04em; text-transform: uppercase;
                 }
-                .login-card p {
-                    margin: 0 0 32px;
-                    color: var(--muted);
-                    font-size: 13px;
-                }
-                .login-tabs {
-                    display: flex;
-                    gap: 0;
-                    margin-bottom: 28px;
-                    border-bottom: 1px solid var(--line);
-                }
+                .login-card > p { margin: 0 0 28px; color: var(--muted); font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; }
+                .login-tabs { display: flex; gap: 0; margin-bottom: 26px; border: 2px solid var(--ink); }
                 .login-tab {
-                    flex: 1;
-                    padding: 10px 0;
-                    text-align: center;
-                    font-size: 11px;
-                    font-weight: 800;
-                    text-transform: uppercase;
-                    letter-spacing: 0.08em;
-                    cursor: pointer;
-                    color: var(--muted);
-                    border-bottom: 2px solid transparent;
-                    transition: all 150ms ease;
+                    flex: 1; padding: 11px 0; text-align: center; font-family: var(--font-mono);
+                    font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.1em;
+                    cursor: pointer; color: var(--ink); background: var(--paper); transition: all 120ms ease;
                 }
-                .login-tab.active {
-                    color: var(--ink);
-                    border-bottom-color: var(--teal);
-                }
+                .login-tab + .login-tab { border-left: 2px solid var(--ink); }
+                .login-tab.active { color: var(--paper); background: var(--ink); }
                 .field { margin-bottom: 18px; }
-                .field label {
-                    display: block;
-                    font-size: 10px;
-                    font-weight: 800;
-                    text-transform: uppercase;
-                    letter-spacing: 0.14em;
-                    color: var(--muted);
-                    margin-bottom: 8px;
-                }
+                .field label { display: block; font-family: var(--font-mono); font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.14em; color: var(--ink); margin-bottom: 8px; }
                 .field input {
-                    width: 100%;
-                    padding: 12px 14px;
-                    border: 0;
-                    border-radius: var(--radius-sm);
-                    font-size: 14px;
-                    background: var(--color-surface-container-high, #e4e2dc);
-                    color: var(--ink);
-                    transition: all 150ms ease;
+                    width: 100%; padding: 12px 14px; border: 2px solid var(--ink); font-size: 14px;
+                    background: var(--paper); color: var(--ink); transition: all 120ms ease; font-family: var(--font-mono);
                 }
-                .field input:focus {
-                    outline: none;
-                    box-shadow: 0 2px 0 0 var(--teal);
-                    background: var(--color-surface-container-lowest, #fff);
-                }
+                .field input:focus { outline: none; box-shadow: var(--shadow-sm); background: #fff; }
                 .login-btn {
-                    width: 100%;
-                    padding: 14px 0;
-                    background: var(--navy);
-                    color: #f8fafc;
-                    border: 0;
-                    border-radius: 999px;
-                    font-size: 12px;
-                    font-weight: 800;
-                    letter-spacing: 0.14em;
-                    text-transform: uppercase;
-                    cursor: pointer;
-                    margin-top: 12px;
-                    transition: background 200ms ease;
+                    width: 100%; padding: 15px 0; background: var(--teal); color: var(--paper); border: 2px solid var(--ink);
+                    font-family: var(--font-mono); font-size: 12px; font-weight: 800; letter-spacing: 0.14em; text-transform: uppercase;
+                    cursor: pointer; margin-top: 12px; transition: all 120ms ease;
                 }
-                .login-btn:hover { background: var(--navy-2); }
-                .login-error {
-                    color: var(--red);
-                    font-size: 12px;
-                    margin-top: 10px;
-                    display: none;
-                    font-weight: 600;
-                }
+                .login-btn:hover { background: var(--ink); }
+                .login-error { color: var(--red); font-family: var(--font-mono); font-size: 12px; margin-top: 12px; display: none; font-weight: 700; }
                 .register-name { display: none; }
-                .onboarding {
-                    margin-top: 24px;
-                    padding: 16px 18px;
-                    background: rgba(15, 118, 110, 0.06);
-                    border-radius: var(--radius-sm);
-                    font-size: 12px;
-                    line-height: 1.6;
-                    color: var(--ink);
-                }
-                .onboarding code {
-                    background: rgba(15, 23, 42, 0.08);
-                    padding: 1px 6px;
-                    border-radius: 4px;
-                    font-family: var(--font-mono);
-                    font-size: 11px;
-                }
+                .onboarding { margin-top: 24px; padding: 16px 18px; background: var(--teal-soft); border: 2px solid var(--ink); font-family: var(--font-mono); font-size: 11px; line-height: 1.7; color: var(--ink); }
+                .onboarding code { background: var(--ink); color: var(--paper); padding: 2px 6px; font-family: var(--font-mono); font-size: 11px; }
                 @media (max-width: 980px) {
                     .app-shell { grid-template-columns: 1fr; }
-                    .sidebar { height: auto; padding: 18px; border-right: 0; border-bottom: 1px solid var(--line); }
+                    .sidebar { height: auto; border-right: 0; border-bottom: 2px solid var(--ink); }
                 }
             </style>
             <div class="login-overlay" data-ref="loginOverlay">
@@ -386,12 +241,13 @@ class AiProxyApp extends KeelElement {
                 </aside>
                 <div class="main-shell">
                     <header class="topbar">
-                        <div>
-                            <div class="topbar-label">Keel AI Gateway</div>
-                            <h2 data-ref="pageTitle">Dashboard</h2>
+                        <div class="topbar-sys" data-ref="sysLine">
+                            <span class="sys-cross">+</span>
+                            <span data-ref="sysCrumb">SECTOR / DASHBOARD</span>
                         </div>
                         <div class="topbar-actions">
-                            <button class="logout-btn" data-ref="refreshBtn" style="width:auto;padding:8px 18px;font-size:10px;">Refresh</button>
+                            <span class="sys-stat"><span class="sys-dot"></span>ONLINE</span>
+                            <button class="refresh-btn" data-ref="refreshBtn">↻ REFRESH</button>
                         </div>
                     </header>
                     <main class="content" data-ref="content">
@@ -509,7 +365,9 @@ class AiProxyApp extends KeelElement {
         `).join('');
 
         const tab = TABS.find(t => t.id === state.activeTab);
-        this.refs.pageTitle.textContent = tab?.label || 'Dashboard';
+        // Topbar shows a system breadcrumb (NOT the page title — the panel hero owns the title,
+        // so it isn't duplicated). Uppercase telemetry style.
+        if (this.refs.sysCrumb) this.refs.sysCrumb.textContent = `SECTOR / ${(tab?.label || 'Dashboard').toUpperCase()}`;
 
         const panels = {
             dashboard: this.refs.panelDashboard,
@@ -551,13 +409,13 @@ class AiProxyApp extends KeelElement {
             { autoAlpha: 0, y: 10 },
             { autoAlpha: 1, y: 0, duration: 0.32, ease: 'power2.out', clearProps: 'transform' }
         );
-        // Animate the page title in the topbar so the user gets immediate feedback that
+        // Animate the system breadcrumb in the topbar so the user gets immediate feedback that
         // the tab actually changed.
-        if (this.refs.pageTitle) {
+        if (this.refs.sysCrumb) {
             gsap.fromTo(
-                this.refs.pageTitle,
-                { autoAlpha: 0, y: 4 },
-                { autoAlpha: 1, y: 0, duration: 0.25, ease: 'power2.out' }
+                this.refs.sysCrumb,
+                { autoAlpha: 0, x: -6 },
+                { autoAlpha: 1, x: 0, duration: 0.25, ease: 'power2.out' }
             );
         }
     }

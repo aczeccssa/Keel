@@ -15,7 +15,7 @@ export class PanelUsers extends KeelElement {
                     border-radius: var(--radius-lg);
                     padding: 28px;
                     box-shadow: var(--shadow-sm);
-                    border: 1px solid rgba(17, 24, 39, 0.04);
+                    border: 2px solid var(--ink);
                 }
                 .section-title {
                     font-family: var(--font-headline);
@@ -26,13 +26,13 @@ export class PanelUsers extends KeelElement {
                 }
                 .toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
                 .btn-primary {
-                    padding: 10px 20px; border: 0; border-radius: 999px;
+                    padding: 10px 20px; border: 0; border-radius: 0;
                     background: var(--navy); color: #f8fafc; font-size: 11px; font-weight: 800;
                     letter-spacing: 0.14em; text-transform: uppercase; cursor: pointer;
                 }
                 .btn-primary:hover { background: var(--navy-2); }
                 .btn-action {
-                    padding: 5px 12px; border: 1px solid var(--line-strong); border-radius: 999px;
+                    padding: 5px 12px; border: 1px solid var(--line-strong); border-radius: 0;
                     background: transparent; color: var(--ink); font-size: 9px; font-weight: 700;
                     text-transform: uppercase; letter-spacing: 0.06em; cursor: pointer;
                 }
@@ -42,7 +42,7 @@ export class PanelUsers extends KeelElement {
                 .btn-action.success { border-color: var(--green); color: var(--green); }
                 .btn-action.success:hover { background: var(--green-soft); }
                 .btn-ghost {
-                    padding: 10px 18px; border: 1px solid var(--line-strong); border-radius: 999px;
+                    padding: 10px 18px; border: 1px solid var(--line-strong); border-radius: 0;
                     background: transparent; color: var(--ink); font-size: 10px; font-weight: 700;
                     letter-spacing: 0.08em; text-transform: uppercase; cursor: pointer;
                 }
@@ -58,7 +58,7 @@ export class PanelUsers extends KeelElement {
                     transition: all 150ms ease;
                 }
                 .field input:focus {
-                    outline: none; box-shadow: 0 2px 0 0 var(--teal); background: var(--color-surface-container-lowest, #fff);
+                    outline: none; box-shadow: var(--shadow-sm); background: var(--color-surface-container-lowest, #fff);
                 }
                 .form-actions { display: flex; gap: 12px; }
                 .empty { text-align: center; color: var(--muted); padding: 40px; font-size: 13px; }

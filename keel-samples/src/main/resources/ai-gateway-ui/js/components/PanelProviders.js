@@ -33,20 +33,20 @@ export class PanelProviders extends KeelElement {
                     border-radius: var(--radius-lg);
                     padding: 28px;
                     box-shadow: var(--shadow-sm);
-                    border: 1px solid rgba(17, 24, 39, 0.04);
+                    border: 2px solid var(--ink);
                 }
                 .section-title {
                     font-family: var(--font-headline);
                     font-size: 20px; font-weight: 500; margin: 0 0 20px; color: var(--ink);
                 }
                 .btn-primary {
-                    padding: 12px 24px; border: 0; border-radius: 999px;
+                    padding: 12px 24px; border: 0; border-radius: 0;
                     background: var(--navy); color: #f8fafc; font-size: 11px; font-weight: 800;
                     letter-spacing: 0.14em; text-transform: uppercase; cursor: pointer; transition: background 200ms ease;
                 }
                 .btn-primary:hover { background: var(--navy-2); }
                 .btn-ghost {
-                    padding: 8px 16px; border: 1px solid var(--line-strong); border-radius: 999px;
+                    padding: 8px 16px; border: 1px solid var(--line-strong); border-radius: 0;
                     background: transparent; color: var(--ink); font-size: 10px; font-weight: 700;
                     letter-spacing: 0.08em; text-transform: uppercase; cursor: pointer; transition: all 150ms ease;
                 }
@@ -55,25 +55,25 @@ export class PanelProviders extends KeelElement {
                 .channel-card {
                     background: var(--panel-strong);
                     border-radius: var(--radius-lg);
-                    border: 1px solid rgba(17, 24, 39, 0.05);
+                    border: 2px solid var(--ink);
                     box-shadow: var(--shadow-sm);
                     overflow: hidden;
                     display: flex; flex-direction: column;
                     transition: box-shadow 200ms ease, transform 200ms ease;
                 }
                 .channel-card:hover { box-shadow: var(--shadow-md); transform: translateY(-2px); }
-                .cc-head { padding: 20px 22px 16px; border-bottom: 1px solid var(--line); }
+                .cc-head { padding: 20px 22px 16px; border-bottom: 2px solid var(--ink); }
                 .cc-name-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
                 .cc-name { font-family: var(--font-headline); font-size: 19px; font-weight: 600; color: var(--ink); margin: 0; }
-                .chip { display: inline-flex; align-items: center; gap: 5px; padding: 4px 10px; border-radius: 999px; font-size: 9px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.07em; }
+                .chip { display: inline-flex; align-items: center; gap: 5px; padding: 4px 10px; border-radius: 0; font-size: 9px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.07em; }
                 .cc-meta { margin-top: 8px; font-size: 11px; color: var(--muted); font-family: var(--font-mono); word-break: break-all; }
                 .cc-proto { margin-top: 10px; display: inline-block; font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.1em; color: var(--teal); }
                 .cc-body { padding: 16px 22px; flex: 1; }
                 .cc-models { display: flex; flex-wrap: wrap; gap: 6px; }
-                .model-tag { font-size: 10px; font-family: var(--font-mono); background: rgba(15,23,42,0.05); padding: 3px 8px; border-radius: 6px; color: var(--ink); }
+                .model-tag { font-size: 10px; font-family: var(--font-mono); background: rgba(15,23,42,0.05); padding: 3px 8px; border-radius: 0; color: var(--ink); }
                 .cc-latency { margin-top: 14px; font-size: 11px; color: var(--muted); font-weight: 700; }
                 .cc-actions { padding: 14px 22px; background: var(--color-surface-container-low, #f3f1ed); display: flex; gap: 8px; flex-wrap: wrap; }
-                .btn-mini { padding: 6px 12px; border-radius: 999px; border: 1px solid var(--line-strong); background: transparent; color: var(--ink); font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; cursor: pointer; transition: all 150ms ease; }
+                .btn-mini { padding: 6px 12px; border-radius: 0; border: 1px solid var(--line-strong); background: transparent; color: var(--ink); font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; cursor: pointer; transition: all 150ms ease; }
                 .btn-mini:hover { background: var(--panel-strong); }
                 .btn-mini.test { border-color: var(--teal); color: var(--teal); }
                 .btn-mini.test:hover { background: var(--teal-soft); }
@@ -94,7 +94,7 @@ export class PanelProviders extends KeelElement {
                     background: var(--color-surface-container-high, #e4e2dc); color: var(--ink); transition: all 150ms ease;
                 }
                 .field textarea { font-family: var(--font-mono); min-height: 90px; resize: vertical; }
-                .field input:focus, .field select:focus, .field textarea:focus { outline: none; box-shadow: 0 2px 0 0 var(--teal); background: var(--color-surface-container-lowest, #fff); }
+                .field input:focus, .field select:focus, .field textarea:focus { outline: none; box-shadow: var(--shadow-sm); background: var(--color-surface-container-lowest, #fff); }
                 .field .hint { font-size: 10px; color: var(--muted); margin-top: 6px; }
                 .modal-actions { display: flex; gap: 12px; margin-top: 8px; }
                 .test-banner { margin: 0 0 18px; padding: 12px 16px; border-radius: var(--radius-sm); font-size: 12px; font-weight: 600; display: none; }

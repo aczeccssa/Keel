@@ -1,39 +1,60 @@
+/* ============================================================================
+   KEEL AI GATEWAY — SWISS INDUSTRIAL BRUTALIST SYSTEM
+   Matte documentation paper · carbon ink · aviation hazard red · zero radius
+   Heavy grotesque headers (Archivo Black) + monospace telemetry (JetBrains Mono)
+   ============================================================================ */
+@import url('https://fonts.googleapis.com/css2?family=Archivo+Black&family=Archivo:wght@400;600;700;900&family=JetBrains+Mono:wght@400;500;700;800&display=swap');
+
 :root {
-    --font-body: "Quicksand", system-ui, -apple-system, sans-serif;
-    --font-headline: "Newsreader", Georgia, "Times New Roman", serif;
-    --font-mono: "Maple Mono", ui-monospace, "SFMono-Regular", Menlo, Monaco, Consolas, monospace;
+    /* Typography */
+    --font-body: "Archivo", "Helvetica Neue", Arial, sans-serif;
+    --font-headline: "Archivo Black", "Helvetica Neue", Arial, sans-serif;
+    --font-mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
 
-    --bg: #f6f3ec;
-    --paper: rgba(255, 253, 249, 0.88);
-    --panel: rgba(255, 255, 255, 0.72);
-    --panel-strong: rgba(255, 255, 255, 0.94);
-    --ink: #111827;
-    --muted: #667085;
-    --line: rgba(17, 24, 39, 0.08);
-    --line-strong: rgba(17, 24, 39, 0.16);
-    --navy: #0f172a;
-    --navy-2: #1e293b;
-    --teal: #0f766e;
-    --teal-soft: rgba(15, 118, 110, 0.12);
-    --amber: #c56a1b;
-    --amber-soft: rgba(197, 106, 27, 0.14);
-    --red: #c62828;
-    --red-soft: rgba(198, 40, 40, 0.12);
-    --green: #13824f;
-    --green-soft: rgba(19, 130, 79, 0.14);
+    /* Substrate — matte unbleached documentation paper */
+    --bg: #eae8e3;
+    --paper: #f4f4f0;
+    --panel: #f4f4f0;
+    --panel-strong: #f4f4f0;
+    --ink: #0b0b0b;            /* carbon ink */
+    --muted: #6b6b66;
+    --line: #0b0b0b;          /* structural dividers are SOLID ink, hairline */
+    --line-strong: #0b0b0b;
 
-    --shadow-sm: 0 2px 4px rgba(15, 23, 42, 0.04);
-    --shadow-md: 0 12px 24px -4px rgba(15, 23, 42, 0.06), 0 4px 10px -2px rgba(15, 23, 42, 0.04);
-    --shadow-lg: 0 24px 48px -12px rgba(15, 23, 42, 0.1), 0 12px 24px -6px rgba(15, 23, 42, 0.06);
-    --glass-highlight: inset 0 1px 0 0 rgba(255, 255, 255, 0.8), inset 0 0 0 1px rgba(255, 255, 255, 0.4);
+    /* The single accent — aviation / hazard red */
+    --navy: #0b0b0b;          /* "navy" repurposed: primary action = carbon */
+    --navy-2: #2a2a2a;
+    --teal: #e61919;          /* "teal" repurposed: the one accent = hazard red */
+    --teal-soft: #fbe0e0;
+    --amber: #b45309;
+    --amber-soft: #f7e6cf;
+    --red: #e61919;
+    --red-soft: #fbe0e0;
+    --green: #1a7a3c;
+    --green-soft: #d8ecdd;
 
-    --ease-smooth: cubic-bezier(0.4, 0, 0.2, 1);
-    --ease-spring: cubic-bezier(0.175, 0.885, 0.32, 1.1);
+    /* Surface helpers (used by panels/inputs) — kept as opaque paper tones */
+    --color-surface-container-lowest: #ffffff;
+    --color-surface-container-low: #ebe9e3;
+    --color-surface-container-high: #e2e0d9;
 
-    --radius-xl: 28px;
-    --radius-lg: 22px;
-    --radius-md: 16px;
-    --radius-sm: 12px;
+    /* Hard, offset, NO-BLUR shadows (brutalist drop) */
+    --shadow-sm: 3px 3px 0 0 #0b0b0b;
+    --shadow-md: 5px 5px 0 0 #0b0b0b;
+    --shadow-lg: 8px 8px 0 0 #0b0b0b;
+    --glass-highlight: none;
+
+    --ease-smooth: cubic-bezier(0.2, 0, 0, 1);
+    --ease-spring: cubic-bezier(0.2, 0, 0, 1);
+
+    /* Geometry: absolute 90° corners */
+    --radius-xl: 0px;
+    --radius-lg: 0px;
+    --radius-md: 0px;
+    --radius-sm: 0px;
+
+    --border: 2px solid #0b0b0b;
+    --border-thin: 1px solid #0b0b0b;
 }
 
 *,
@@ -51,38 +72,27 @@ body {
 body {
     font-family: var(--font-body);
     color: var(--ink);
-    background: radial-gradient(circle at top left, rgba(15, 118, 110, 0.12), transparent 32%),
-        radial-gradient(circle at top right, rgba(197, 106, 27, 0.11), transparent 30%),
-        linear-gradient(180deg, #fbf9f4 0%, var(--bg) 100%);
+    background-color: var(--bg);
+    /* Mechanical grain + faint blueprint grid */
+    background-image:
+        repeating-linear-gradient(0deg, transparent, transparent 39px, rgba(11, 11, 11, 0.035) 39px, rgba(11, 11, 11, 0.035) 40px),
+        repeating-linear-gradient(90deg, transparent, transparent 39px, rgba(11, 11, 11, 0.035) 39px, rgba(11, 11, 11, 0.035) 40px);
     overflow-y: hidden;
     -webkit-font-smoothing: antialiased;
     text-rendering: optimizeLegibility;
 }
 
-a {
-    color: inherit;
-    text-decoration: none;
-}
+a { color: inherit; text-decoration: none; }
+button, input, select, textarea { font: inherit; color: inherit; }
+svg, img { display: block; max-width: 100%; }
+[hidden] { display: none !important; }
 
-button,
-input,
-select,
-textarea {
-    font: inherit;
-    color: inherit;
-}
+keel-observability-app,
+ai-proxy-app,
+c-end-playground { display: block; min-height: 100vh; }
 
-svg,
-img {
-    display: block;
-    max-width: 100%;
-}
-
-[hidden] {
-    display: none !important;
-}
-
-keel-observability-app {
-    display: block;
-    min-height: 100vh;
-}
+/* Global selection + scrollbar in keeping with the system */
+::selection { background: #e61919; color: #f4f4f0; }
+::-webkit-scrollbar { width: 12px; height: 12px; }
+::-webkit-scrollbar-track { background: var(--bg); }
+::-webkit-scrollbar-thumb { background: #0b0b0b; border: 3px solid var(--bg); }

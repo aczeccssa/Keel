@@ -15,7 +15,7 @@ export class PanelDashboard extends KeelElement {
                     border-radius: var(--radius-lg);
                     padding: 28px;
                     box-shadow: var(--shadow-sm);
-                    border: 1px solid rgba(17, 24, 39, 0.04);
+                    border: 2px solid var(--ink);
                 }
                 .section-title {
                     font-family: var(--font-headline);
@@ -45,7 +45,7 @@ export class PanelDashboard extends KeelElement {
                 .onboarding-banner code {
                     background: rgba(15, 23, 42, 0.08);
                     padding: 1px 6px;
-                    border-radius: 4px;
+                    border-radius: 0;
                     font-family: var(--font-mono);
                     font-size: 11px;
                 }

@@ -16,7 +16,7 @@ export class PanelKeys extends KeelElement {
                     border-radius: var(--radius-lg);
                     padding: 28px;
                     box-shadow: var(--shadow-sm);
-                    border: 1px solid rgba(17, 24, 39, 0.04);
+                    border: 2px solid var(--ink);
                 }
                 .section-title {
                     font-family: var(--font-headline);
@@ -28,7 +28,7 @@ export class PanelKeys extends KeelElement {
                 .btn-primary {
                     padding: 12px 24px;
                     border: 0;
-                    border-radius: 999px;
+                    border-radius: 0;
                     background: var(--navy);
                     color: #f8fafc;
                     font-size: 11px;
@@ -42,7 +42,7 @@ export class PanelKeys extends KeelElement {
                 .btn-ghost {
                     padding: 10px 18px;
                     border: 1px solid var(--line-strong);
-                    border-radius: 999px;
+                    border-radius: 0;
                     background: transparent;
                     color: var(--ink);
                     font-size: 11px;
@@ -56,7 +56,7 @@ export class PanelKeys extends KeelElement {
                 .btn-danger {
                     padding: 6px 14px;
                     border: 1px solid var(--red);
-                    border-radius: 999px;
+                    border-radius: 0;
                     background: transparent;
                     color: var(--red);
                     font-size: 10px;
@@ -88,7 +88,7 @@ export class PanelKeys extends KeelElement {
                 }
                 .field input:focus {
                     outline: none;
-                    box-shadow: 0 2px 0 0 var(--teal);
+                    box-shadow: var(--shadow-sm);
                     background: var(--color-surface-container-lowest, #fff);
                 }
                 .raw-key-display {
