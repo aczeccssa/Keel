@@ -6,6 +6,7 @@ import com.keel.contract.ai.PoolChainSnapshotProvider
 import com.keel.contract.ai.RateLimitGate
 import com.keel.contract.ai.UsageRecorder
 import com.keel.contract.ai.UserDirectory
+import com.keel.db.database.DatabaseFactory
 import com.keel.kernel.plugin.EndpointExecutionPolicy
 import com.keel.kernel.plugin.PluginApiException
 import com.keel.kernel.plugin.PluginDescriptor
@@ -17,6 +18,11 @@ import com.keel.kernel.plugin.PluginRuntimeMode
 import com.keel.kernel.plugin.StandardKeelPlugin
 import com.keel.openapi.annotations.KeelApiPlugin
 import com.keel.openapi.runtime.OpenApiDoc
+import com.keel.samples.aigateway.airelay.config.ChannelRepository
+import com.keel.samples.aigateway.airelay.config.ChannelView
+import com.keel.samples.aigateway.airelay.config.ConfigService
+import com.keel.samples.aigateway.airelay.config.SecretCipher
+import com.keel.samples.aigateway.airelay.config.UpsertChannelRequest
 import com.keel.samples.aigateway.airelay.pool.PoolChainManager
 import com.keel.samples.aigateway.airelay.protocol.ProtocolTranscoder
 import com.keel.samples.aigateway.airelay.protocol.WireProtocol
@@ -32,6 +38,7 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonElement
 import org.koin.core.Koin
 import org.koin.dsl.module
+import java.io.File
 
 @KeelApiPlugin(
     pluginId = "airelay",
@@ -59,6 +66,13 @@ class AIRelayPlugin : StandardKeelPlugin {
     lateinit var upstreamClient: MockableUpstreamHttpClient
         private set
 
+    // Runtime-configurable provider/model store (DB-backed). When channels exist, the relay
+    // routes through them; otherwise it falls back to the static settings.chains. This is what
+    // makes "add a provider in the UI and use it immediately" work without a restart.
+    private var configService: ConfigService? = null
+    private var channelRepository: ChannelRepository? = null
+    private var configDbFactory: DatabaseFactory? = null
+
     override fun modules() = listOf(
         module {
             single { poolChainManager }
@@ -80,15 +94,50 @@ class AIRelayPlugin : StandardKeelPlugin {
         upstreamClient = if (needsReal) {
             MockableUpstreamHttpClient(realClient = RealUpstreamHttpClient.create())
         } else {
-            MockableUpstreamHttpClient()
+            MockableUpstreamHttpClient(realClient = RealUpstreamHttpClient.create())
         }
+
+        // DB-backed channel/model configuration. Seeded from airelay/pools.json (if present) or
+        // the static defaults on first boot, then editable at runtime via the admin API/UI.
+        runCatching {
+            val dataDir = System.getProperty("keel.data.dir")
+                ?: (System.getProperty("java.io.tmpdir").trimEnd('/') + "/keel-data")
+            File(dataDir).mkdirs()
+            val factory = DatabaseFactory.h2File(filePath = "$dataDir/aigateway_airelay", poolSize = 5)
+            val db = factory.init()
+            val repo = ChannelRepository(db, SecretCipher.fromEnv())
+            repo.initializeSchema()
+            val service = ConfigService(repo)
+            if (repo.count() == 0L) {
+                AIRelaySettings.seedChannelsIfPresent(repo)
+            }
+            service.reload()
+            configDbFactory = factory
+            channelRepository = repo
+            configService = service
+        }.onFailure {
+            // If the DB can't initialize we keep running on static chains only.
+        }
+
         context.kernelKoin.loadModules(
             listOf(
                 module {
-                    single<PoolChainSnapshotProvider> { poolChainManager }
+                    single<PoolChainSnapshotProvider> { activeManager() }
                 }
             )
         )
+    }
+
+    /** The live pool manager: DB-backed if channels are configured, else the static one. */
+    private fun activeManager(): PoolChainManager {
+        val svc = configService ?: return poolChainManager
+        val managed = svc.poolChainManager
+        return if (managed.snapshot().chains.isNotEmpty()) managed else poolChainManager
+    }
+
+    private fun activePricing(): ModelPricingRegistry {
+        val svc = configService ?: return pricing
+        return if (svc.pricings.isNotEmpty()) ModelPricingRegistry(svc.pricings) else pricing
     }
 
     /**
@@ -111,10 +160,10 @@ class AIRelayPlugin : StandardKeelPlugin {
             usageRecorder = usageRecorder,
             rateLimitGate = rateLimitGate,
             userDirectory = userDirectory,
-            poolChainManager = poolChainManager,
+            poolChainManager = activeManager(),
             transcoder = transcoder,
             upstreamClient = upstreamClient,
-            costCalculator = CostCalculator(pricing, userDirectory)
+            costCalculator = CostCalculator(activePricing(), userDirectory)
         )
     }
 
@@ -160,7 +209,13 @@ class AIRelayPlugin : StandardKeelPlugin {
                 "/models",
                 doc = OpenApiDoc(summary = "List AI Gateway models", tags = listOf("ai-gateway", "airelay"))
             ) {
-                PluginResult(body = ModelListResponse(settings.chains.flatMap { chain -> chain.modelAliases.map { ModelView(it, chain.chainId) } }))
+                val chains = activeManager().snapshot().chains
+                val models = if (chains.isNotEmpty()) {
+                    chains.flatMap { chain -> chain.modelAliases.map { ModelView(it, chain.chainId) } }
+                } else {
+                    settings.chains.flatMap { chain -> chain.modelAliases.map { ModelView(it, chain.chainId) } }
+                }
+                PluginResult(body = ModelListResponse(models))
             }
         }
 
@@ -169,14 +224,14 @@ class AIRelayPlugin : StandardKeelPlugin {
                 "/pools",
                 doc = OpenApiDoc(summary = "List pool-chain health", tags = listOf("ai-gateway", "airelay", "admin"))
             ) {
-                PluginResult(body = poolChainManager.snapshot())
+                PluginResult(body = activeManager().snapshot())
             }
             get<PoolChainSnapshot>(
                 "/pools/{chainId}/health",
                 doc = OpenApiDoc(summary = "Get pool-chain health", tags = listOf("ai-gateway", "airelay", "admin"), errorStatuses = setOf(404))
             ) {
                 val chainId = pathParameters["chainId"] ?: throw PluginApiException(400, "Missing chainId")
-                val chain = poolChainManager.snapshot().chains.firstOrNull { it.chainId == chainId }
+                val chain = activeManager().snapshot().chains.firstOrNull { it.chainId == chainId }
                     ?: throw PluginApiException(404, "Pool chain not found")
                 PluginResult(body = PoolChainSnapshot(listOf(chain)))
             }
@@ -186,7 +241,7 @@ class AIRelayPlugin : StandardKeelPlugin {
             ) {
                 val chainId = pathParameters["chainId"] ?: throw PluginApiException(400, "Missing chainId")
                 val keyId = pathParameters["keyId"] ?: throw PluginApiException(400, "Missing keyId")
-                if (!poolChainManager.reset(chainId, keyId)) throw PluginApiException(404, "Key not found")
+                if (!activeManager().reset(chainId, keyId)) throw PluginApiException(404, "Key not found")
                 PluginResult(body = PoolResetResponse("Key reset"))
             }
             get<PoolConfigResponse>(
@@ -198,11 +253,69 @@ class AIRelayPlugin : StandardKeelPlugin {
                     pricings = settings.pricings
                 ))
             }
-            post<AddChainResponse>(
-                "/config/chains",
-                doc = OpenApiDoc(summary = "Add a new pool chain", tags = listOf("ai-gateway", "airelay", "admin"), errorStatuses = setOf(400, 409))
-            ) {
-                throw PluginApiException(501, "Runtime chain addition requires restart in Phase 1. Edit airelay/pools.json and restart.")
+
+            // ---- Channel (provider) CRUD — DB-backed, hot-applied ----
+            route("/channels") {
+                get<ChannelListResponse>(
+                    doc = OpenApiDoc(summary = "List configured provider channels", tags = listOf("ai-gateway", "airelay", "admin"))
+                ) {
+                    val repo = channelRepository ?: throw PluginApiException(503, "Channel store unavailable")
+                    PluginResult(body = ChannelListResponse(repo.listChannels()))
+                }
+                post<UpsertChannelRequest, ChannelView>(
+                    doc = OpenApiDoc(summary = "Create a provider channel", tags = listOf("ai-gateway", "airelay", "admin"), errorStatuses = setOf(400, 503))
+                ) { request ->
+                    val repo = channelRepository ?: throw PluginApiException(503, "Channel store unavailable")
+                    validateChannel(request)
+                    val created = repo.createChannel(request)
+                    configService?.reload()
+                    PluginResult(body = created)
+                }
+                put<UpsertChannelRequest, ChannelView>(
+                    "/{channelId}",
+                    doc = OpenApiDoc(summary = "Update a provider channel", tags = listOf("ai-gateway", "airelay", "admin"), errorStatuses = setOf(400, 404, 503))
+                ) { request ->
+                    val repo = channelRepository ?: throw PluginApiException(503, "Channel store unavailable")
+                    val channelId = pathParameters["channelId"] ?: throw PluginApiException(400, "Missing channelId")
+                    validateChannel(request)
+                    val updated = repo.updateChannel(channelId, request) ?: throw PluginApiException(404, "Channel not found")
+                    configService?.reload()
+                    PluginResult(body = updated)
+                }
+                delete<DeleteChannelResponse>(
+                    "/{channelId}",
+                    doc = OpenApiDoc(summary = "Delete a provider channel", tags = listOf("ai-gateway", "airelay", "admin"), errorStatuses = setOf(404, 503))
+                ) {
+                    val repo = channelRepository ?: throw PluginApiException(503, "Channel store unavailable")
+                    val channelId = pathParameters["channelId"] ?: throw PluginApiException(400, "Missing channelId")
+                    if (!repo.deleteChannel(channelId)) throw PluginApiException(404, "Channel not found")
+                    configService?.reload()
+                    PluginResult(body = DeleteChannelResponse("Channel deleted"))
+                }
+                post<ToggleChannelResponse>(
+                    "/{channelId}/enabled/{enabled}",
+                    doc = OpenApiDoc(summary = "Enable or disable a channel", tags = listOf("ai-gateway", "airelay", "admin"), errorStatuses = setOf(404, 503))
+                ) {
+                    val repo = channelRepository ?: throw PluginApiException(503, "Channel store unavailable")
+                    val channelId = pathParameters["channelId"] ?: throw PluginApiException(400, "Missing channelId")
+                    val enabled = pathParameters["enabled"]?.toBooleanStrictOrNull()
+                        ?: throw PluginApiException(400, "enabled must be true or false")
+                    if (!repo.setEnabled(channelId, enabled)) throw PluginApiException(404, "Channel not found")
+                    configService?.reload()
+                    PluginResult(body = ToggleChannelResponse(channelId, enabled))
+                }
+                post<ChannelTestResponse>(
+                    "/{channelId}/test",
+                    doc = OpenApiDoc(summary = "Send a live test request through a channel", tags = listOf("ai-gateway", "airelay", "admin"), errorStatuses = setOf(404, 503)),
+                    executionPolicy = EndpointExecutionPolicy(timeoutMs = 30_000)
+                ) {
+                    val repo = channelRepository ?: throw PluginApiException(503, "Channel store unavailable")
+                    val channelId = pathParameters["channelId"] ?: throw PluginApiException(400, "Missing channelId")
+                    val channel = repo.getChannel(channelId) ?: throw PluginApiException(404, "Channel not found")
+                    val result = testChannel(channel)
+                    repo.recordTestResult(channelId, result.latencyMs, result.error)
+                    PluginResult(body = result)
+                }
             }
         }
 
@@ -211,6 +324,37 @@ class AIRelayPlugin : StandardKeelPlugin {
             basePackage = "ai-gateway-ui",
             doc = OpenApiDoc(summary = "AI Proxy management UI", tags = listOf("ai-gateway", "airelay")),
             index = "index.html"
+        )
+    }
+
+    private fun validateChannel(request: UpsertChannelRequest) {
+        if (request.name.isBlank()) throw PluginApiException(400, "name is required")
+        if (request.baseUrl.isBlank()) throw PluginApiException(400, "baseUrl is required")
+        runCatching { WireProtocol.valueOf(request.protocol) }
+            .getOrElse { throw PluginApiException(400, "protocol must be one of ${WireProtocol.entries.joinToString()}") }
+    }
+
+    /** Fire one tiny live request through the channel and report status/latency. */
+    private suspend fun testChannel(channel: ChannelView): ChannelTestResponse {
+        val repo = channelRepository ?: return ChannelTestResponse(false, null, "Channel store unavailable")
+        val protocol = runCatching { WireProtocol.valueOf(channel.protocol) }
+            .getOrElse { return ChannelTestResponse(false, null, "Unknown protocol ${channel.protocol}") }
+        val model = channel.models.firstOrNull { it.enabled }?.let {
+            it.upstreamModelName.ifBlank { it.publicModelName }
+        } ?: return ChannelTestResponse(false, null, "Channel has no enabled model to test")
+        val key = repo.decryptedKey(channel.channelId).orEmpty()
+        val ping = RealUpstreamHttpClient.create().pingChannel(
+            baseUrl = channel.baseUrl,
+            protocol = protocol,
+            apiKey = key,
+            apiKeyEnv = channel.apiKeyEnv,
+            model = model
+        )
+        return ChannelTestResponse(
+            ok = ping.ok,
+            latencyMs = ping.latencyMs,
+            error = ping.error,
+            sample = ping.sample
         )
     }
 }
@@ -263,3 +407,20 @@ data class PoolConfigResponse(
 
 @Serializable
 data class AddChainResponse(val message: String)
+
+@Serializable
+data class ChannelListResponse(val channels: List<ChannelView>)
+
+@Serializable
+data class DeleteChannelResponse(val message: String)
+
+@Serializable
+data class ToggleChannelResponse(val channelId: String, val enabled: Boolean)
+
+@Serializable
+data class ChannelTestResponse(
+    val ok: Boolean,
+    val latencyMs: Long?,
+    val error: String?,
+    val sample: String? = null
+)

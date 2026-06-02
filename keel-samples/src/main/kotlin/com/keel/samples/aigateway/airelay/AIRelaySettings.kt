@@ -1,7 +1,12 @@
 package com.keel.samples.aigateway.airelay
 
+import com.keel.samples.aigateway.airelay.config.ChannelRepository
+import com.keel.samples.aigateway.airelay.config.UpsertChannelRequest
+import com.keel.samples.aigateway.airelay.config.UpsertModelRequest
 import com.keel.samples.aigateway.airelay.protocol.WireProtocol
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
+import java.io.File
 
 @Serializable
 data class AIRelaySettings(
@@ -9,7 +14,67 @@ data class AIRelaySettings(
     val pricings: List<ModelPricing> = defaultPricing()
 ) {
     companion object {
-        fun load(): AIRelaySettings = AIRelaySettings()
+        private val json = Json { ignoreUnknownKeys = true; isLenient = true }
+
+        /**
+         * Load static settings. If a JSON config file is present (path from `keel.airelay.config`
+         * system property, `KEEL_AIRELAY_CONFIG` env, or `airelay/pools.json` in the working dir),
+         * it overrides the built-in defaults. The defaults remain the ultimate fallback.
+         */
+        fun load(): AIRelaySettings {
+            val path = System.getProperty("keel.airelay.config")
+                ?: System.getenv("KEEL_AIRELAY_CONFIG")
+                ?: "airelay/pools.json"
+            val file = File(path)
+            if (file.isFile) {
+                runCatching { return json.decodeFromString<AIRelaySettings>(file.readText()) }
+            }
+            return AIRelaySettings()
+        }
+
+        /**
+         * Seed the runtime channel store from the file/default chains on first boot, so the
+         * DB-backed config (managed via the UI) starts from a sensible baseline. Only real
+         * (non-`mock://`) chains are seeded — mock chains are test scaffolding, not providers a
+         * user would manage. Models are seeded from the pricing table joined to the chain aliases.
+         */
+        fun seedChannelsIfPresent(repo: ChannelRepository) {
+            val settings = load()
+            val pricingByModel = settings.pricings.associateBy { it.model }
+            settings.chains.forEach { chain ->
+                val level = chain.levels.firstOrNull() ?: return@forEach
+                if (level.provider.baseUrl.startsWith("mock://")) return@forEach
+                val key = level.keys.firstOrNull()
+                repo.createChannel(
+                    UpsertChannelRequest(
+                        name = level.provider.providerId,
+                        protocol = level.provider.protocol.name,
+                        baseUrl = level.provider.baseUrl,
+                        apiKey = key?.apiKey?.takeIf { it != "mock-key" } ?: "",
+                        apiKeyEnv = key?.apiKeyEnv,
+                        enabled = true,
+                        priority = 0,
+                        weight = key?.weight ?: 100,
+                        maxConcurrency = key?.maxConcurrency ?: 10,
+                        timeoutMs = level.provider.timeoutMs,
+                        models = chain.modelAliases.map { alias ->
+                            val p = pricingByModel[alias]
+                            UpsertModelRequest(
+                                publicModelName = alias,
+                                upstreamModelName = "",
+                                inputCostPerMTok = p?.inputCostPerMTok ?: 0.0,
+                                outputCostPerMTok = p?.outputCostPerMTok ?: 0.0,
+                                cacheCreationCostPerMTok = p?.cacheCreationCostPerMTok,
+                                cacheReadCostPerMTok = p?.cacheReadCostPerMTok,
+                                cachedInputDiscount = p?.cachedInputDiscount,
+                                reasoningOutputCostPerMTok = p?.reasoningOutputCostPerMTok,
+                                enabled = true
+                            )
+                        }
+                    )
+                )
+            }
+        }
     }
 }
 

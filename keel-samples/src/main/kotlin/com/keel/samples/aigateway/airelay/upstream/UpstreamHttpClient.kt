@@ -25,6 +25,14 @@ data class UpstreamResponse(
     val headers: Map<String, List<String>> = emptyMap()
 )
 
+/** Result of a channel reachability/auth probe (the admin "Test" action). */
+data class PingResult(
+    val ok: Boolean,
+    val latencyMs: Long,
+    val error: String?,
+    val sample: String?
+)
+
 class UpstreamHttpException(
     val status: Int,
     override val message: String,

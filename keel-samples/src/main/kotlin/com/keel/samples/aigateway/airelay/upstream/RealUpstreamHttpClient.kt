@@ -128,6 +128,60 @@ class RealUpstreamHttpClient private constructor(
         return if (stream) "$base$path?stream=true" else "$base$path"
     }
 
+    /**
+     * Send one minimal request to a provider to verify reachability + auth, returning latency and
+     * any error. Used by the admin "Test" action so a user can validate a channel (e.g. pointing at
+     * http://127.0.0.1:15721 with their key) before saving it. Does NOT go through the pool — it
+     * targets the supplied baseUrl/key directly.
+     */
+    suspend fun pingChannel(
+        baseUrl: String,
+        protocol: WireProtocol,
+        apiKey: String,
+        apiKeyEnv: String?,
+        model: String
+    ): PingResult {
+        val resolvedKey = apiKeyEnv?.let { System.getenv(it) } ?: apiKey
+        val base = baseUrl.trimEnd('/')
+        val path = when (protocol) {
+            WireProtocol.ANTHROPIC_MESSAGES -> "/v1/messages"
+            WireProtocol.OPENAI_CHAT -> "/v1/chat/completions"
+            WireProtocol.OPENAI_RESPONSES -> "/v1/responses"
+        }
+        val body = when (protocol) {
+            WireProtocol.ANTHROPIC_MESSAGES ->
+                """{"model":"$model","max_tokens":16,"messages":[{"role":"user","content":"ping"}]}"""
+            WireProtocol.OPENAI_CHAT ->
+                """{"model":"$model","max_tokens":16,"messages":[{"role":"user","content":"ping"}]}"""
+            WireProtocol.OPENAI_RESPONSES ->
+                """{"model":"$model","max_output_tokens":16,"input":"ping","store":false}"""
+        }
+        val startMark = io.ktor.util.date.getTimeMillis()
+        return try {
+            val response = client.post("$base$path") {
+                headers {
+                    append(HttpHeaders.Accept, "application/json")
+                    when (protocol) {
+                        WireProtocol.ANTHROPIC_MESSAGES -> append("x-api-key", resolvedKey)
+                        else -> append(HttpHeaders.Authorization, "Bearer $resolvedKey")
+                    }
+                    append("anthropic-version", "2023-06-01")
+                }
+                contentType(ContentType.Application.Json)
+                setBody(body)
+            }
+            val latency = io.ktor.util.date.getTimeMillis() - startMark
+            val text = response.bodyAsText()
+            if (response.status.value in 200..299) {
+                PingResult(true, latency, null, text.take(160))
+            } else {
+                PingResult(false, latency, "HTTP ${response.status.value}: ${text.take(160)}", null)
+            }
+        } catch (e: Exception) {
+            PingResult(false, io.ktor.util.date.getTimeMillis() - startMark, e.message ?: e.toString(), null)
+        }
+    }
+
     companion object {
         fun create(): RealUpstreamHttpClient = RealUpstreamHttpClient(
             client = HttpClient(CIO) {
