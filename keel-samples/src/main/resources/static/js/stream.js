@@ -5,22 +5,41 @@ import { buildUrl } from './utils.js';
 
 const TAB_IDS = ['topology', 'traces', 'logs', 'nodes', 'metrics', 'openapi', 'ai-gateway'];
 
-export function connectAllStreams() {
+// Lazy SSE: keep only ONE live EventSource at a time — the one for the active tab.
+// Opening all 7 streams at once held 7 persistent server connections per browser tab, which
+// (combined with the per-connection server cost) was exhausting the gateway's request capacity
+// and blocking unrelated /api/* traffic. We now connect the active tab on demand and close the
+// previous one on tab switch.
+export function connectActiveStream(activeTabId) {
     if (!state.streamEnabled) {
         disconnectAllStreams();
         return;
     }
-
+    const target = TAB_IDS.includes(activeTabId) ? activeTabId : 'topology';
+    // Close every stream that is not the target.
     TAB_IDS.forEach((tabId) => {
-        connectTabStream(tabId);
+        if (tabId !== target && state.tabEventSources[tabId]) {
+            closeTabStream(tabId);
+            state.tabConnectionStates[tabId] = 'paused';
+        }
     });
+    // Ensure the target is connected (idempotent).
+    if (!state.tabEventSources[target]) {
+        connectTabStream(target);
+    }
+    syncConnectionState();
+    renderChrome();
+}
+
+export function connectAllStreams() {
+    // Backwards-compatible entry point: now connects only the active tab (lazy).
+    connectActiveStream(state.activeTab);
 }
 
 export function reconnectAllStreams() {
     if (!state.streamEnabled) return;
-    TAB_IDS.forEach((tabId) => {
-        reconnectTabStream(tabId);
-    });
+    // Only the active tab is live; reconnect just that one.
+    connectActiveStream(state.activeTab);
 }
 
 export function reconnectTabStream(tabId) {
@@ -149,12 +168,13 @@ function syncConnectionState() {
         return;
     }
 
-    const statuses = TAB_IDS.map((tabId) => state.tabConnectionStates[tabId] || 'connecting');
-    if (statuses.every((status) => status === 'live')) {
+    // Only the active tab carries a live stream now; report on that one.
+    const activeStatus = state.tabConnectionStates[state.activeTab] || 'connecting';
+    if (activeStatus === 'live') {
         state.connectionState = 'Live';
         return;
     }
-    if (statuses.some((status) => status === 'retrying')) {
+    if (activeStatus === 'retrying') {
         state.connectionState = 'Retrying';
         return;
     }

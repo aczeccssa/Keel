@@ -2,6 +2,7 @@ import { state } from './state.js';
 import { API_BASE } from './config.js';
 import { TABS } from './config.js';
 import { renderChrome, renderPanels } from './render.js';
+import { connectActiveStream } from './stream.js';
 
 export function setActiveTab(tabId) {
     state.activeTab = TABS.some((tab) => tab.id === tabId) ? tabId : 'topology';
@@ -9,6 +10,8 @@ export function setActiveTab(tabId) {
         window.location.hash = state.activeTab;
         return;
     }
+    // Lazy SSE: connect the now-active tab's stream and close the rest.
+    connectActiveStream(state.activeTab);
     renderChrome();
     renderPanels();
 }
