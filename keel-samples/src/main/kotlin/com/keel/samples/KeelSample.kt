@@ -73,15 +73,17 @@ fun main() = runKeel {
         }
     }
 
-    // Global: Register static resources under an explicit sub-path.
+    // Global: No root-level static resources.
     //
-    // We deliberately avoid `staticResources("/", "static")` here. Mounting a wildcard on the root
-    // path swallows every GET that is not matched by an earlier route and falls through Ktor's
-    // default no-op fallback, which silently hangs the connection and blocks all subsequent
-    // /api/* traffic on the same worker. Static files are served under `/static/*` instead,
-    // and `/` redirects users to the Observability UI as a stable landing target.
+    // A wildcard `staticResources("/", ...)` or even `staticResources("/static", ...)` installs a
+    // TailcardSelector child on the routing root. Ktor's default static fallback is a no-op, so
+    // any GET that doesn't match an earlier route is silently consumed — no response body, no
+    // handled flag — and the connection hangs, queueing subsequent /api/* traffic.
+    //
+    // Each plugin mounts its own static bundle at its scoped path (e.g.
+    // /api/plugins/observability/ui/, /api/plugins/airelay/ui/). The root "/" and "/index"
+    // paths are handled by explicit redirect handlers below.
     routing {
-        staticResources("/static", "static")
         get("/") {
             call.respondRedirect("/api/plugins/observability/ui/")
         }

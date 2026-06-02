@@ -61,9 +61,10 @@ class IndexStaticBlockingTest {
             install(ContentNegotiation) { json() }
             routing {
                 manager.mountRoutes(this)
-                // Replicate the *fixed* sample-app routing shape: explicit sub-paths and
-                // explicit redirect handlers for landing pages. No wildcard at the root.
-                staticResources("/static", "static")
+                // Replicate the fixed sample-app routing shape: explicit redirect handlers
+                // for landing pages. No staticResources at the root — even
+                // staticResources("/static", "static") installs a TailcardSelector wildcard
+                // that can interfere with route resolution.
                 get("/") { call.respondRedirect("/api/plugins/observability/ui/") }
                 get("/index") { call.respondRedirect("/api/plugins/observability/ui/") }
                 get("/index.html") { call.respondRedirect("/api/plugins/observability/ui/") }
