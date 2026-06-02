@@ -1,6 +1,9 @@
 package com.keel.test.kernel
 
 import com.keel.kernel.plugin.StandardKeelPlugin
+import com.keel.kernel.plugin.KeelInterceptorResult
+import com.keel.kernel.plugin.KeelRequestContext
+import com.keel.kernel.plugin.KeelRequestInterceptor
 import com.keel.kernel.plugin.PluginDescriptor
 import com.keel.kernel.plugin.PluginEndpointBuilders
 import com.keel.kernel.plugin.PluginInitContext
@@ -11,13 +14,22 @@ import com.keel.openapi.runtime.OpenApiAggregator
 import com.keel.openapi.runtime.OpenApiDoc
 import com.keel.openapi.runtime.OpenApiRegistry
 import io.ktor.client.request.get
+import io.ktor.client.request.header
+import io.ktor.client.request.post
+import io.ktor.client.request.setBody
+import io.ktor.client.statement.bodyAsText
+import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
+import io.ktor.http.HttpStatusCode
+import io.ktor.http.contentType
 import io.ktor.server.application.install
+import io.ktor.server.response.respondText
 import io.ktor.server.routing.routing
 import io.ktor.server.sse.SSE
 import io.ktor.sse.ServerSentEvent
 import io.ktor.utils.io.ClosedWriteChannelException
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import kotlin.test.AfterTest
@@ -71,6 +83,99 @@ class PluginEndpointOpenApiTest {
             assertTrue("application/octet-stream" in staticContent)
             assertTrue("text/html" in staticContent)
             assertTrue("application/json" !in staticContent)
+        }
+    }
+
+    @Test
+    fun `raw post endpoints run interceptors and advertise configured content types`() {
+        OpenApiRegistry.clear()
+        val koin = startKoin {}.also { koinStarted = true }.koin
+        val manager = UnifiedPluginManager(koin)
+        manager.registerPlugin(RawRoutePlugin())
+
+        io.ktor.server.testing.testApplication {
+            application {
+                install(SSE)
+                routing {
+                    manager.mountRoutes(this)
+                }
+                kotlinx.coroutines.runBlocking {
+                    manager.startPlugin("raw-route-test")
+                }
+            }
+
+            val unauthorized = client.post("/api/plugins/raw-route-test/v1/raw") {
+                contentType(ContentType.Application.Json)
+                setBody("{\"value\":\"blocked\"}")
+            }
+            kotlin.test.assertEquals(HttpStatusCode.Unauthorized, unauthorized.status)
+
+            val response = client.post("/api/plugins/raw-route-test/v1/raw") {
+                header("X-Raw-User", "alice")
+                contentType(ContentType.Application.Json)
+                setBody("{\"value\":\"accepted\"}")
+            }
+            kotlin.test.assertEquals(HttpStatusCode.OK, response.status)
+            val body = response.bodyAsText()
+            assertTrue(body.contains("\"principal\":\"alice\""))
+            assertTrue(body.contains("\"rawBody\":\"{\\\"value\\\":\\\"accepted\\\"}\""))
+
+            val oversized = client.post("/api/plugins/raw-route-test/v1/raw") {
+                header("X-Raw-User", "alice")
+                contentType(ContentType.Application.Json)
+                setBody("x".repeat(33))
+            }
+            kotlin.test.assertEquals(HttpStatusCode.PayloadTooLarge, oversized.status)
+
+            val spec = json.parseToJsonElement(OpenApiAggregator.buildSpec()).jsonObject
+            val rawContent = spec["paths"]!!.jsonObject["/api/plugins/raw-route-test/v1/raw"]!!
+                .jsonObject["post"]!!.jsonObject["responses"]!!.jsonObject["200"]!!
+                .jsonObject["content"]!!.jsonObject
+            assertTrue("application/json" in rawContent)
+            assertTrue("text/event-stream" in rawContent)
+        }
+    }
+
+    private class RawRoutePlugin : StandardKeelPlugin {
+        override val descriptor: PluginDescriptor = PluginDescriptor(
+            pluginId = "raw-route-test",
+            version = "1.0.0",
+            displayName = "raw-route-test"
+        )
+
+        override fun modules() = listOf(
+            org.koin.dsl.module {
+                single { RawRouteAuthInterceptor() }
+            }
+        )
+
+        override fun endpoints() = PluginEndpointBuilders.pluginEndpoints(descriptor.pluginId) {
+            interceptors(RawRouteAuthInterceptor::class)
+            route("/v1") {
+                rawPost(
+                    "/raw",
+                    doc = OpenApiDoc(summary = "Raw route", tags = listOf("raw")),
+                    responseContentTypes = listOf("application/json", "text/event-stream"),
+                    executionPolicy = com.keel.kernel.plugin.EndpointExecutionPolicy(maxPayloadBytes = 32)
+                ) {
+                    call.respondText(
+                        """{"principal":"${request.principal}","rawBody":${json.encodeToString(rawBody.orEmpty())}}""",
+                        ContentType.Application.Json
+                    )
+                }
+            }
+        }
+    }
+
+    private class RawRouteAuthInterceptor : KeelRequestInterceptor {
+        override suspend fun intercept(
+            context: KeelRequestContext,
+            next: suspend () -> KeelInterceptorResult
+        ): KeelInterceptorResult {
+            val user = context.requestHeaders["X-Raw-User"]?.firstOrNull()
+                ?: return KeelInterceptorResult.reject(401, "Unauthorized")
+            context.principal = user
+            return next()
         }
     }
 
