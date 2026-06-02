@@ -10,7 +10,6 @@ import io.ktor.client.request.post
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.HttpResponse
 import io.ktor.client.statement.bodyAsText
-import io.ktor.client.statement.headerValues
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
 import io.ktor.http.contentType
@@ -58,9 +57,10 @@ class RealUpstreamHttpClient private constructor(
                     "Invalid JSON body from upstream: ${bodyText.take(200)}"
                 )
             }
-        val headers = response.headers.entries().groupBy({ it.key }, { it.value })
-        val headerMap: Map<String, List<String>> = headers
-        return UpstreamResponse(status = response.status.value, body = body, headers = headerMap)
+        val headers: Map<String, List<String>> = response.headers.entries()
+            .groupBy({ it.key }, { it.value })
+            .mapValues { it.value.flatten() }
+        return UpstreamResponse(status = response.status.value, body = body, headers = headers)
     }
 
     override fun stream(selection: PoolSelection, request: JsonObject): Flow<ServerSentEvent> = flow {
