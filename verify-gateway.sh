@@ -60,7 +60,9 @@ CHID=$(echo "$CH" | python3 -c 'import sys,json;print(json.load(sys.stdin).get("
 
 # Live Test endpoint
 TEST=$(curl -s -m 30 -X POST "$BASE/api/plugins/airelay/admin/channels/$CHID/test" -H "Authorization: Bearer $TOK")
-echo "$TEST" | grep -q '"ok":true' && ok "channel Test passed: $TEST" || bad "channel Test failed: $TEST"
+# Response is direct JSON (not wrapped in RelayResponse).
+echo "$TEST" | python3 -c "import sys,json; d=json.load(sys.stdin); exit(0 if d.get('ok') else 1)" 2>/dev/null \
+  && ok "channel Test passed: $TEST" || bad "channel Test failed: $TEST"
 
 # Create a virtual key
 KEY=$(curl -s -m 8 -X POST "$BASE/api/plugins/token/v1/keys" -H "Authorization: Bearer $TOK" -H 'content-type: application/json' \
@@ -70,13 +72,24 @@ KEY=$(curl -s -m 8 -X POST "$BASE/api/plugins/token/v1/keys" -H "Authorization: 
 echo "== 4a. Direct Anthropic (req #4) =="
 R=$(curl -s -m 60 "$BASE/api/plugins/airelay/v1/messages" -H "Authorization: Bearer $KEY" -H 'content-type: application/json' \
   -d '{"model":"claude-sonnet-4-20250514","max_tokens":64,"messages":[{"role":"user","content":"Reply with exactly: pong"}]}')
-echo "$R" | grep -q '"type"' && ok "direct Anthropic returned a message" || bad "direct Anthropic failed: ${R:0:300}"
+# RelayResponse wraps inner JSON as a string: {"response": "{\"type\":\"message\",...}"}
+# Unwrap it with python3 and check the inner payload.
+echo "$R" | python3 -c "import sys,json; inner=json.load(sys.stdin).get('response','{}'); d=json.loads(inner) if isinstance(inner,str) else inner; exit(0 if d.get('type')=='message' else 1)" 2>/dev/null \
+  && ok "direct Anthropic returned a message" || bad "direct Anthropic failed (no type:message): ${R:0:300}"
 
 echo "== 4b. OpenAI Responses -> Anthropic (req #4) =="
 H=$(curl -s -m 60 -D - -o /tmp/keel-resp.json "$BASE/api/plugins/airelay/v1/responses" -H "Authorization: Bearer $KEY" -H 'content-type: application/json' \
   -d '{"model":"claude-sonnet-4-20250514","input":"Reply with exactly: pong","store":false,"max_output_tokens":64}')
 echo "$H" | grep -qi 'X-Upstream-Protocol: *ANTHROPIC' && ok "Responses->Anthropic: upstream=ANTHROPIC header present" || bad "missing/incorrect X-Upstream-Protocol header"
-grep -q '"object"' /tmp/keel-resp.json && ok "Responses envelope returned to client" || bad "client did not get Responses envelope: $(head -c 300 /tmp/keel-resp.json)"
+# Unwrap RelayResponse inner JSON and check for Responses envelope.
+python3 -c "
+import json,sys
+with open('/tmp/keel-resp.json') as f:
+    outer=json.load(f)
+inner=outer.get('response','{}')
+d=json.loads(inner) if isinstance(inner,str) else inner
+exit(0 if d.get('object')=='response' else 1)
+" 2>/dev/null && ok "Responses envelope returned to client" || bad "client did not get Responses envelope: $(head -c 300 /tmp/keel-resp.json)"
 
 echo ""
 echo "== RESULT: $PASS passed, $FAIL failed =="
