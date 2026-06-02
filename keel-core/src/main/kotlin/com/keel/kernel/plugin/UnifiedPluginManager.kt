@@ -45,7 +45,7 @@ import org.koin.core.Koin
 
 class UnifiedPluginManager(
     private val kernelKoin: Koin,
-    runtimeRoot: File = File("/tmp/keel"),
+    runtimeRoot: File = File(System.getProperty("keel.runtime.dir", System.getProperty("java.io.tmpdir") + "/keel")),
     private val currentClasspath: String = System.getProperty("java.class.path"),
     private val observabilityHub: ObservabilityHub? = null
 ) : PluginAvailability {

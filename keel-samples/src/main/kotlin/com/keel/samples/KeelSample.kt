@@ -64,8 +64,13 @@ fun main() = runKeel {
     // Disable hot reload
     enablePluginHotReload(false)
 
-    // Global ktor plugin: CORS
+    // Global ktor plugin: CORS + engine selection.
+    // Engine defaults to Netty but can be overridden with -Dkeel.engine=cio. CIO handles many
+    // long-lived SSE connections (the dashboards) with less per-connection overhead.
     server {
+        if (System.getProperty("keel.engine").equals("cio", ignoreCase = true)) {
+            engine = com.keel.kernel.config.KeelEngine.CIO
+        }
         globalKtorPlugin {
             install(CORS) {
                 anyHost()

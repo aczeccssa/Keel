@@ -95,9 +95,17 @@ object KeelEngineStarter {
             port = config.port
             host = config.host
         })
-        config.connectionGroupSize?.let { connectionGroupSize = it }
-        config.workerGroupSize?.let { workerGroupSize = it }
-        config.callGroupSize?.let { callGroupSize = it }
+        // Long-lived SSE streams (the observability + AI-gateway dashboards each hold persistent
+        // EventSource connections) occupy a call-group worker for their whole lifetime. The engine
+        // defaults are tuned for short request/response cycles and are too small once a handful of
+        // streams are open, which starves new /api/* and page requests. Give the call group ample
+        // headroom unless the host app overrides it explicitly.
+        val cpu = Runtime.getRuntime().availableProcessors()
+        connectionGroupSize = config.connectionGroupSize ?: max(2, cpu)
+        workerGroupSize = config.workerGroupSize ?: max(4, cpu * 2)
+        callGroupSize = config.callGroupSize ?: max(64, cpu * 16)
         config.engineConfigBlock?.invoke(this)
     }
 }
+
+private fun max(a: Int, b: Int): Int = if (a >= b) a else b
