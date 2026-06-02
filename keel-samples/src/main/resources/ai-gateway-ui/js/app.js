@@ -9,6 +9,7 @@ import './components/shared/KeelHero.js';
 import './components/shared/KeelDetailList.js';
 
 import './components/PanelDashboard.js';
+import './components/PanelProviders.js';
 import './components/PanelKeys.js';
 import './components/PanelPools.js';
 import './components/PanelRateLimits.js';
@@ -19,6 +20,7 @@ const ICONS = {
     dashboard: '<path d="M3 3v18h18"/><path d="m7 14 3-3 3 2 4-6"/>',
     key: '<path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/>',
     dns: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>',
+    hub: '<circle cx="12" cy="12" r="3"/><circle cx="5" cy="5" r="2"/><circle cx="19" cy="5" r="2"/><circle cx="5" cy="19" r="2"/><circle cx="19" cy="19" r="2"/><line x1="7" y1="7" x2="10" y2="10"/><line x1="17" y1="7" x2="14" y2="10"/><line x1="7" y1="17" x2="10" y2="14"/><line x1="17" y1="17" x2="14" y2="14"/>',
     speed: '<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>',
     group: '<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>',
     terminal: '<polyline points="4 17 10 11 4 5"/><line x1="12" x2="20" y1="19" y2="19"/>',
@@ -394,6 +396,7 @@ class AiProxyApp extends KeelElement {
                     </header>
                     <main class="content" data-ref="content">
                         <ai-panel-dashboard class="panel" data-ref="panelDashboard"></ai-panel-dashboard>
+                        <ai-panel-providers class="panel" data-ref="panelProviders"></ai-panel-providers>
                         <ai-panel-keys class="panel" data-ref="panelKeys"></ai-panel-keys>
                         <ai-panel-pools class="panel" data-ref="panelPools"></ai-panel-pools>
                         <ai-panel-rate-limits class="panel" data-ref="panelRateLimits"></ai-panel-rate-limits>
@@ -510,6 +513,7 @@ class AiProxyApp extends KeelElement {
 
         const panels = {
             dashboard: this.refs.panelDashboard,
+            providers: this.refs.panelProviders,
             keys: this.refs.panelKeys,
             pools: this.refs.panelPools,
             ratelimits: this.refs.panelRateLimits,
@@ -561,6 +565,7 @@ class AiProxyApp extends KeelElement {
     _refreshActive() {
         const panels = {
             dashboard: this.refs.panelDashboard,
+            providers: this.refs.panelProviders,
             keys: this.refs.panelKeys,
             pools: this.refs.panelPools,
             ratelimits: this.refs.panelRateLimits,

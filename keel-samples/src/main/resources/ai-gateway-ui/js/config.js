@@ -7,8 +7,9 @@ export const API = {
 
 export const TABS = [
     { id: 'dashboard', label: 'Dashboard', icon: 'dashboard', hint: 'Cost & usage overview' },
+    { id: 'providers', label: 'Providers', icon: 'dns', hint: 'Upstream channels & models' },
     { id: 'keys', label: 'API Keys', icon: 'key', hint: 'Manage virtual keys' },
-    { id: 'pools', label: 'Pool Chains', icon: 'dns', hint: 'Upstream health & config' },
+    { id: 'pools', label: 'Pool Chains', icon: 'hub', hint: 'Live upstream health' },
     { id: 'ratelimits', label: 'Rate Limits', icon: 'speed', hint: 'Token bucket rules' },
     { id: 'users', label: 'Users & Groups', icon: 'group', hint: 'Account management' },
     { id: 'playground', label: 'Playground', icon: 'terminal', hint: 'Test AI requests' },
