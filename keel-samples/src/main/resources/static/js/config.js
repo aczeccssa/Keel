@@ -7,7 +7,8 @@ export const TABS = [
     { id: "logs", label: "Logs", note: "Structured explorer" },
     { id: "nodes", label: "Nodes", note: "Cluster inventory" },
     { id: "metrics", label: "Metrics", note: "Runtime snapshot" },
-    { id: "openapi", label: "OpenAPI", note: "Contract explorer" }
+    { id: "openapi", label: "OpenAPI", note: "Contract explorer" },
+    { id: "ai-gateway", label: "AI Gateway", note: "Cost / pool / rate limit" }
 ];
 export const VIEWBOX = 1000;
 export const LOG_LIMIT = 20;

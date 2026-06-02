@@ -7,6 +7,7 @@ import './PanelLogs.js';
 import './PanelNodes.js';
 import './PanelMetrics.js';
 import './PanelOpenApi.js';
+import './PanelAiGateway.js';
 
 import { KeelElement } from './base/KeelElement.js';
 import { state } from '../state.js';
@@ -88,6 +89,7 @@ export class ObservabilityApp extends KeelElement {
                         <keel-panel-nodes class="tab-panel" data-ref="nodesPanel"></keel-panel-nodes>
                         <keel-panel-metrics class="tab-panel" data-ref="metricsPanel"></keel-panel-metrics>
                         <keel-panel-openapi class="tab-panel" data-ref="openApiPanel"></keel-panel-openapi>
+                        <keel-panel-ai-gateway class="tab-panel" data-ref="aiGatewayPanel"></keel-panel-ai-gateway>
                     </main>
                 </div>
             </div>
@@ -103,7 +105,8 @@ export class ObservabilityApp extends KeelElement {
             logs: this.refs.logsPanel,
             nodes: this.refs.nodesPanel,
             metrics: this.refs.metricsPanel,
-            openapi: this.refs.openApiPanel
+            openapi: this.refs.openApiPanel,
+            'ai-gateway': this.refs.aiGatewayPanel
         };
 
         window.addEventListener('hashchange', () => {
@@ -304,6 +307,7 @@ export class ObservabilityApp extends KeelElement {
         this.renderNodesPanel(appState);
         this.renderMetricsPanel(appState);
         this.renderOpenApiPanel(appState);
+        this.renderAiGatewayPanel(appState);
     }
 
     renderTopologyPanel(appState) {
@@ -334,6 +338,11 @@ export class ObservabilityApp extends KeelElement {
     renderOpenApiPanel(appState) {
         this.ensureInitialized();
         this.refs.openApiPanel.render(appState);
+    }
+
+    renderAiGatewayPanel(appState) {
+        this.ensureInitialized();
+        this.refs.aiGatewayPanel.render(appState);
     }
 
     showBootError(message) {

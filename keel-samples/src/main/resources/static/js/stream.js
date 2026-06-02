@@ -3,7 +3,7 @@ import { renderChrome, renderLogsPanel, renderMetricsPanel, renderNodesPanel, re
 import { state, refreshSelectionDefaults, rememberMetrics, openApiOperations } from './state.js';
 import { buildUrl } from './utils.js';
 
-const TAB_IDS = ['topology', 'traces', 'logs', 'nodes', 'metrics', 'openapi'];
+const TAB_IDS = ['topology', 'traces', 'logs', 'nodes', 'metrics', 'openapi', 'ai-gateway'];
 
 export function connectAllStreams() {
     if (!state.streamEnabled) {
@@ -136,6 +136,8 @@ function streamUrl(tabId) {
             });
         case 'openapi':
             return buildUrl(`${API_BASE}/plugins/observability/openapi`, params);
+        case 'ai-gateway':
+            return buildUrl(`${API_BASE}/plugins/observability/ai-gateway`, params);
         default:
             return buildUrl(`${API_BASE}/plugins/observability/${tabId}`, params);
     }
@@ -182,6 +184,9 @@ function applyTabSnapshot(tabId, payload) {
     }
     if (tabId === 'openapi') {
         applyOpenApiSnapshot(payload);
+    }
+    if (tabId === 'ai-gateway') {
+        applyAiGatewaySnapshot(payload);
     }
 }
 
@@ -283,6 +288,11 @@ function applyOpenApiSnapshot(snapshot) {
     }
 
     renderOpenApiPanel();
+}
+
+function applyAiGatewaySnapshot(snapshot) {
+    state.aiGateway = snapshot;
+    renderAiGatewayPanel();
 }
 
 function animateNewFlows(nextFlows) {

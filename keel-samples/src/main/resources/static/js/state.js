@@ -44,6 +44,7 @@ export const state = {
     openApiMeta: { generatedAtEpochMs: 0, source: '' },
     openApiFilters: { query: '', tag: '' },
     selectedOpenApiOpKey: null,
+    aiGateway: null,
     metricsHistory: [],
     selectedNodeId: null,
     selectedTraceId: null,

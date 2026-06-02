@@ -46,6 +46,11 @@ export function renderOpenApiPanel() {
     if (app) app.renderOpenApiPanel(state);
 }
 
+export function renderAiGatewayPanel() {
+    const app = appShell();
+    if (app) app.renderAiGatewayPanel(state);
+}
+
 export function renderPluginList() {
     const app = appShell();
     if (app && typeof app.renderMetricsPanel === 'function') app.renderMetricsPanel(state);
