@@ -160,7 +160,7 @@ class CEndPlayground extends KeelElement {
                         <div class="brand-mark">K</div>
                         <h1>Keel AI Gateway</h1>
                     </div>
-                    <a class="signin" href="/api/plugins/observability/ui/" data-ref="signinBtn">Sign in</a>
+                    <a class="signin" href="/api/plugins/airelay/ui/" data-ref="signinBtn">Sign in</a>
                 </nav>
                 <section class="hero" data-ref="hero">
                     <h2>Try the gateway in your browser.</h2>
