@@ -6,7 +6,7 @@
  * pages and external link shares. Sign in is offered as a single button
  * that drops users back into the management console.
  */
-import { KeelElement } from '/js/components/base/KeelElement.js';
+import { KeelElement } from './components/base/KeelElement.js';
 
 const DEMO_MODELS = [
     'claude-sonnet-4-20250514',

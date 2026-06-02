@@ -1,4 +1,4 @@
-import { KeelElement } from '/js/components/base/KeelElement.js';
+import { KeelElement } from './base/KeelElement.js';
 import { fetchWithAuth } from '../api.js';
 import { API, DEMO_MODELS } from '../config.js';
 

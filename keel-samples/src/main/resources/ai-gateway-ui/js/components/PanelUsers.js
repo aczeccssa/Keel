@@ -1,7 +1,7 @@
-import { KeelElement } from '/js/components/base/KeelElement.js';
+import { KeelElement } from './base/KeelElement.js';
 import { requestJson, postJson } from '../api.js';
 import { API } from '../config.js';
-import { escapeHtml } from '/js/utils.js';
+import { escapeHtml } from '../utils.js';
 
 export class PanelUsers extends KeelElement {
     hostStyles() { return 'height:100%;'; }

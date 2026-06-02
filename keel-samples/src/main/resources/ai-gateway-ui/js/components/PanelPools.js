@@ -1,7 +1,7 @@
-import { KeelElement } from '/js/components/base/KeelElement.js';
+import { KeelElement } from './base/KeelElement.js';
 import { requestJson, postJson } from '../api.js';
 import { API } from '../config.js';
-import { escapeHtml } from '/js/utils.js';
+import { escapeHtml } from '../utils.js';
 
 const STATUS_STYLES = {
     HEALTHY:  { bg: 'rgba(19,130,79,0.12)', color: 'var(--green)', label: 'Healthy' },

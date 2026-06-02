@@ -1,4 +1,4 @@
-import { KeelElement } from '/js/components/base/KeelElement.js';
+import { KeelElement } from '../base/KeelElement.js';
 
 /**
  * Styled data table. Cells are pre-formatted HTML (the parent is responsible for

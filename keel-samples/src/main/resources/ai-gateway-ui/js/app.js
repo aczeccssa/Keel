@@ -1,12 +1,12 @@
-import { KeelElement } from '/js/components/base/KeelElement.js';
+import { KeelElement } from './components/base/KeelElement.js';
 import { state, setTab, hydrateHash } from './state.js';
 import { loadStoredAuth, login, register, logout } from './auth.js';
 import { TABS } from './config.js';
 
-import '/js/components/shared/KeelStatGrid.js';
-import '/js/components/shared/KeelDataTable.js';
-import '/js/components/shared/KeelHero.js';
-import '/js/components/shared/KeelDetailList.js';
+import './components/shared/KeelStatGrid.js';
+import './components/shared/KeelDataTable.js';
+import './components/shared/KeelHero.js';
+import './components/shared/KeelDetailList.js';
 
 import './components/PanelDashboard.js';
 import './components/PanelKeys.js';

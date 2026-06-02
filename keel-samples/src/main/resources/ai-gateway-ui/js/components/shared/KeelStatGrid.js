@@ -1,4 +1,4 @@
-import { KeelElement } from '/js/components/base/KeelElement.js';
+import { KeelElement } from '../base/KeelElement.js';
 
 /**
  * Grid of 2-4 stat tiles (label, value, optional hint) with animated number tween

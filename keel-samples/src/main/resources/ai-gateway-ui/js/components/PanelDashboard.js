@@ -1,4 +1,4 @@
-import { KeelElement } from '/js/components/base/KeelElement.js';
+import { KeelElement } from './base/KeelElement.js';
 import { requestJson } from '../api.js';
 import { API } from '../config.js';
 

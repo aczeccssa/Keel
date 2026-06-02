@@ -1,4 +1,4 @@
-import { KeelElement } from '/js/components/base/KeelElement.js';
+import { KeelElement } from '../base/KeelElement.js';
 
 /**
  * Key/value detail list used in management surfaces. Each row is a label + a value

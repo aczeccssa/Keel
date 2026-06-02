@@ -1,4 +1,4 @@
-import { KeelElement } from '/js/components/base/KeelElement.js';
+import { KeelElement } from '../base/KeelElement.js';
 
 /**
  * Headline strip used at the top of every panel. Renders a small uppercase label,
