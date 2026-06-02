@@ -20,5 +20,4 @@ kotlin {
 
 tasks.test {
     useJUnitPlatform()
-    failOnNoDiscoveredTests = false
 }
