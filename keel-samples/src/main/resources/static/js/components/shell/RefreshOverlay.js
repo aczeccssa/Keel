@@ -100,7 +100,7 @@ export class RefreshOverlay extends KeelElement {
         });
     }
 
-    render({ open = false, refreshIntervalMs = 5000 } = {}) {
+    render({ open = false, refreshIntervalMs = 30000 } = {}) {
         this.ensureInitialized();
         this.refs.cover.classList.toggle('is-open', open);
         this.refs.options.innerHTML = REFRESH_INTERVALS.map((opt) => `

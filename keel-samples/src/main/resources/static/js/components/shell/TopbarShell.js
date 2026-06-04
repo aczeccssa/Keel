@@ -109,7 +109,7 @@ export class TopbarShell extends KeelElement {
     render(appState) {
         this.ensureInitialized();
         this.refs.connectionText.textContent = appState.connectionState === 'Live'
-            ? `Live ${REFRESH_INTERVALS.find((item) => item.ms === appState.refreshIntervalMs)?.label || '5s'}`
+            ? `Live ${REFRESH_INTERVALS.find((item) => item.ms === appState.refreshIntervalMs)?.label || '30s'}`
             : appState.connectionState;
         this.refs.connectionPill.classList.toggle('is-offline', appState.connectionState !== 'Live');
         this.refs.streamToggleBtn.textContent = appState.streamEnabled ? 'Live On' : 'Live Off';

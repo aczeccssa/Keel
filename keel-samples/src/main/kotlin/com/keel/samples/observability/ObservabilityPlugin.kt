@@ -185,7 +185,7 @@ class ObservabilityPlugin : StandardKeelPlugin {
         queryParameters[name]?.firstOrNull()?.takeIf { it.isNotBlank() }
 
     private fun KeelRequestContext.streamIntervalMs(): Long =
-        queryParam("intervalMs")?.toLongOrNull()?.coerceIn(1_000L, 300_000L) ?: 5_000L
+        queryParam("intervalMs")?.toLongOrNull()?.coerceIn(1_000L, 300_000L) ?: 30_000L
 
     private fun KeelRequestContext.serverUrl(
         defaultScheme: String = "http",

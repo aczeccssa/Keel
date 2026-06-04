@@ -51,7 +51,7 @@ export const state = {
     traceFilters: { query: '', status: 'all', service: '', window: '1h', limit: 40 },
     selectedLogKey: null,
     streamEnabled: true,
-    refreshIntervalMs: 5_000,
+    refreshIntervalMs: 30_000,
     refreshOverlayOpen: false,
     streamIntervalId: null,
     connectionState: 'Booting',
