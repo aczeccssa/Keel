@@ -7,6 +7,7 @@ import kotlinx.serialization.Serializable
 @Serializable
 data class CreateApiKeyRequest(
     val displayName: String,
+    val groupId: String = "default",
     val allowedModels: List<String> = emptyList(),
     val allowedIps: List<String> = emptyList(),
     val maxBudgetUsd: Double = 10.0,
@@ -19,6 +20,7 @@ data class CreateApiKeyRequest(
 @Serializable
 data class UpdateApiKeyRequest(
     val displayName: String? = null,
+    val groupId: String? = null,
     val allowedModels: List<String>? = null,
     val allowedIps: List<String>? = null,
     val maxBudgetUsd: Double? = null,
@@ -39,6 +41,7 @@ data class ApiKeyView(
     val keyPrefix: String,
     val userId: String,
     val displayName: String,
+    val groupId: String = "default",
     val maxBudgetUsd: Double,
     val currentSpendUsd: Double,
     val remainingBudgetUsd: Double,
@@ -76,6 +79,10 @@ data class TokenUsageRecordView(
     val model: String,
     val provider: String,
     val status: Int,
+    val transportStatus: Int = status,
+    val outcome: String = if (status >= 400) "ERROR" else "SUCCESS",
+    val errorCode: String? = null,
+    val usageSource: String = "PROVIDER",
     val usage: TokenUsage,
     val cost: CostBreakdown,
     val latencyMs: Long,

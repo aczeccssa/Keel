@@ -27,6 +27,13 @@ object ApiKeysTable : AuditPluginTable("token", "api_keys") {
     override val primaryKey = PrimaryKey(keyId)
 }
 
+object ApiKeyGroupTable : AuditPluginTable("token", "api_key_group") {
+    val keyId: Column<String> = varchar("key_id", 32)
+    val groupId: Column<String> = varchar("group_id", 64).default("default")
+
+    override val primaryKey = PrimaryKey(keyId)
+}
+
 object UsageRecordsTable : AuditPluginTable("token", "usage_records") {
     val recordId: Column<String> = varchar("record_id", 32)
     val keyId: Column<String> = varchar("key_id", 32).index()
@@ -52,7 +59,10 @@ object UsageRecordsTable : AuditPluginTable("token", "usage_records") {
     val cacheHitRate: Column<Double?> = double("cache_hit_rate").nullable()
     val latencyMs: Column<Long> = long("latency_ms")
     val status: Column<Int> = integer("status")
-    val errorCode: Column<String?> = varchar("error_code", 64).nullable()
+    val transportStatus: Column<Int> = integer("transport_status").default(200)
+    val outcome: Column<String> = varchar("outcome", 16).default("SUCCESS")
+    val usageSource: Column<String> = varchar("usage_source", 16).default("PROVIDER")
+    val errorCode: Column<String?> = varchar("error_code", 128).nullable()
     val streamed: Column<Boolean> = bool("streamed")
     val failoverCount: Column<Int> = integer("failover_count")
 

@@ -48,6 +48,7 @@ data class VerifiedApiKey(
     val keyId: String,
     val userId: String,
     val userGroupId: String,
+    val routingGroupId: String = "default",
     val allowedModels: List<String>,
     val rpmLimit: Int?,
     val tpmLimit: Int?,
@@ -61,6 +62,12 @@ class InvalidApiKeyException(
 class QuotaExceededException(
     val keyId: String
 ) : RuntimeException("Quota exceeded for API key $keyId")
+
+@Serializable
+enum class UsageSource { PROVIDER, ESTIMATED, NONE }
+
+@Serializable
+enum class RequestOutcome { SUCCESS, ERROR }
 
 interface UsageRecorder {
     suspend fun record(record: UsageRecordInput)
@@ -84,7 +91,10 @@ data class UsageRecordInput(
     val status: Int,
     val errorCode: String?,
     val streamed: Boolean,
-    val failoverCount: Int
+    val failoverCount: Int,
+    val transportStatus: Int = status,
+    val outcome: RequestOutcome = if (status >= 400) RequestOutcome.ERROR else RequestOutcome.SUCCESS,
+    val usageSource: UsageSource = if (usage.totalTokens > 0 || usage.cacheCreationInputTokens > 0 || usage.cacheReadInputTokens > 0) UsageSource.PROVIDER else UsageSource.NONE,
 )
 
 @Serializable

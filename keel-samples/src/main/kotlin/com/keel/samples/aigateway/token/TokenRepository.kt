@@ -39,7 +39,18 @@ class TokenRepository(
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
 
     fun initializeSchema() {
-        database.createTables(ApiKeysTable, UsageRecordsTable)
+        database.createTables(ApiKeysTable, ApiKeyGroupTable, UsageRecordsTable)
+        migrateUsageRecordOutcomeColumns()
+        backfillKeyGroups()
+    }
+
+    private fun migrateUsageRecordOutcomeColumns() {
+        database.transaction {
+            exec("ALTER TABLE token_usage_records ADD COLUMN IF NOT EXISTS transport_status INT NOT NULL DEFAULT 200")
+            exec("ALTER TABLE token_usage_records ADD COLUMN IF NOT EXISTS outcome VARCHAR(16) NOT NULL DEFAULT 'SUCCESS'")
+            exec("ALTER TABLE token_usage_records ADD COLUMN IF NOT EXISTS usage_source VARCHAR(16) NOT NULL DEFAULT 'PROVIDER'")
+            exec("ALTER TABLE token_usage_records ALTER COLUMN error_code VARCHAR(128)")
+        }
     }
 
     fun seedDemoKeyIfNeeded() = database.transaction {
@@ -70,6 +81,10 @@ class TokenRepository(
                 it[createdBy] = "system"
                 it[updatedBy] = "system"
                 it[deletedAt] = null
+            }
+            ApiKeyGroupTable.insert {
+                it[keyId] = "key-demo-user"
+                it[groupId] = DEFAULT_GROUP_ID
             }
         }
     }
@@ -103,6 +118,10 @@ class TokenRepository(
             it[updatedBy] = ownerUserId
             it[deletedAt] = null
         }
+        ApiKeyGroupTable.insert {
+            it[keyId] = keyIdValue
+            it[groupId] = request.groupId.ifBlank { DEFAULT_GROUP_ID }
+        }
         ApiKeyCreatedResponse(findKeyRow(keyIdValue).toView(), rawKey)
     }
 
@@ -135,6 +154,7 @@ class TokenRepository(
             it[updatedAt] = now
             it[updatedBy] = ownerUserId
         }
+        request.groupId?.let { group -> upsertKeyGroup(keyId, group.ifBlank { DEFAULT_GROUP_ID }) }
         findKeyRow(keyId).toView()
     }
 
@@ -148,6 +168,19 @@ class TokenRepository(
             it[updatedBy] = ownerUserId
         }
         findKeyRow(keyId).toView()
+    }
+
+    fun deleteKey(ownerUserId: String, keyId: String, includeAll: Boolean): ApiKeyView = database.transaction {
+        val row = findKeyRow(keyId)
+        if (!includeAll && row[ApiKeysTable.userId] != ownerUserId) throw PluginApiException(403, "Forbidden")
+        val now = Clock.System.now()
+        ApiKeysTable.update({ ApiKeysTable.keyId eq keyId }) {
+            it[status] = ApiKeyStatuses.REVOKED
+            it[updatedAt] = now
+            it[updatedBy] = ownerUserId
+            it[deletedAt] = now
+        }
+        row.toView().copy(status = ApiKeyStatuses.REVOKED)
     }
 
     fun addTempBudget(ownerUserId: String, keyId: String, request: TempBudgetRequest, includeAll: Boolean): ApiKeyView = database.transaction {
@@ -194,6 +227,7 @@ class TokenRepository(
             VerifiedKeyPartial(
                 keyId = refreshed[ApiKeysTable.keyId],
                 userId = refreshed[ApiKeysTable.userId],
+                routingGroupId = groupForKey(refreshed[ApiKeysTable.keyId]),
                 allowedModels = refreshed.allowedModels(),
                 rpmLimit = refreshed[ApiKeysTable.rpmLimit],
                 tpmLimit = refreshed[ApiKeysTable.tpmLimit],
@@ -215,6 +249,7 @@ class TokenRepository(
             keyId = partial.keyId,
             userId = partial.userId,
             userGroupId = user.groupId,
+            routingGroupId = partial.routingGroupId,
             allowedModels = partial.allowedModels,
             rpmLimit = partial.rpmLimit,
             tpmLimit = partial.tpmLimit,
@@ -250,7 +285,10 @@ class TokenRepository(
                 it[cacheHitRate] = record.cost.cacheHitRate
                 it[latencyMs] = record.latencyMs
                 it[status] = record.status
-                it[errorCode] = record.errorCode
+                it[transportStatus] = record.transportStatus
+                it[outcome] = record.outcome.name
+                it[usageSource] = record.usageSource.name
+                it[errorCode] = record.errorCode?.take(128)
                 it[streamed] = record.streamed
                 it[failoverCount] = record.failoverCount
                 it[createdAt] = now
@@ -302,14 +340,56 @@ class TokenRepository(
         )
     }
 
+    fun recentRecords(limit: Int): UsageListResponse = database.transaction {
+        val n = limit.coerceIn(1, 200)
+        val rows = UsageRecordsTable.selectAll()
+            .where { UsageRecordsTable.deletedAt.isNull() }
+            .orderBy(UsageRecordsTable.createdAt to SortOrder.DESC)
+            .limit(n)
+            .map { it.toUsageRecordView() }
+        UsageListResponse(records = rows, total = rows.size)
+    }
+
     private data class VerifiedKeyPartial(
         val keyId: String,
         val userId: String,
+        val routingGroupId: String,
         val allowedModels: List<String>,
         val rpmLimit: Int?,
         val tpmLimit: Int?,
         val remainingBudgetUsd: Double
     )
+
+    private fun backfillKeyGroups() = database.transaction {
+        val mapped = ApiKeyGroupTable.selectAll().map { it[ApiKeyGroupTable.keyId] }.toSet()
+        ApiKeysTable.selectAll().forEach { row ->
+            val keyId = row[ApiKeysTable.keyId]
+            if (keyId !in mapped) {
+                ApiKeyGroupTable.insert {
+                    it[ApiKeyGroupTable.keyId] = keyId
+                    it[groupId] = DEFAULT_GROUP_ID
+                }
+            }
+        }
+    }
+
+    private fun upsertKeyGroup(keyId: String, groupId: String) {
+        val updated = ApiKeyGroupTable.update({ ApiKeyGroupTable.keyId eq keyId }) {
+            it[ApiKeyGroupTable.groupId] = groupId
+        }
+        if (updated == 0) {
+            ApiKeyGroupTable.insert {
+                it[ApiKeyGroupTable.keyId] = keyId
+                it[ApiKeyGroupTable.groupId] = groupId
+            }
+        }
+    }
+
+    private fun groupForKey(keyId: String): String = ApiKeyGroupTable.selectAll()
+        .where { ApiKeyGroupTable.keyId eq keyId }
+        .firstOrNull()
+        ?.get(ApiKeyGroupTable.groupId)
+        ?: DEFAULT_GROUP_ID
 
     private fun maybeResetBudget(row: ResultRow, now: Instant) {
         if (now < row[ApiKeysTable.budgetResetAt]) return
@@ -337,6 +417,7 @@ class TokenRepository(
             keyPrefix = this[ApiKeysTable.keyPrefix],
             userId = this[ApiKeysTable.userId],
             displayName = this[ApiKeysTable.displayName],
+            groupId = groupForKey(this[ApiKeysTable.keyId]),
             maxBudgetUsd = budget,
             currentSpendUsd = spend,
             remainingBudgetUsd = budget - spend,
@@ -356,6 +437,10 @@ class TokenRepository(
         model = this[UsageRecordsTable.model],
         provider = this[UsageRecordsTable.provider],
         status = this[UsageRecordsTable.status],
+        transportStatus = this[UsageRecordsTable.transportStatus],
+        outcome = this[UsageRecordsTable.outcome],
+        errorCode = this[UsageRecordsTable.errorCode],
+        usageSource = this[UsageRecordsTable.usageSource],
         usage = usage(),
         cost = cost(),
         latencyMs = this[UsageRecordsTable.latencyMs],
@@ -429,5 +514,9 @@ class TokenRepository(
     private fun hashKey(rawKey: String): String {
         val digest = MessageDigest.getInstance("SHA-256").digest(rawKey.toByteArray(Charsets.UTF_8))
         return Base64.getUrlEncoder().withoutPadding().encodeToString(digest)
+    }
+
+    companion object {
+        const val DEFAULT_GROUP_ID = "default"
     }
 }
