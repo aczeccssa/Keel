@@ -1,7 +1,6 @@
 package com.keel.samples.aigateway.airelay.upstream
 
 import com.keel.contract.ai.TokenUsage
-import com.keel.samples.aigateway.airelay.PoolLevelConfig
 import com.keel.samples.aigateway.airelay.pool.PoolSelection
 import com.keel.samples.aigateway.airelay.protocol.WireProtocol
 import com.keel.samples.aigateway.airelay.protocol.obj
@@ -15,8 +14,21 @@ import kotlinx.serialization.json.buildJsonObject
 import io.ktor.sse.ServerSentEvent
 
 interface UpstreamHttpClient {
-    suspend fun send(selection: PoolSelection, request: JsonObject): UpstreamResponse
-    fun stream(selection: PoolSelection, request: JsonObject): Flow<ServerSentEvent>
+    suspend fun send(
+        selection: PoolSelection,
+        request: JsonObject,
+        extraHeaders: Map<String, String> = emptyMap()
+    ): UpstreamResponse
+    fun stream(
+        selection: PoolSelection,
+        request: JsonObject,
+        extraHeaders: Map<String, String> = emptyMap()
+    ): Flow<ServerSentEvent>
+    suspend fun countTokens(
+        selection: PoolSelection,
+        request: JsonObject,
+        extraHeaders: Map<String, String> = emptyMap()
+    ): UpstreamResponse
 }
 
 data class UpstreamResponse(
@@ -42,6 +54,7 @@ class UpstreamHttpException(
 class MockableUpstreamHttpClient(
     private val failureOverrides: MutableMap<String, MockFailure> = mutableMapOf(),
     private val usageOverrides: MutableMap<String, com.keel.contract.ai.TokenUsage> = mutableMapOf(),
+    private val streamEventOverrides: MutableMap<String, List<ServerSentEvent>> = mutableMapOf(),
     private val realClient: UpstreamHttpClient? = null
 ) : UpstreamHttpClient {
     fun failKey(keyId: String, failure: MockFailure) {
@@ -50,31 +63,48 @@ class MockableUpstreamHttpClient(
 
     fun clearFailures() {
         failureOverrides.clear()
+        streamEventOverrides.clear()
     }
 
     fun forceUsage(keyId: String, usage: com.keel.contract.ai.TokenUsage) {
         usageOverrides[keyId] = usage
     }
 
-    override suspend fun send(selection: PoolSelection, request: JsonObject): UpstreamResponse {
-        failureOverrides[selection.keyState.key.keyId]?.let { throw it.toException() }
-        if (!selection.level.provider.baseUrl.startsWith("mock://")) {
-            val real = realClient
-                ?: throw UpstreamHttpException(501, "Real upstream HTTP is not configured in this sample run")
-            return real.send(selection, request)
-        }
-        return UpstreamResponse(200, mockResponse(selection.level, request, usageOverrides[selection.keyState.key.keyId]))
+    fun streamEventsForKey(keyId: String, events: List<ServerSentEvent>) {
+        streamEventOverrides[keyId] = events
     }
 
-    override fun stream(selection: PoolSelection, request: JsonObject): Flow<ServerSentEvent> = flow {
+    override suspend fun send(
+        selection: PoolSelection,
+        request: JsonObject,
+        extraHeaders: Map<String, String>
+    ): UpstreamResponse {
         failureOverrides[selection.keyState.key.keyId]?.let { throw it.toException() }
-        if (!selection.level.provider.baseUrl.startsWith("mock://")) {
+        if (!selection.provider.baseUrl.startsWith("mock://")) {
             val real = realClient
-                ?: throw UpstreamHttpException(501, "Real upstream HTTP streaming is not configured in this sample run")
-            real.stream(selection, request).collect { emit(it) }
+                ?: throw UpstreamHttpException(501, "Real upstream HTTP is not configured in this sample run")
+            return real.send(selection, request, extraHeaders)
+        }
+        return UpstreamResponse(200, mockResponse(selection, request, usageOverrides[selection.keyState.key.keyId]))
+    }
+
+    override fun stream(
+        selection: PoolSelection,
+        request: JsonObject,
+        extraHeaders: Map<String, String>
+    ): Flow<ServerSentEvent> = flow {
+        failureOverrides[selection.keyState.key.keyId]?.let { throw it.toException() }
+        streamEventOverrides[selection.keyState.key.keyId]?.let { events ->
+            events.forEach { emit(it) }
             return@flow
         }
-        when (selection.level.provider.protocol) {
+        if (!selection.provider.baseUrl.startsWith("mock://")) {
+            val real = realClient
+                ?: throw UpstreamHttpException(501, "Real upstream HTTP streaming is not configured in this sample run")
+            real.stream(selection, request, extraHeaders).collect { emit(it) }
+            return@flow
+        }
+        when (selection.provider.protocol) {
             WireProtocol.OPENAI_CHAT -> {
                 emit(ServerSentEvent(data = """{"choices":[{"delta":{"content":"mock "}}]}"""))
                 emit(ServerSentEvent(data = """{"choices":[{"delta":{"content":"response"}}]}"""))
@@ -93,11 +123,29 @@ class MockableUpstreamHttpClient(
         }
     }
 
-    private fun mockResponse(level: PoolLevelConfig, request: JsonObject, usageOverride: com.keel.contract.ai.TokenUsage?): JsonObject {
+    override suspend fun countTokens(
+        selection: PoolSelection,
+        request: JsonObject,
+        extraHeaders: Map<String, String>
+    ): UpstreamResponse {
+        failureOverrides[selection.keyState.key.keyId]?.let { throw it.toException() }
+        if (!selection.provider.baseUrl.startsWith("mock://")) {
+            val real = realClient
+                ?: throw UpstreamHttpException(501, "Real upstream HTTP is not configured in this sample run")
+            return real.countTokens(selection, request, extraHeaders)
+        }
+        val estimated = ((request["messages"]?.toString()?.length ?: 0) / 4).coerceAtLeast(1)
+        return UpstreamResponse(
+            status = 200,
+            body = buildJsonObject { put("input_tokens", JsonPrimitive(estimated)) }
+        )
+    }
+
+    private fun mockResponse(selection: PoolSelection, request: JsonObject, usageOverride: com.keel.contract.ai.TokenUsage?): JsonObject {
         val model = request.string("model") ?: "mock-model"
-        val text = "Mock response from ${level.provider.providerId} for $model"
+        val text = "Mock response from ${selection.provider.providerId} for $model"
         val usage = usageOverride ?: com.keel.contract.ai.TokenUsage(promptTokens = 12, completionTokens = 8)
-        return when (level.provider.protocol) {
+        return when (selection.provider.protocol) {
             WireProtocol.OPENAI_CHAT -> buildJsonObject {
                 put("id", JsonPrimitive("chatcmpl-mock"))
                 put("object", JsonPrimitive("chat.completion"))

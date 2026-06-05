@@ -7,9 +7,11 @@ import com.keel.contract.ai.QuotaExceededException
 import com.keel.contract.ai.RateLimitContext
 import com.keel.contract.ai.RateLimitDecision
 import com.keel.contract.ai.RateLimitGate
+import com.keel.contract.ai.RequestOutcome
 import com.keel.contract.ai.TokenUsage
 import com.keel.contract.ai.UsageRecordInput
 import com.keel.contract.ai.UsageRecorder
+import com.keel.contract.ai.UsageSource
 import com.keel.contract.ai.UserDirectory
 import com.keel.contract.ai.VerifiedApiKey
 import com.keel.contract.customer.ChargeResult
@@ -24,6 +26,7 @@ import com.keel.samples.aigateway.airelay.protocol.IrRequest
 import com.keel.samples.aigateway.airelay.protocol.IrStreamEvent
 import com.keel.samples.aigateway.airelay.protocol.ProtocolTranscoder
 import com.keel.samples.aigateway.airelay.protocol.WireProtocol
+import com.keel.samples.aigateway.airelay.protocol.anthropic.AnthropicStreamObserver
 import com.keel.samples.aigateway.airelay.protocol.obj
 import com.keel.samples.aigateway.airelay.protocol.string
 import com.keel.samples.aigateway.airelay.protocol.textOf
@@ -187,7 +190,10 @@ class AIRelayService(
                             model = ir.model, provider = selection.provider.providerId,
                             poolLevelId = selection.level.levelId, upstreamKeyId = selection.keyState.key.keyId,
                             usage = effectiveUsage, cost = cost, latencyMs = elapsedMs(started),
-                            status = upstream.status, errorCode = null, streamed = false, failoverCount = failoverCount
+                            status = upstream.status, errorCode = null, streamed = false, failoverCount = failoverCount,
+                            transportStatus = upstream.status,
+                            outcome = if (upstream.status >= 400) RequestOutcome.ERROR else RequestOutcome.SUCCESS,
+                            usageSource = if (effectiveUsage.totalTokens > 0) com.keel.contract.ai.UsageSource.PROVIDER else com.keel.contract.ai.UsageSource.NONE,
                         )
                     )
                 } catch (error: Throwable) {
@@ -233,7 +239,9 @@ class AIRelayService(
         val upstreamRequest = buildUpstreamRequest(rawRequest, clientProtocol, selection.provider.protocol, ir.copy(model = selection.upstreamModel, stream = true))
         selection.keyState.currentConcurrency.incrementAndGet()
         val upstreamStream = upstreamClient.stream(selection, upstreamRequest, upstreamHeaders)
+        val observer = if (selection.provider.protocol == WireProtocol.ANTHROPIC_MESSAGES) AnthropicStreamObserver() else null
         val rawEvents = upstreamStream.toList()
+        rawEvents.forEach { observer?.observe(it) }
         var lastUsage = TokenUsage()
         val outputText = StringBuilder()
         val decodedEvents = transcoder.decodeStream(selection.provider.protocol, rawEvents.asFlow()).map { event ->
@@ -254,24 +262,46 @@ class AIRelayService(
                 val clientEvents = transcoder.encodeStream(clientProtocol, decodedEvents.asFlow())
                 renderSse(clientEvents.toList())
             }
-            val effectiveUsage = normalizeUsage(ir, lastUsage, outputText.toString())
-            val cost = costCalculator.calculate(ir.model, effectiveUsage, keyContext.verified.userGroupId, variantKeyFor(ir))
+            val streamOutcome = observer?.outcome(transportStatus = 200)
+            val isSemanticError = streamOutcome?.outcome == RequestOutcome.ERROR
+            val effectiveUsage = if (streamOutcome != null && isSemanticError) {
+                if (streamOutcome.usageSource != com.keel.contract.ai.UsageSource.NONE) streamOutcome.usage else TokenUsage()
+            } else {
+                normalizeUsage(ir, lastUsage, outputText.toString())
+            }
+            val usageSource = when {
+                streamOutcome != null -> if (isSemanticError && streamOutcome.usageSource == com.keel.contract.ai.UsageSource.NONE) com.keel.contract.ai.UsageSource.NONE else streamOutcome.usageSource
+                effectiveUsage.totalTokens > 0 || effectiveUsage.cacheCreationInputTokens > 0 || effectiveUsage.cacheReadInputTokens > 0 -> com.keel.contract.ai.UsageSource.PROVIDER
+                else -> com.keel.contract.ai.UsageSource.NONE
+            }
+            val semanticStatus = streamOutcome?.semanticStatus ?: 200
+            val errorCode = streamOutcome?.errorType
+            val effectiveCost = if (isSemanticError && usageSource == com.keel.contract.ai.UsageSource.NONE) {
+                CostBreakdown()
+            } else {
+                costCalculator.calculate(ir.model, effectiveUsage, keyContext.verified.userGroupId, variantKeyFor(ir))
+            }
 
-            val creditHeaders = try {
-                chargeCustomerCredits(
-                    keyContext,
-                    effectiveUsage,
-                    selection.provider.providerId,
-                    keyContext.verified.routingGroupId,
-                    clientProtocol,
-                    ir.model,
-                    "stream-${started.epochSeconds}",
-                    variantKeyFor(ir)
-                )
-            } catch (error: Throwable) {
-                recordLocalAccountingFailure(keyContext.verified, clientProtocol, ir, started, error)
-                poolChainManager.markSuccess(selection)
-                return protocolError(clientProtocol, 500, "api_error", localAccountingMessage(error))
+            // Charge customer only for successful streams or streams with real provider usage.
+            val creditHeaders = if (isSemanticError && usageSource == com.keel.contract.ai.UsageSource.NONE) {
+                emptyMap()
+            } else {
+                try {
+                    chargeCustomerCredits(
+                        keyContext,
+                        effectiveUsage,
+                        selection.provider.providerId,
+                        keyContext.verified.routingGroupId,
+                        clientProtocol,
+                        ir.model,
+                        streamOutcome?.requestId ?: "stream-${started.epochSeconds}",
+                        variantKeyFor(ir)
+                    )
+                } catch (error: Throwable) {
+                    recordLocalAccountingFailure(keyContext.verified, clientProtocol, ir, started, error)
+                    poolChainManager.markSuccess(selection)
+                    return protocolError(clientProtocol, 500, "api_error", localAccountingMessage(error))
+                }
             }
 
             poolChainManager.markSuccess(selection)
@@ -288,12 +318,15 @@ class AIRelayService(
                         poolLevelId = selection.level.levelId,
                         upstreamKeyId = selection.keyState.key.keyId,
                         usage = effectiveUsage,
-                        cost = cost,
+                        cost = effectiveCost,
                         latencyMs = elapsedMs(started),
-                        status = 200,
-                        errorCode = null,
+                        status = semanticStatus,
+                        errorCode = errorCode,
                         streamed = true,
-                        failoverCount = 0
+                        failoverCount = 0,
+                        transportStatus = streamOutcome?.transportStatus ?: 200,
+                        outcome = streamOutcome?.outcome ?: RequestOutcome.SUCCESS,
+                        usageSource = usageSource,
                     )
                 )
             } catch (error: Throwable) {
@@ -302,9 +335,9 @@ class AIRelayService(
 
             val headers = (extraHeaders + creditHeaders).toMutableMap()
             headers["X-Upstream-Protocol"] = listOf(selection.provider.protocol.name)
-            headers["X-Cost-USD"] = listOf(cost.totalCostUsd.toString())
+            headers["X-Cost-USD"] = listOf(effectiveCost.totalCostUsd.toString())
             headers["Content-Type"] = listOf("text/event-stream")
-            RelayResult(status = 200, headers = headers, body = collected)
+            RelayResult(status = semanticStatus, headers = headers, body = collected)
         } catch (error: UpstreamHttpException) {
             poolChainManager.markFailure(selection, error.status, error.message, error.retryAfterSeconds)
             throw error
