@@ -7,11 +7,11 @@ import io.ktor.http.ContentType
 import io.ktor.http.HttpMethod
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.ApplicationCall
-import io.ktor.server.request.receiveChannel
 import io.ktor.server.request.receiveText
 import io.ktor.server.response.respond
 import io.ktor.server.response.respondBytes
 import io.ktor.server.response.respondText
+import io.ktor.utils.io.readAvailable
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonNull
@@ -184,15 +184,7 @@ internal suspend fun respondPluginResult(
 }
 
 internal suspend fun readRawBody(call: ApplicationCall): ByteArray {
-    val channel = call.receiveChannel()
-    val buffer = java.io.ByteArrayOutputStream()
-    val tmp = ByteArray(8192)
-    while (true) {
-        val n = channel.readAvailable(tmp)
-        if (n == -1) break
-        if (n > 0) buffer.write(tmp, 0, n)
-    }
-    return buffer.toByteArray()
+    return call.receiveText().toByteArray(Charsets.ISO_8859_1)
 }
 
 internal fun buildRawPluginRequest(call: ApplicationCall, context: KeelRequestContext, body: ByteArray): RawPluginRequest =
