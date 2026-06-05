@@ -420,6 +420,7 @@ class UnifiedPluginManager(
         val pluginId = entry.plugin.descriptor.pluginId
         val routes = entry.routeDefinitions
         val endpoints = routes.filterIsInstance<PluginEndpointDefinition<*, *>>()
+        val rawEndpoints = routes.filterIsInstance<PluginRawEndpointDefinition>()
         val sseRoutes = routes.filterIsInstance<PluginSseDefinition>()
         val staticRoutes = routes.filterIsInstance<PluginStaticResourceDefinition>()
         val endpointKeys = endpoints.map { operationKey(it.method, fullPluginPath(pluginId, it.path)) }
@@ -474,6 +475,15 @@ class UnifiedPluginManager(
                 when (entry.config.runtimeMode) {
                     PluginRuntimeMode.IN_PROCESS -> staticResources(definition.path, definition.basePackage, definition.index)
                     PluginRuntimeMode.EXTERNAL_JVM -> mountExternalStatic(definition.path, pluginId, definition.path)
+                }
+            }
+            for (endpoint in rawEndpoints) {
+                val fullPath = endpoint.path.ifBlank { "" }
+                when (endpoint.method) {
+                    HttpMethod.Get -> mountRawGet(fullPath, pluginId, endpoint.endpointId)
+                    HttpMethod.Post -> mountRawPost(fullPath, pluginId, endpoint.endpointId)
+                    HttpMethod.Delete -> mountRawDelete(fullPath, pluginId, endpoint.endpointId)
+                    else -> error("Unsupported raw method: ${endpoint.method}")
                 }
             }
         }
@@ -540,6 +550,30 @@ class UnifiedPluginManager(
         }
     }
 
+    private fun Route.mountRawGet(path: String, pluginId: String, endpointId: String) {
+        if (path.isBlank()) {
+            get { handleRawInvocation(pluginId, endpointId) }
+        } else {
+            get(path) { handleRawInvocation(pluginId, endpointId) }
+        }
+    }
+
+    private fun Route.mountRawPost(path: String, pluginId: String, endpointId: String) {
+        if (path.isBlank()) {
+            post { handleRawInvocation(pluginId, endpointId) }
+        } else {
+            post(path) { handleRawInvocation(pluginId, endpointId) }
+        }
+    }
+
+    private fun Route.mountRawDelete(path: String, pluginId: String, endpointId: String) {
+        if (path.isBlank()) {
+            delete { handleRawInvocation(pluginId, endpointId) }
+        } else {
+            delete(path) { handleRawInvocation(pluginId, endpointId) }
+        }
+    }
+
     private fun Route.mountSse(entry: ManagedPlugin, path: String, pluginId: String, ssePath: String) {
         val handler: suspend io.ktor.server.sse.ServerSSESession.() -> Unit = {
             when (resolveDispatchDisposition(pluginId)) {
@@ -579,6 +613,38 @@ class UnifiedPluginManager(
             sse(handler)
         } else {
             sse(path, handler)
+        }
+    }
+
+    private suspend fun io.ktor.server.routing.RoutingContext.handleRawInvocation(
+        pluginId: String,
+        endpointId: String
+    ) {
+        val entry = registry.get(pluginId) ?: run {
+            call.respond(HttpStatusCode.NotFound, "Plugin not found")
+            return
+        }
+        val endpoint = entry.routeDefinitions
+            .filterIsInstance<PluginRawEndpointDefinition>()
+            .firstOrNull { it.endpointId == endpointId }
+            ?: run {
+                call.respond(HttpStatusCode.NotFound, "Plugin raw endpoint not found")
+                return
+            }
+        if (entry.config.runtimeMode != PluginRuntimeMode.IN_PROCESS) {
+            call.respond(HttpStatusCode.NotImplemented, "Raw plugin endpoints are only supported in-process")
+            return
+        }
+        try {
+            val context = buildRequestContext(call, entry.plugin.descriptor.pluginId, endpoint.method, call.request.path())
+            val body = readRawBody(call)
+            val request = buildRawPluginRequest(call, context, body)
+            val result = endpoint.handler.invoke(context, request)
+            respondRawPluginResult(call, result)
+        } catch (error: PluginApiException) {
+            call.respond(HttpStatusCode.fromValue(error.status), error.message ?: "Request failed")
+        } catch (error: Exception) {
+            call.respond(HttpStatusCode.InternalServerError, error.message ?: "Internal server error")
         }
     }
 

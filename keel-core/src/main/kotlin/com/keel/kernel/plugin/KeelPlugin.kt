@@ -167,6 +167,21 @@ data class PluginResult<T>(
     val body: T? = null
 )
 
+data class RawPluginRequest(
+    val method: String,
+    val path: String,
+    val query: Map<String, List<String>>,
+    val headers: Map<String, List<String>>,
+    val body: ByteArray = ByteArray(0)
+)
+
+data class RawPluginResponse(
+    val status: Int = 200,
+    val headers: Map<String, List<String>> = emptyMap(),
+    val contentType: String? = null,
+    val body: ByteArray = ByteArray(0)
+)
+
 interface KeelRequestInterceptor {
     suspend fun intercept(
         context: KeelRequestContext,
@@ -330,6 +345,17 @@ data class PluginSseDefinition(
     override val path: String,
     val doc: OpenApiDoc = OpenApiDoc(),
     val handler: suspend PluginSseSession.() -> Unit
+) : PluginRouteDefinition
+
+data class PluginRawEndpointDefinition(
+    val endpointId: String,
+    val method: HttpMethod,
+    override val path: String,
+    val doc: OpenApiDoc = OpenApiDoc(),
+    val executionPolicy: EndpointExecutionPolicy = EndpointExecutionPolicy(),
+    val interceptors: List<KClass<out KeelRequestInterceptor>> = emptyList(),
+    val interceptorSource: InterceptorMetadataSource = InterceptorMetadataSource.NONE,
+    val handler: suspend KeelRequestContext.(RawPluginRequest) -> PluginResult<RawPluginResponse>
 ) : PluginRouteDefinition
 
 data class PluginStaticResourceDefinition(
@@ -500,6 +526,53 @@ class PluginEndpointDsl internal constructor(
         handler: suspend PluginSseSession.() -> Unit
     ) {
         endpoints += PluginSseDefinition(path = resolvePath(path), doc = doc, handler = handler)
+    }
+
+    fun rawPost(
+        path: String = "",
+        doc: OpenApiDoc = OpenApiDoc(),
+        executionPolicy: EndpointExecutionPolicy = EndpointExecutionPolicy(),
+        handler: suspend KeelRequestContext.(RawPluginRequest) -> PluginResult<RawPluginResponse>
+    ) {
+        raw(HttpMethod.Post, path, doc, executionPolicy, handler)
+    }
+
+    fun rawGet(
+        path: String = "",
+        doc: OpenApiDoc = OpenApiDoc(),
+        executionPolicy: EndpointExecutionPolicy = EndpointExecutionPolicy(),
+        handler: suspend KeelRequestContext.(RawPluginRequest) -> PluginResult<RawPluginResponse>
+    ) {
+        raw(HttpMethod.Get, path, doc, executionPolicy, handler)
+    }
+
+    fun rawDelete(
+        path: String = "",
+        doc: OpenApiDoc = OpenApiDoc(),
+        executionPolicy: EndpointExecutionPolicy = EndpointExecutionPolicy(),
+        handler: suspend KeelRequestContext.(RawPluginRequest) -> PluginResult<RawPluginResponse>
+    ) {
+        raw(HttpMethod.Delete, path, doc, executionPolicy, handler)
+    }
+
+    private fun raw(
+        method: HttpMethod,
+        path: String,
+        doc: OpenApiDoc,
+        executionPolicy: EndpointExecutionPolicy,
+        handler: suspend KeelRequestContext.(RawPluginRequest) -> PluginResult<RawPluginResponse>
+    ) {
+        val resolvedPath = resolvePath(path)
+        endpoints += PluginRawEndpointDefinition(
+            endpointId = buildEndpointId(pluginIdValue, method, resolvedPath),
+            method = method,
+            path = resolvedPath,
+            doc = doc,
+            executionPolicy = executionPolicy,
+            interceptors = inheritedInterceptors,
+            interceptorSource = inheritedInterceptorSource,
+            handler = handler
+        )
     }
 
     fun staticResources(
