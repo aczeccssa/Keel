@@ -29,6 +29,11 @@ interface UpstreamHttpClient {
         request: JsonObject,
         extraHeaders: Map<String, String> = emptyMap()
     ): UpstreamResponse
+    suspend fun proxyRaw(
+        selection: PoolSelection,
+        request: RawProxyRequest,
+        extraHeaders: Map<String, String> = emptyMap()
+    ): RawProxyResponse
 }
 
 data class UpstreamResponse(
@@ -55,6 +60,7 @@ class MockableUpstreamHttpClient(
     private val failureOverrides: MutableMap<String, MockFailure> = mutableMapOf(),
     private val usageOverrides: MutableMap<String, com.keel.contract.ai.TokenUsage> = mutableMapOf(),
     private val streamEventOverrides: MutableMap<String, List<ServerSentEvent>> = mutableMapOf(),
+    private val rawResponseOverrides: MutableMap<String, RawProxyResponse> = mutableMapOf(),
     private val realClient: UpstreamHttpClient? = null
 ) : UpstreamHttpClient {
     fun failKey(keyId: String, failure: MockFailure) {
@@ -64,6 +70,7 @@ class MockableUpstreamHttpClient(
     fun clearFailures() {
         failureOverrides.clear()
         streamEventOverrides.clear()
+        rawResponseOverrides.clear()
     }
 
     fun forceUsage(keyId: String, usage: com.keel.contract.ai.TokenUsage) {
@@ -72,6 +79,10 @@ class MockableUpstreamHttpClient(
 
     fun streamEventsForKey(keyId: String, events: List<ServerSentEvent>) {
         streamEventOverrides[keyId] = events
+    }
+
+    fun rawResponseForKey(keyId: String, response: RawProxyResponse) {
+        rawResponseOverrides[keyId] = response
     }
 
     override suspend fun send(
@@ -203,6 +214,26 @@ class MockableUpstreamHttpClient(
                 })
             }
         }
+    }
+
+    override suspend fun proxyRaw(
+        selection: PoolSelection,
+        request: RawProxyRequest,
+        extraHeaders: Map<String, String>
+    ): RawProxyResponse {
+        failureOverrides[selection.keyState.key.keyId]?.let { throw it.toException() }
+        rawResponseOverrides[selection.keyState.key.keyId]?.let { return it }
+        if (!selection.provider.baseUrl.startsWith("mock://")) {
+            val real = realClient
+                ?: throw UpstreamHttpException(501, "Real upstream HTTP is not configured in this sample run")
+            return real.proxyRaw(selection, request, extraHeaders)
+        }
+        return RawProxyResponse(
+            status = 200,
+            headers = mapOf("X-Mock-Upstream" to listOf(selection.provider.providerId)),
+            contentType = request.contentType ?: "application/json",
+            body = request.body.ifEmpty { "{}".toByteArray() }
+        )
     }
 
     private fun openAiUsage(usage: TokenUsage): JsonObject = buildJsonObject {

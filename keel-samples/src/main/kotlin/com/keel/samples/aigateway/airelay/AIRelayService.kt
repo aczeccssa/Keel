@@ -31,6 +31,8 @@ import com.keel.samples.aigateway.airelay.protocol.obj
 import com.keel.samples.aigateway.airelay.protocol.string
 import com.keel.samples.aigateway.airelay.protocol.textOf
 import com.keel.samples.aigateway.airelay.upstream.UpstreamHttpClient
+import com.keel.samples.aigateway.airelay.upstream.RawProxyRequest
+import com.keel.samples.aigateway.airelay.upstream.RawProxyResponse
 import com.keel.samples.aigateway.airelay.upstream.UpstreamHttpException
 import com.keel.samples.aigateway.airelay.usage.CostCalculator
 import com.keel.samples.aigateway.airelay.usage.TokenEstimator
@@ -618,6 +620,73 @@ class AIRelayService(
 
     private fun elapsedMs(started: kotlinx.datetime.Instant): Long =
         (kotlinx.datetime.Clock.System.now() - started).inWholeMilliseconds
+
+    suspend fun proxyAnthropicRaw(
+        context: KeelRequestContext,
+        raw: com.keel.kernel.plugin.RawPluginRequest,
+        upstreamPath: String,
+        method: io.ktor.http.HttpMethod,
+        requireFilesBeta: Boolean = false,
+    ): com.keel.kernel.plugin.RawPluginResponse {
+        validateProtocolHeaders(context, WireProtocol.ANTHROPIC_MESSAGES)?.let { error ->
+            return com.keel.kernel.plugin.RawPluginResponse(
+                status = error.status,
+                headers = error.headers,
+                contentType = "application/json",
+                body = error.body.toByteArray()
+            )
+        }
+        val keyContext = verifyKey(context) ?: return com.keel.kernel.plugin.RawPluginResponse(
+            status = 401,
+            headers = mapOf("Content-Type" to listOf("application/json")),
+            contentType = "application/json",
+            body = anthropicErrorBody("authentication_error", "Missing or invalid API key").toByteArray()
+        )
+        val selection = poolChainManager.selectProtocolCandidates(
+            keyContext.verified.routingGroupId, WireProtocol.ANTHROPIC_MESSAGES
+        ).firstOrNull() ?: return com.keel.kernel.plugin.RawPluginResponse(
+            status = 503,
+            headers = mapOf("Content-Type" to listOf("application/json")),
+            contentType = "application/json",
+            body = anthropicErrorBody("api_error", "No Anthropic upstream available").toByteArray()
+        )
+        val extraHeaders = upstreamHeaderOverrides(context, WireProtocol.ANTHROPIC_MESSAGES).toMutableMap()
+        if (requireFilesBeta) {
+            val beta = raw.headers["anthropic-beta"]?.firstOrNull()
+                ?: raw.headers["Anthropic-Beta"]?.firstOrNull()
+            if (beta.isNullOrBlank()) extraHeaders["anthropic-beta"] = "files-api-2025-04-14"
+        }
+        return try {
+            val response = upstreamClient.proxyRaw(
+                selection = selection,
+                request = RawProxyRequest(
+                    method = method,
+                    path = upstreamPath,
+                    queryString = raw.query.entries.joinToString("&") { (k, values) ->
+                        values.joinToString("&") { v -> "${java.net.URLEncoder.encode(k, "UTF-8")}=${java.net.URLEncoder.encode(v, "UTF-8")}" }
+                    },
+                    headers = raw.headers,
+                    body = raw.body,
+                    contentType = raw.headers["Content-Type"]?.firstOrNull()
+                        ?: raw.headers["content-type"]?.firstOrNull(),
+                ),
+                extraHeaders = extraHeaders
+            )
+            com.keel.kernel.plugin.RawPluginResponse(
+                status = response.status,
+                headers = response.headers,
+                contentType = response.contentType,
+                body = response.body
+            )
+        } catch (error: Throwable) {
+            com.keel.kernel.plugin.RawPluginResponse(
+                status = 502,
+                headers = mapOf("Content-Type" to listOf("application/json")),
+                contentType = "application/json",
+                body = anthropicErrorBody("api_error", "Raw proxy failed: ${(error.message ?: error::class.simpleName ?: "unknown").take(200)}").toByteArray()
+            )
+        }
+    }
 
     private fun protocolError(clientProtocol: WireProtocol, status: Int, errorType: String, message: String): RelayResult =
         RelayResult(

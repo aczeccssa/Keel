@@ -6,6 +6,7 @@ import io.ktor.client.HttpClient
 import io.ktor.client.engine.cio.CIO
 import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.request.headers
+import io.ktor.client.request.get
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.HttpResponse
@@ -18,10 +19,12 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 
 /**
- * Real HTTP upstream client. Hits the actual provider at [selection.level.provider.baseUrl]
+ * Real HTTP upstream client. Hits the actual provider at [selection.provider.baseUrl]
  * using the key from [selection.keyState.key]. Sends requests in the provider's [WireProtocol]
  * and streams the SSE response back without transcoding — transcoding is the AIRelayService's
  * job. This client is a pure transport.
@@ -33,18 +36,23 @@ class RealUpstreamHttpClient private constructor(
     private val json: Json = Json { ignoreUnknownKeys = true; isLenient = true }
 ) : UpstreamHttpClient {
 
-    override suspend fun send(selection: PoolSelection, request: JsonObject): UpstreamResponse {
+    override suspend fun send(
+        selection: PoolSelection,
+        request: JsonObject,
+        extraHeaders: Map<String, String>
+    ): UpstreamResponse {
         val url = endpointUrl(selection, stream = false)
         val apiKey = resolveApiKey(selection)
         val response: HttpResponse = client.post(url) {
             headers {
-                selection.level.provider.defaultHeaders.forEach { (k, v) -> append(k, v) }
+                selection.provider.defaultHeaders.forEach { (k, v) -> append(k, v) }
+                extraHeaders.forEach { (k, v) -> append(k, v) }
                 append(HttpHeaders.Accept, "application/json")
-                when (selection.level.provider.protocol) {
+                when (selection.provider.protocol) {
                     WireProtocol.ANTHROPIC_MESSAGES -> append("x-api-key", apiKey)
                     else -> append(HttpHeaders.Authorization, "Bearer $apiKey")
                 }
-                append("anthropic-version", "2023-06-01")
+                if ("anthropic-version" !in extraHeaders) append("anthropic-version", "2023-06-01")
             }
             contentType(ContentType.Application.Json)
             setBody(json.encodeToString(JsonObject.serializer(), request))
@@ -63,18 +71,23 @@ class RealUpstreamHttpClient private constructor(
         return UpstreamResponse(status = response.status.value, body = body, headers = headers)
     }
 
-    override fun stream(selection: PoolSelection, request: JsonObject): Flow<ServerSentEvent> = flow {
+    override fun stream(
+        selection: PoolSelection,
+        request: JsonObject,
+        extraHeaders: Map<String, String>
+    ): Flow<ServerSentEvent> = flow {
         val url = endpointUrl(selection, stream = true)
         val apiKey = resolveApiKey(selection)
         val bodyText: String = client.post(url) {
             headers {
-                selection.level.provider.defaultHeaders.forEach { (k, v) -> append(k, v) }
+                selection.provider.defaultHeaders.forEach { (k, v) -> append(k, v) }
+                extraHeaders.forEach { (k, v) -> append(k, v) }
                 append(HttpHeaders.Accept, "text/event-stream")
-                when (selection.level.provider.protocol) {
+                when (selection.provider.protocol) {
                     WireProtocol.ANTHROPIC_MESSAGES -> append("x-api-key", apiKey)
                     else -> append(HttpHeaders.Authorization, "Bearer $apiKey")
                 }
-                append("anthropic-version", "2023-06-01")
+                if ("anthropic-version" !in extraHeaders) append("anthropic-version", "2023-06-01")
             }
             contentType(ContentType.Application.Json)
             setBody(json.encodeToString(JsonObject.serializer(), request))
@@ -87,6 +100,34 @@ class RealUpstreamHttpClient private constructor(
             val event = parseSseBlock(block) ?: continue
             emit(event)
         }
+    }
+
+    override suspend fun countTokens(
+        selection: PoolSelection,
+        request: JsonObject,
+        extraHeaders: Map<String, String>
+    ): UpstreamResponse {
+        val apiKey = resolveApiKey(selection)
+        val response: HttpResponse = client.post("${selection.provider.baseUrl.trimEnd('/')}/v1/messages/count_tokens") {
+            headers {
+                selection.provider.defaultHeaders.forEach { (k, v) -> append(k, v) }
+                extraHeaders.forEach { (k, v) -> append(k, v) }
+                append(HttpHeaders.Accept, "application/json")
+                append("x-api-key", apiKey)
+                if ("anthropic-version" !in extraHeaders) append("anthropic-version", "2023-06-01")
+            }
+            contentType(ContentType.Application.Json)
+            setBody(json.encodeToString(JsonObject.serializer(), request))
+        }
+        val bodyText = response.bodyAsText()
+        val body = runCatching { json.parseToJsonElement(bodyText).jsonObject }
+            .getOrElse {
+                throw UpstreamHttpException(
+                    response.status.value,
+                    "Invalid JSON body from upstream: ${bodyText.take(200)}"
+                )
+            }
+        return UpstreamResponse(status = response.status.value, body = body)
     }
 
     private fun parseSseBlock(block: String): ServerSentEvent? {
@@ -119,8 +160,8 @@ class RealUpstreamHttpClient private constructor(
     }
 
     private fun endpointUrl(selection: PoolSelection, stream: Boolean): String {
-        val base = selection.level.provider.baseUrl.trimEnd('/')
-        val path = when (selection.level.provider.protocol) {
+        val base = selection.provider.baseUrl.trimEnd('/')
+        val path = when (selection.provider.protocol) {
             WireProtocol.ANTHROPIC_MESSAGES -> "/v1/messages"
             WireProtocol.OPENAI_CHAT -> "/v1/chat/completions"
             WireProtocol.OPENAI_RESPONSES -> "/v1/responses"
@@ -182,6 +223,84 @@ class RealUpstreamHttpClient private constructor(
         }
     }
 
+    suspend fun discoverModels(
+        baseUrl: String,
+        protocol: WireProtocol,
+        apiKey: String,
+        apiKeyEnv: String?,
+    ): DiscoverModelsResult {
+        val resolvedKey = apiKeyEnv?.let { System.getenv(it) } ?: apiKey
+        val base = baseUrl.trimEnd('/')
+        val startMark = io.ktor.util.date.getTimeMillis()
+        return try {
+            val response = client.get("$base/v1/models") {
+                headers {
+                    append(HttpHeaders.Accept, "application/json")
+                    when (protocol) {
+                        WireProtocol.ANTHROPIC_MESSAGES -> append("x-api-key", resolvedKey)
+                        else -> append(HttpHeaders.Authorization, "Bearer $resolvedKey")
+                    }
+                    if (protocol == WireProtocol.ANTHROPIC_MESSAGES) append("anthropic-version", "2023-06-01")
+                }
+            }
+            val latency = io.ktor.util.date.getTimeMillis() - startMark
+            val text = response.bodyAsText()
+            if (response.status.value !in 200..299) {
+                return DiscoverModelsResult(emptyList(), latency, "HTTP ${response.status.value}: ${text.take(160)}")
+            }
+            val jsonBody = json.parseToJsonElement(text).jsonObject
+            val modelItems = jsonBody["data"]?.jsonArray?.toList().orEmpty()
+            val models = modelItems.mapNotNull { el ->
+                runCatching { el.jsonObject["id"]?.jsonPrimitive?.content }.getOrNull()
+            }.distinct().sorted()
+            DiscoverModelsResult(models, latency, null)
+        } catch (e: Exception) {
+            DiscoverModelsResult(emptyList(), io.ktor.util.date.getTimeMillis() - startMark, e.message ?: e.toString())
+        }
+    }
+
+    override suspend fun proxyRaw(
+        selection: PoolSelection,
+        request: RawProxyRequest,
+        extraHeaders: Map<String, String>
+    ): RawProxyResponse {
+        val apiKey = resolveApiKey(selection)
+        val base = selection.provider.baseUrl.trimEnd('/')
+        val url = buildString {
+            append(base)
+            append(request.path)
+            if (request.queryString.isNotBlank()) append('?').append(request.queryString)
+        }
+        val response: HttpResponse = client.request(url) {
+            method = request.method
+            headers {
+                selection.provider.defaultHeaders.forEach { (k, v) -> append(k, v) }
+                request.headers.forEach { (k, values) -> values.forEach { append(k, it) } }
+                extraHeaders.forEach { (k, v) -> append(k, v) }
+                when (selection.provider.protocol) {
+                    WireProtocol.ANTHROPIC_MESSAGES -> append("x-api-key", apiKey)
+                    else -> append(HttpHeaders.Authorization, "Bearer $apiKey")
+                }
+                if (selection.provider.protocol == WireProtocol.ANTHROPIC_MESSAGES &&
+                    "anthropic-version" !in extraHeaders &&
+                    request.headers.keys.none { it.equals("anthropic-version", ignoreCase = true) }) {
+                    append("anthropic-version", "2023-06-01")
+                }
+            }
+            request.contentType?.let { contentType(ContentType.parse(it)) }
+            if (request.body.isNotEmpty()) setBody(request.body)
+        }
+        val headers: Map<String, List<String>> = response.headers.entries()
+            .groupBy({ it.key }, { it.value })
+            .mapValues { it.value.flatten() }
+        return RawProxyResponse(
+            status = response.status.value,
+            headers = headers,
+            contentType = response.headers[HttpHeaders.ContentType],
+            body = response.bodyAsBytes()
+        )
+    }
+
     companion object {
         fun create(): RealUpstreamHttpClient = RealUpstreamHttpClient(
             client = HttpClient(CIO) {
@@ -195,3 +314,9 @@ class RealUpstreamHttpClient private constructor(
         )
     }
 }
+
+data class DiscoverModelsResult(
+    val models: List<String>,
+    val latencyMs: Long,
+    val error: String?,
+)
