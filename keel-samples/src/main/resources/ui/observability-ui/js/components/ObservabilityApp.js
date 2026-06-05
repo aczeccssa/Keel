@@ -10,7 +10,7 @@ import './PanelOpenApi.js';
 import './PanelAiGateway.js';
 
 import { KeelElement } from './base/KeelElement.js';
-import { state } from '../state.js';
+import { setSidebarCollapsed, state } from '../state.js';
 import { TABS } from '../config.js';
 import { clamp } from '../utils.js';
 import { setActiveTab, hydrateHash } from '../events.js';
@@ -30,6 +30,10 @@ export class ObservabilityApp extends KeelElement {
                     display: grid;
                     grid-template-columns: 240px minmax(0, 1fr);
                     height: 100vh;
+                    transition: grid-template-columns 240ms var(--ease-smooth);
+                }
+                .app-shell.is-sidebar-collapsed {
+                    grid-template-columns: 76px minmax(0, 1fr);
                 }
                 .main-shell {
                     min-width: 0;
@@ -69,6 +73,9 @@ export class ObservabilityApp extends KeelElement {
                 }
                 @media (max-width: 980px) {
                     .app-shell {
+                        grid-template-columns: 1fr;
+                    }
+                    .app-shell.is-sidebar-collapsed {
                         grid-template-columns: 1fr;
                     }
                     .content {
@@ -119,6 +126,7 @@ export class ObservabilityApp extends KeelElement {
             'keel:navigate',
             'keel:open-refresh-overlay',
             'keel:close-refresh-overlay',
+            'keel:sidebar-toggle',
             'keel:stream-toggle',
             'keel:refresh-interval-change',
             'keel:node-select',
@@ -158,6 +166,11 @@ export class ObservabilityApp extends KeelElement {
         }
         if (type === 'keel:close-refresh-overlay') {
             state.refreshOverlayOpen = false;
+            this.renderChrome(state);
+            return;
+        }
+        if (type === 'keel:sidebar-toggle') {
+            setSidebarCollapsed(!state.sidebarCollapsed);
             this.renderChrome(state);
             return;
         }
@@ -286,6 +299,7 @@ export class ObservabilityApp extends KeelElement {
         this.refs.topbar.style.display = '';
         this.refs.content.style.padding = '';
         this.refs.content.style.overflow = '';
+        this.refs.appShell.classList.toggle('is-sidebar-collapsed', Boolean(appState.sidebarCollapsed));
 
         this.refs.sidebar.render(appState);
         this.refs.topbar.render(appState);

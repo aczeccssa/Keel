@@ -24,8 +24,8 @@
     /* The single accent — aviation / hazard red */
     --navy: #0b0b0b;          /* "navy" repurposed: primary action = carbon */
     --navy-2: #2a2a2a;
-    --teal: #e61919;          /* "teal" repurposed: the one accent = hazard red */
-    --teal-soft: #fbe0e0;
+    --teal: #0d9488;          /* "teal" — primary interactive accent (real teal) */
+    --teal-soft: #e0f5f1;
     --amber: #b45309;
     --amber-soft: #f7e6cf;
     --red: #e61919;
@@ -92,7 +92,38 @@ ai-proxy-app,
 c-end-playground { display: block; min-height: 100vh; }
 
 /* Global selection + scrollbar in keeping with the system */
-::selection { background: #e61919; color: #f4f4f0; }
+::selection { background: #0d9488; color: #f4f4f0; }
 ::-webkit-scrollbar { width: 12px; height: 12px; }
 ::-webkit-scrollbar-track { background: var(--bg); }
 ::-webkit-scrollbar-thumb { background: #0b0b0b; border: 3px solid var(--bg); }
+
+/* ── Dark mode ───────────────────────────────────────────────────────────── */
+[data-theme="dark"] {
+    --bg: #111111;
+    --paper: #1a1a1a;
+    --panel: #1a1a1a;
+    --panel-strong: #222222;
+    --ink: #e8e6e1;
+    --muted: #8a8580;
+    --line: #333333;
+    --line-strong: #444444;
+    --teal: #14b8a6;
+    --teal-soft: #0d2e2a;
+    --red-soft: #2a1215;
+    --green-soft: #0d2818;
+    --amber-soft: #2a1f0d;
+    --color-surface-container-lowest: #0e0e0e;
+    --color-surface-container-low: #161616;
+    --color-surface-container-high: #242424;
+    --shadow-sm: 3px 3px 0 0 #000;
+    --shadow-md: 5px 5px 0 0 #000;
+    --shadow-lg: 8px 8px 0 0 #000;
+}
+
+[data-theme="dark"] body {
+    background-image:
+        repeating-linear-gradient(0deg, transparent, transparent 39px, rgba(255,255,255,0.02) 39px, rgba(255,255,255,0.02) 40px),
+        repeating-linear-gradient(90deg, transparent, transparent 39px, rgba(255,255,255,0.02) 39px, rgba(255,255,255,0.02) 40px);
+}
+
+[data-theme="dark"] ::-webkit-scrollbar-thumb { background: #444; border-color: #111; }

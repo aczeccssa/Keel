@@ -1,6 +1,16 @@
 import { LOG_LIMIT } from './config.js';
 
+const SIDEBAR_COLLAPSED_STORAGE_KEY = 'keel.observability.sidebarCollapsed';
+
 let appShell = null;
+
+function readSidebarCollapsed() {
+    try {
+        return window.localStorage.getItem(SIDEBAR_COLLAPSED_STORAGE_KEY) === 'true';
+    } catch (_) {
+        return false;
+    }
+}
 
 function initialTabConnectionStates() {
     return {
@@ -15,6 +25,7 @@ function initialTabConnectionStates() {
 
 export const state = {
     activeTab: 'topology',
+    sidebarCollapsed: readSidebarCollapsed(),
     topology: [],
     traces: [],
     traceDashboard: null,
@@ -71,6 +82,15 @@ export const state = {
     refreshTimers: {},
     eventSource: null
 };
+
+export function setSidebarCollapsed(collapsed) {
+    state.sidebarCollapsed = Boolean(collapsed);
+    try {
+        window.localStorage.setItem(SIDEBAR_COLLAPSED_STORAGE_KEY, String(state.sidebarCollapsed));
+    } catch (_) {
+        // localStorage can be unavailable in constrained browser contexts.
+    }
+}
 
 export function setAppShell(element) {
     appShell = element;

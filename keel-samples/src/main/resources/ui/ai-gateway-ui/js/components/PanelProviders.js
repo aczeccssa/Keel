@@ -104,17 +104,18 @@ export class PanelProviders extends KeelElement {
             <div class="panel-layout">
                 <div class="toolbar">
                     <keel-hero data-ref="hero"></keel-hero>
-                    <button class="btn-primary" data-ref="addBtn">Add Provider</button>
+                    <button class="btn-primary" data-ref="addBtn">Add Channel</button>
                 </div>
                 <div data-ref="grid"></div>
             </div>
 
             <div class="overlay" data-ref="overlay">
                 <div class="modal" data-ref="modal">
-                    <h3 data-ref="modalTitle">Add Provider</h3>
+                    <h3 data-ref="modalTitle">Add Channel</h3>
                     <div class="test-banner" data-ref="testBanner"></div>
                     <div class="form-grid">
-                        <div class="field"><label>Name</label><input data-ref="fName" placeholder="My Anthropic pool"></div>
+                        <div class="field"><label>Name</label><input data-ref="fName" placeholder="My Anthropic backup"></div>
+                        <div class="field"><label>Group</label><select data-ref="fGroup"></select></div>
                         <div class="field"><label>Protocol</label>
                             <select data-ref="fProtocol">${PROTOCOLS.map(p => `<option value="${p.value}">${p.label}</option>`).join('')}</select>
                         </div>
@@ -140,8 +141,9 @@ export class PanelProviders extends KeelElement {
     }
 
     afterMount() {
-        this.refs.hero.render({ label: 'Provider Management', title: 'Providers', metaHtml: '' });
+        this.refs.hero.render({ label: 'Channel Management', title: 'Channels', metaHtml: '' });
         this._editingId = null;
+        this._groups = [];
         this.refs.addBtn.addEventListener('click', () => this._openModal(null));
         this.refs.cancelBtn.addEventListener('click', () => this._closeModal());
         this.refs.overlay.addEventListener('click', (e) => { if (e.target === this.refs.overlay) this._closeModal(); });
@@ -151,22 +153,26 @@ export class PanelProviders extends KeelElement {
 
     async refresh() {
         try {
-            const data = await requestJson(`${API.airelay}/admin/channels`);
+            const [data, groups] = await Promise.all([
+                requestJson(`${API.airelay}/admin/channels`),
+                requestJson(`${API.airelay}/admin/groups`).catch(() => ({ groups: [] })),
+            ]);
+            this._groups = groups.groups || [];
             this._render(data.channels || []);
         } catch (e) {
-            this.refs.grid.innerHTML = `<div class="empty">Failed to load providers: ${escapeHtml(e.message)}</div>`;
+            this.refs.grid.innerHTML = `<div class="empty">Failed to load channels: ${escapeHtml(e.message)}</div>`;
         }
     }
 
     _render(channels) {
         this.refs.hero.render({
-            label: 'Provider Management',
-            title: 'Providers',
+            label: 'Channel Management',
+            title: 'Channels',
             metaHtml: `<span style="font-size:11px;font-weight:700;color:var(--muted);">${channels.length} channel${channels.length !== 1 ? 's' : ''}</span>`
         });
 
         if (channels.length === 0) {
-            this.refs.grid.innerHTML = `<div class="section-card"><div class="empty">No providers configured yet.<br>Click <strong>Add Provider</strong> to point the gateway at an upstream (e.g. a local Anthropic endpoint).</div></div>`;
+            this.refs.grid.innerHTML = `<div class="section-card"><div class="empty">No channels configured yet.<br>Click <strong>Add Channel</strong> to point the gateway at an upstream (e.g. a local Anthropic endpoint).</div></div>`;
             return;
         }
 
@@ -182,6 +188,9 @@ export class PanelProviders extends KeelElement {
         const latency = c.lastTestLatencyMs != null
             ? `Last test: ${c.lastTestError ? `<span style="color:var(--red)">failed</span>` : `${c.lastTestLatencyMs}ms OK`}`
             : 'Not tested yet';
+        const group = escapeHtml(c.groupId || 'default');
+        const priority = c.priority ?? 0;
+        const weight = c.weight ?? 100;
         return `
             <div class="channel-card" data-card="${c.channelId}">
                 <div class="cc-head">
@@ -190,7 +199,7 @@ export class PanelProviders extends KeelElement {
                         <span class="chip" style="background:${s.bg};color:${s.color};">${s.label}</span>
                     </div>
                     <div class="cc-meta">${escapeHtml(c.baseUrl)}</div>
-                    <span class="cc-proto">${escapeHtml(c.protocol)}</span>
+                    <span class="cc-proto">${escapeHtml(c.protocol)} · GROUP ${group} · P${priority} · W${weight}</span>
                 </div>
                 <div class="cc-body">
                     <div class="cc-models">${models}</div>
@@ -222,8 +231,12 @@ export class PanelProviders extends KeelElement {
 
     _openModal(channel) {
         this._editingId = channel ? channel.channelId : null;
-        this.refs.modalTitle.textContent = channel ? 'Edit Provider' : 'Add Provider';
+        this.refs.modalTitle.textContent = channel ? 'Edit Channel' : 'Add Channel';
         this.refs.testBanner.className = 'test-banner';
+        const groupOptions = (this._groups && this._groups.length ? this._groups : [{ groupId: 'default', name: 'Default' }])
+            .map(g => `<option value="${escapeHtml(g.groupId)}">${escapeHtml(g.name || g.groupId)}</option>`).join('');
+        this.refs.fGroup.innerHTML = groupOptions;
+        this.refs.fGroup.value = channel?.groupId || 'default';
         this.refs.fName.value = channel?.name || '';
         this.refs.fProtocol.value = channel?.protocol || 'ANTHROPIC_MESSAGES';
         this.refs.fBaseUrl.value = channel?.baseUrl || '';
@@ -261,6 +274,7 @@ export class PanelProviders extends KeelElement {
             weight: parseInt(this.refs.fWeight.value) || 100,
             maxConcurrency: parseInt(this.refs.fMaxConc.value) || 10,
             timeoutMs: 60000,
+            groupId: this.refs.fGroup.value || 'default',
             models,
         };
     }
