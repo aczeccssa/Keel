@@ -10,6 +10,8 @@ import com.keel.samples.aigateway.airelay.protocol.IrResponse
 import com.keel.samples.aigateway.airelay.protocol.IrStreamEvent
 import com.keel.samples.aigateway.airelay.protocol.IrTool
 import com.keel.samples.aigateway.airelay.protocol.ProtocolTranscoder
+import com.keel.samples.aigateway.airelay.protocol.openai.responses.ResponsesStreamObserver
+import com.keel.contract.ai.RequestOutcome
 import com.keel.contract.ai.TokenUsage
 import io.ktor.sse.ServerSentEvent
 import kotlinx.coroutines.flow.asFlow
@@ -63,5 +65,52 @@ class TranscodingBugfixTest {
         assertEquals(1, irEvents.size)
         val error = irEvents.single() as IrStreamEvent.Error
         assertEquals("Invalid request body", error.message)
+    }
+
+    @Test
+    fun responsesStreamObserverDetectsCompletedStream() {
+        val observer = ResponsesStreamObserver()
+        observer.observe(ServerSentEvent(
+            data = """{"type":"response.created","response":{"id":"resp_1","model":"gpt-5.4","status":"in_progress"}}""",
+            event = "response.created"
+        ))
+        observer.observe(ServerSentEvent(
+            data = """{"type":"response.completed","response":{"id":"resp_1","model":"gpt-5.4","status":"completed","usage":{"input_tokens":10,"output_tokens":20}}}""",
+            event = "response.completed"
+        ))
+        val outcome = observer.outcome(transportStatus = 200)
+        assertEquals(RequestOutcome.SUCCESS, outcome.outcome)
+        assertEquals(200, outcome.semanticStatus)
+        assertEquals("resp_1", outcome.requestId)
+        assertEquals("gpt-5.4", outcome.model)
+        assertEquals(10, outcome.usage.promptTokens)
+        assertEquals(20, outcome.usage.completionTokens)
+    }
+
+    @Test
+    fun responsesStreamObserverDetectsErrorStream() {
+        val observer = ResponsesStreamObserver()
+        observer.observe(ServerSentEvent(
+            data = """{"type":"error","code":"invalid_request_error","message":"bad input"}""",
+            event = "error"
+        ))
+        val outcome = observer.outcome(transportStatus = 200)
+        assertEquals(RequestOutcome.ERROR, outcome.outcome)
+        assertEquals(500, outcome.semanticStatus)
+        assertEquals("invalid_request_error", outcome.errorType)
+        assertEquals("bad input", outcome.errorMessage)
+    }
+
+    @Test
+    fun responsesStreamObserverDetectsFailedResponse() {
+        val observer = ResponsesStreamObserver()
+        observer.observe(ServerSentEvent(
+            data = """{"type":"response.failed","response":{"id":"resp_2","status":"failed","error":{"type":"server_error","message":"internal error"}}}""",
+            event = "response.failed"
+        ))
+        val outcome = observer.outcome(transportStatus = 200)
+        assertEquals(RequestOutcome.ERROR, outcome.outcome)
+        assertEquals(500, outcome.semanticStatus)
+        assertEquals("server_error", outcome.errorType)
     }
 }

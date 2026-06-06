@@ -27,6 +27,8 @@ import com.keel.samples.aigateway.airelay.protocol.IrStreamEvent
 import com.keel.samples.aigateway.airelay.protocol.ProtocolTranscoder
 import com.keel.samples.aigateway.airelay.protocol.WireProtocol
 import com.keel.samples.aigateway.airelay.protocol.anthropic.AnthropicStreamObserver
+import com.keel.samples.aigateway.airelay.protocol.anthropic.AnthropicStreamOutcome
+import com.keel.samples.aigateway.airelay.protocol.openai.responses.ResponsesStreamObserver
 import com.keel.samples.aigateway.airelay.protocol.obj
 import com.keel.samples.aigateway.airelay.protocol.string
 import com.keel.samples.aigateway.airelay.protocol.textOf
@@ -245,9 +247,13 @@ class AIRelayService(
         val upstreamRequest = buildUpstreamRequest(rawRequest, clientProtocol, selection.provider.protocol, ir.copy(model = selection.upstreamModel, stream = true))
         selection.keyState.currentConcurrency.incrementAndGet()
         val upstreamStream = upstreamClient.stream(selection, upstreamRequest, upstreamHeaders)
-        val observer = if (selection.provider.protocol == WireProtocol.ANTHROPIC_MESSAGES) AnthropicStreamObserver() else null
+        val anthropicObserver = if (selection.provider.protocol == WireProtocol.ANTHROPIC_MESSAGES) AnthropicStreamObserver() else null
+        val responsesObserver = if (selection.provider.protocol == WireProtocol.OPENAI_RESPONSES) ResponsesStreamObserver() else null
         val rawEvents = upstreamStream.toList()
-        rawEvents.forEach { observer?.observe(it) }
+        rawEvents.forEach { event ->
+            anthropicObserver?.observe(event)
+            responsesObserver?.observe(event)
+        }
         var lastUsage = TokenUsage()
         val outputText = StringBuilder()
         val decodedEvents = transcoder.decodeStream(selection.provider.protocol, rawEvents.asFlow()).map { event ->
@@ -268,7 +274,20 @@ class AIRelayService(
                 val clientEvents = transcoder.encodeStream(clientProtocol, decodedEvents.asFlow())
                 renderSse(clientEvents.toList())
             }
-            val streamOutcome = observer?.outcome(transportStatus = 200)
+            val streamOutcome = anthropicObserver?.outcome(transportStatus = 200)
+                ?: responsesObserver?.outcome(transportStatus = 200)?.let { ro ->
+                    AnthropicStreamOutcome(
+                        transportStatus = ro.transportStatus,
+                        semanticStatus = ro.semanticStatus,
+                        outcome = ro.outcome,
+                        errorType = ro.errorType,
+                        errorMessage = ro.errorMessage,
+                        usage = ro.usage,
+                        usageSource = ro.usageSource,
+                        requestId = ro.requestId,
+                        model = ro.model,
+                    )
+                }
             val isSemanticError = streamOutcome?.outcome == RequestOutcome.ERROR
             val effectiveUsage = if (streamOutcome != null && isSemanticError) {
                 if (streamOutcome.usageSource != com.keel.contract.ai.UsageSource.NONE) streamOutcome.usage else TokenUsage()
