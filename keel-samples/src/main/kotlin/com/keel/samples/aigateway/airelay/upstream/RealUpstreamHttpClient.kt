@@ -61,7 +61,9 @@ class RealUpstreamHttpClient private constructor(
                     WireProtocol.ANTHROPIC_MESSAGES -> append("x-api-key", apiKey)
                     else -> append(HttpHeaders.Authorization, "Bearer $apiKey")
                 }
-                if ("anthropic-version" !in extraHeaders) append("anthropic-version", "2023-06-01")
+                if (selection.provider.protocol == WireProtocol.ANTHROPIC_MESSAGES) {
+                    if ("anthropic-version" !in extraHeaders) append("anthropic-version", "2023-06-01")
+                }
             }
             contentType(ContentType.Application.Json)
             setBody(json.encodeToString(JsonObject.serializer(), request))
@@ -237,7 +239,9 @@ class RealUpstreamHttpClient private constructor(
                 extraHeaders.forEach { (k, v) -> append(k, v) }
                 append(HttpHeaders.Accept, "application/json")
                 append("x-api-key", apiKey)
-                if ("anthropic-version" !in extraHeaders) append("anthropic-version", "2023-06-01")
+                if (selection.provider.protocol == WireProtocol.ANTHROPIC_MESSAGES) {
+                    if ("anthropic-version" !in extraHeaders) append("anthropic-version", "2023-06-01")
+                }
             }
             contentType(ContentType.Application.Json)
             setBody(json.encodeToString(JsonObject.serializer(), request))
