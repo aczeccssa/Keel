@@ -32,6 +32,7 @@ class LiveOpenAIResponsesTranscodingTest {
     fun anthropicRequestTranscodesThroughRoutinOpenAIResponsesUpstream() = runBlocking {
         val apiKey = System.getenv("ROUTIN_AI_PLAN_API_KEY")
         assumeTrue(!apiKey.isNullOrBlank(), "Set ROUTIN_AI_PLAN_API_KEY to run routin.ai live Responses transcoding test")
+        val upstreamModel = System.getenv("ROUTIN_AI_PLAN_MODEL")?.takeIf { it.isNotBlank() } ?: "gpt-5.3"
 
         val transcoder = ProtocolTranscoder(
             listOf(
@@ -41,7 +42,7 @@ class LiveOpenAIResponsesTranscodingTest {
             )
         )
         val upstream = RealUpstreamHttpClient.create()
-        val selection = PoolChainManager(liveChain(apiKey)).selectCandidates("default", "claude-opus-4-8").single()
+        val selection = PoolChainManager(liveChain(apiKey, upstreamModel)).selectCandidates("default", "claude-opus-4-8").single()
 
         val anthropicRequest = buildJsonObject {
             put("model", JsonPrimitive("claude-opus-4-8"))
@@ -61,7 +62,7 @@ class LiveOpenAIResponsesTranscodingTest {
             ir.copy(model = selection.upstreamModel, stream = false)
         )
 
-        assertEquals("gpt-5.3", upstreamRequest["model"]!!.jsonPrimitive.content)
+        assertEquals(upstreamModel, upstreamRequest["model"]!!.jsonPrimitive.content)
         assertNotNull(upstreamRequest["input"], "Anthropic messages must encode to Responses input")
         assertNotNull(upstreamRequest["instructions"], "Anthropic system must encode to Responses instructions")
         assertEquals(JsonPrimitive(false), upstreamRequest["store"], "Responses requests must disable storage")
@@ -78,7 +79,7 @@ class LiveOpenAIResponsesTranscodingTest {
         assertTrue(content.isNotEmpty(), "Anthropic response content must be non-empty")
     }
 
-    private fun liveChain(apiKey: String): List<PoolChainConfig> = listOf(
+    private fun liveChain(apiKey: String, upstreamModel: String): List<PoolChainConfig> = listOf(
         PoolChainConfig(
             chainId = "default",
             modelAliases = listOf("claude-opus-4-8"),
@@ -97,7 +98,7 @@ class LiveOpenAIResponsesTranscodingTest {
                             keyId = "routin-plan-key",
                             apiKey = apiKey,
                             supportedModels = listOf("claude-opus-4-8"),
-                            modelMap = mapOf("claude-opus-4-8" to "gpt-5.3"),
+                            modelMap = mapOf("claude-opus-4-8" to upstreamModel),
                             maxConcurrency = 1,
                         )
                     )
