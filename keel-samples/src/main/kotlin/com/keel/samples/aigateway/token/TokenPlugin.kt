@@ -133,7 +133,8 @@ class TokenPlugin : StandardKeelPlugin {
                 doc = OpenApiDoc(summary = "List recent usage records with full token + cost breakdown", tags = listOf("ai-gateway", "token", "admin"), errorStatuses = setOf(401, 403))
             ) {
                 val limit = queryParameters["limit"]?.firstOrNull()?.toIntOrNull() ?: 50
-                PluginResult(body = repository.recentRecords(limit))
+                val status = queryParameters["status"]?.firstOrNull()?.toIntOrNull()
+                PluginResult(body = repository.recentRecords(limit, status))
             }
         }
     }

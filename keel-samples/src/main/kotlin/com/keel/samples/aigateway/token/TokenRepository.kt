@@ -340,10 +340,10 @@ class TokenRepository(
         )
     }
 
-    fun recentRecords(limit: Int): UsageListResponse = database.transaction {
+    fun recentRecords(limit: Int, status: Int? = null): UsageListResponse = database.transaction {
         val n = limit.coerceIn(1, 200)
-        val rows = UsageRecordsTable.selectAll()
-            .where { UsageRecordsTable.deletedAt.isNull() }
+        val base = UsageRecordsTable.selectAll().where { UsageRecordsTable.deletedAt.isNull() }
+        val rows = (if (status != null) base.andWhere { UsageRecordsTable.status eq status } else base)
             .orderBy(UsageRecordsTable.createdAt to SortOrder.DESC)
             .limit(n)
             .map { it.toUsageRecordView() }
