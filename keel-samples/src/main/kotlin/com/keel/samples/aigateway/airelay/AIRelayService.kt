@@ -127,8 +127,10 @@ class AIRelayService(
                 handleBlockingRelay(context, clientProtocol, rawRequest, ir, keyContext, started, extraHeaders)
             }
         } catch (e: PluginApiException) {
+            System.err.println("airelay_error model=${ir.model} client=${clientProtocol} upstream=none status=${e.status} error=api_error message=${e.message?.take(180)}")
             protocolError(clientProtocol, e.status, "api_error", e.message)
         } catch (e: Exception) {
+            System.err.println("airelay_error model=${ir.model} client=${clientProtocol} upstream=none status=500 error=${e.javaClass.simpleName?.take(64)} message=${(e.message ?: "").take(180)}")
             protocolError(clientProtocol, 500, "api_error", e.message ?: "Internal error")
         }
     }
@@ -222,6 +224,7 @@ class AIRelayService(
                 headers["X-Request-Id"] = listOf(upstreamIr.id)
                 return RelayResult(status = upstream.status, headers = headers, body = responseBody)
             } catch (error: UpstreamHttpException) {
+                System.err.println("airelay_error model=${ir.model} client=${clientProtocol} upstream=${selection.provider.protocol} status=${error.status} error=upstream_${error.status} message=${(error.message ?: "").take(180)}")
                 poolChainManager.markFailure(selection, error.status, error.message, error.retryAfterSeconds)
                 lastError = error
                 failoverCount += 1
@@ -371,9 +374,11 @@ class AIRelayService(
             headers["Content-Type"] = listOf("text/event-stream")
             RelayResult(status = semanticStatus, headers = headers, body = collected)
         } catch (error: UpstreamHttpException) {
+            System.err.println("airelay_error model=${ir.model} client=${clientProtocol} upstream=${selection.provider.protocol} status=${error.status} error=upstream_${error.status} message=${(error.message ?: "").take(180)}")
             poolChainManager.markFailure(selection, error.status, error.message, error.retryAfterSeconds)
             throw error
         } catch (error: Throwable) {
+            System.err.println("airelay_error model=${ir.model} client=${clientProtocol} upstream=${selection.provider.protocol} status=500 error=${error.javaClass.simpleName?.take(64)} message=${(error.message ?: "").take(180)}")
             poolChainManager.markFailure(selection, null, error.message)
             throw error
         } finally {
