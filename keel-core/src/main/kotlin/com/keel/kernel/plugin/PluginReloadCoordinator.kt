@@ -35,7 +35,7 @@ internal class PluginReloadCoordinator(
         source: PluginDevelopmentSource,
         classpathModulePaths: Set<String>
     ): LoadResult {
-        val classLoader = buildSourceClassLoader(classpathModulePaths, source)
+        val classLoader = buildSourceClassLoader(classpathModulePaths)
         val plugin = runCatching {
             val clazz = classLoader.loadClass(source.implementationClassName)
             require(KeelPlugin::class.java.isAssignableFrom(clazz)) {
@@ -153,10 +153,7 @@ internal class PluginReloadCoordinator(
         }
     }
 
-    private fun buildSourceClassLoader(
-        classpathModulePaths: Set<String>,
-        source: PluginDevelopmentSource
-    ): URLClassLoader {
+    private fun buildSourceClassLoader(classpathModulePaths: Set<String>): URLClassLoader {
         val urls = linkedSetOf<java.net.URL>()
         classpathModulePaths.forEach { modulePath ->
             val moduleDir = File(modulePath)

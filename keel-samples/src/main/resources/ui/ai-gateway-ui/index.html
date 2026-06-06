@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta content="width=device-width, initial-scale=1.0" name="viewport">
+    <title>Keel AI Relay - Console</title>
+    <link rel="shortcut icon" href="/favicon.svg" type="image/x-icon">
+    <link href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Archivo:wght@400;600;700;900&family=JetBrains+Mono:wght@400;500;700;800&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght@400&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/api/plugins/airelay/ui/css/style.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
+    <script>
+        // Flicker-free theme: stored pref wins; otherwise follow OS preference.
+        (function(){
+            var stored = localStorage.getItem('keel-theme-pref');
+            var dark;
+            if (stored === 'dark') dark = true;
+            else if (stored === 'light') dark = false;
+            else dark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+            if (dark) document.documentElement.setAttribute('data-theme', 'dark');
+        })();
+    </script>
+    <style>
+        ai-proxy-app { display:block; min-height:100vh; }
+    </style>
+</head>
+<body>
+    <ai-proxy-app></ai-proxy-app>
+    <script type="module" src="/api/plugins/airelay/ui/js/app.js"></script>
+</body>
+</html>

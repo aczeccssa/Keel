@@ -44,15 +44,21 @@ object KeelConstants {
     /** Production environment value. */
     const val ENV_PRODUCTION = "production"
 
-    /** System property name for plugin hot reload. */
-    const val HOT_RELOAD_SYSTEM_PROPERTY = "keel.hotReload"
+    /** System property name for http engine. */
+    const val HTTP_ENGINE_SYSTEM_PROPERTY = "keel.http.engine"
 
-    /** System property name for config hot reload. */
-    const val CONFIG_HOT_RELOAD_SYSTEM_PROPERTY = "keel.configHotReload"
+    /** Environment variable name for http engine. */
+    const val HTTP_ENGINE_ENV_VARIABLE = "HTTP_ENGINE"
+
+    /** Environment variable default for http engine. */
+    const val HTTP_ENGINE_ENV_DEFAULT = "NETTY"
 
     const val PORT_SYSTEM_PROPERTY = "keel.port"
 
     const val PORT_ENV_VARIABLE = "KEEL_PORT"
+
+    /** Standard preview/platform port environment variable. */
+    const val STANDARD_PORT_ENV_VARIABLE = "PORT"
 
     const val DEFAULT_SERVER_PORT = 8080
 

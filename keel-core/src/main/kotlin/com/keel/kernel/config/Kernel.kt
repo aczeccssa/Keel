@@ -112,14 +112,37 @@ class Kernel(
 
     fun configureApplication(app: Application) {
         app.intercept(ApplicationCallPipeline.Plugins) {
+            // SSE / streaming requests are long-lived (they only complete when the client
+            // disconnects). Wrapping them in a span whose `finally { span.end() }` runs after
+            // `proceed()` returns would keep the span — and, worse, a thread-local OpenTelemetry
+            // Scope — open for the entire lifetime of the stream. With several persistent SSE
+            // connections this pins resources and starves new requests. Such paths are traced by
+            // their own per-event spans instead, so we skip the wrapping span here.
+            val acceptsEventStream = call.request.headers["Accept"]
+                ?.contains("text/event-stream", ignoreCase = true) == true
+            if (acceptsEventStream) {
+                if (gatewayInterceptor.intercept(call)) {
+                    finish()
+                    return@intercept
+                }
+                proceed()
+                return@intercept
+            }
+
             val span = observabilityTracing.tracer.spanBuilder("http.request")
                 .setAttribute("http.method", call.request.httpMethod.value)
                 .setAttribute("http.route", call.request.path())
                 .setAttribute("network.protocol.name", call.request.local.scheme.uppercase())
                 .setAttribute("keel.jvm", "kernel")
                 .startSpan()
-            val scope = span.makeCurrent()
-            call.attributes.put(ObservabilityTracing.TRACE_CONTEXT_KEY, Context.current())
+            // Capture the trace context into call attributes, then close the thread-local Scope
+            // IMMEDIATELY. `proceed()` is a suspend point that can resume on a different thread;
+            // holding an OpenTelemetry Scope across it is a documented anti-pattern that corrupts
+            // the thread-local context stack. Downstream code reads the context from call
+            // attributes (TRACE_CONTEXT_KEY) rather than from the current thread.
+            span.makeCurrent().use {
+                call.attributes.put(ObservabilityTracing.TRACE_CONTEXT_KEY, Context.current())
+            }
             try {
                 if (gatewayInterceptor.intercept(call)) {
                     span.setStatus(io.opentelemetry.api.trace.StatusCode.ERROR)
@@ -129,7 +152,6 @@ class Kernel(
                 proceed()
             } finally {
                 call.response.status()?.value?.let { span.setAttribute("http.status_code", it.toLong()) }
-                scope.close()
                 span.end()
             }
         }

@@ -43,7 +43,7 @@ internal object BannerPrinter {
         val stream = contextLoader?.getResourceAsStream(BANNER_RESOURCE)
             ?: BannerPrinter::class.java.classLoader?.getResourceAsStream(BANNER_RESOURCE)
             ?: return null
-        return stream.bufferedReader().use { it.readText() }
+        return stream.bufferedReader(Charsets.UTF_8).use { it.readText() }
     }
 
     private fun versionOf(clazz: Class<*>): String {

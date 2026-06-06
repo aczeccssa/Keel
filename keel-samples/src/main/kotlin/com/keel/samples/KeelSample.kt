@@ -1,6 +1,11 @@
 package com.keel.samples
 
 import com.keel.kernel.config.runKeel
+import com.keel.samples.aigateway.account.AccountPlugin
+import com.keel.samples.aigateway.airelay.AIRelayPlugin
+import com.keel.samples.aigateway.riskcontrol.RiskControlPlugin
+import com.keel.samples.aigateway.token.TokenPlugin
+import com.keel.samples.aigateway.customerportal.CustomerPortalPlugin
 import com.keel.samples.authsample.AuthSamplePlugin
 import com.keel.samples.observability.ObservabilityPlugin
 import com.keel.samples.ordersample.OrderSamplePlugin
@@ -46,6 +51,11 @@ import io.ktor.server.plugins.cors.routing.CORS
  */
 fun main() = runKeel {
     // Mount Plugins
+    plugin(AccountPlugin())
+    plugin(TokenPlugin())
+    plugin(RiskControlPlugin())
+    plugin(AIRelayPlugin())
+    plugin(CustomerPortalPlugin())
     plugin(AuthSamplePlugin())
     plugin(ProductSamplePlugin())
     plugin(OrderSamplePlugin())
@@ -54,8 +64,11 @@ fun main() = runKeel {
     // Disable hot reload
     enablePluginHotReload(false)
 
-    // Global ktor plugin: CORS
+    // Global ktor plugin: CORS + engine selection.
     server {
+        // @Mark: Specific network engin to CIO for better handling of long-lived connections (e.g. SSE in the ObservabilityPlugin dashboard).
+        // engine = KeelEngine.CIO
+
         globalKtorPlugin {
             install(CORS) {
                 anyHost()
@@ -63,8 +76,21 @@ fun main() = runKeel {
         }
     }
 
-    // Global: Register global static resources
+    // Global: No root-level static resources.
+    //
+    // A wildcard `staticResources("/", ...)` or even `staticResources("/static", ...)` installs a
+    // TailcardSelector child on the routing root. Ktor's default static fallback is a no-op, so
+    // any GET that doesn't match an earlier route is silently consumed — no response body, no
+    // handled flag — and the connection hangs, queueing subsequent /api/* traffic.
+    //
+    // Each plugin mounts its own static bundle at its scoped path (e.g.
+    // /api/plugins/observability/ui/, /api/plugins/airelay/ui/). The root "/" and "/index"
+    // paths are handled by explicit redirect handlers below.
     routing {
-        staticResources("/", "static")
+        staticResources(
+            remotePath = "/",
+            basePackage = "ui/observability-ui",
+            index = "index.html"
+        )
     }
 }

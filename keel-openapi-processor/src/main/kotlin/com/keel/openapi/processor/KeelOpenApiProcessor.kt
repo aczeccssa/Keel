@@ -104,7 +104,7 @@ class KeelOpenApiProcessor(
         val description = annotation.arguments.firstOrNull { it.name?.asString() == "description" }?.value as? String ?: ""
         val version = annotation.arguments.firstOrNull { it.name?.asString() == "version" }?.value as? String ?: "1.0.0"
 
-        val typeName = pluginId.replaceFirstChar { it.uppercase() } + "OpenApiFragment"
+        val typeName = sanitizeClassName(pluginId) + "OpenApiFragment"
         val packageName = "com.keel.openapi.generated"
         val fqn = "$packageName.$typeName"
 
@@ -247,6 +247,27 @@ class KeelOpenApiProcessor(
             }
         }.joinToString("")
         return "${sanitized}_${suffix}"
+    }
+
+    /**
+     * Convert a plugin id like `customer-portal` into a valid Kotlin class-name prefix
+     * such as `CustomerPortal`. Hyphens, dots, and other non-identifier characters split
+     * the id into PascalCased segments. Leading non-letters are dropped.
+     */
+    private fun sanitizeClassName(pluginId: String): String {
+        val builder = StringBuilder()
+        var capNext = true
+        for (ch in pluginId) {
+            when {
+                ch.isLetterOrDigit() -> {
+                    if (builder.isEmpty() && !ch.isLetter()) continue
+                    if (capNext) builder.append(ch.uppercaseChar()) else builder.append(ch)
+                    capNext = false
+                }
+                else -> capNext = true
+            }
+        }
+        return if (builder.isEmpty()) "Plugin" else builder.toString()
     }
 
     private data class GeneratedRouteMetadataDescriptor(

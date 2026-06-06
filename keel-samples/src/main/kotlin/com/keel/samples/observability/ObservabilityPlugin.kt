@@ -10,6 +10,9 @@ import com.keel.kernel.plugin.PluginRouteDefinition
 import com.keel.kernel.plugin.PluginRuntimeContext
 import com.keel.kernel.plugin.PluginSseSession
 import com.keel.kernel.plugin.StandardKeelPlugin
+import com.keel.contract.ai.PoolChainSnapshotProvider
+import com.keel.contract.ai.RateLimitSnapshotProvider
+import com.keel.contract.ai.UsageRecorder
 import com.keel.openapi.annotations.KeelApiPlugin
 import com.keel.openapi.runtime.OpenApiAggregator
 import com.keel.openapi.runtime.OpenApiDoc
@@ -37,6 +40,7 @@ import kotlin.time.Duration.Companion.minutes
 class ObservabilityPlugin : StandardKeelPlugin {
     private val logger = KeelLoggerService.getLogger("ObservabilityPlugin")
     private lateinit var observability: KeelObservability
+    private lateinit var kernelKoin: org.koin.core.Koin
 
     override val descriptor: PluginDescriptor = PluginDescriptor(
         pluginId = "observability",
@@ -46,12 +50,19 @@ class ObservabilityPlugin : StandardKeelPlugin {
 
     override suspend fun onInit(context: PluginInitContext) {
         observability = context.kernelKoin.get()
+        kernelKoin = context.kernelKoin
         observability.registerPanel(
             id = "observability-topology",
             title = "Observability Topology",
             dataEndpoint = "/api/plugins/observability/topology"
         )
+        observability.registerPanel(
+            id = "ai-gateway",
+            title = "AI Gateway",
+            dataEndpoint = "/api/plugins/observability/ai-gateway"
+        )
         logger.info("Initialized observability plugin")
+
     }
 
     override fun endpoints(): List<PluginRouteDefinition> = pluginEndpoints(descriptor.pluginId) {
@@ -138,12 +149,11 @@ class ObservabilityPlugin : StandardKeelPlugin {
             }
         }
 
-        staticResources(
-            path = "/ui",
-            basePackage = "static",
-            doc = OpenApiDoc(summary = "Open the observability static UI", tags = listOf("observability")),
-            index = "index.html"
-        )
+        sse("/ai-gateway", doc = OpenApiDoc(summary = "Subscribe to AI Gateway tab snapshots", tags = listOf("observability", "ai-gateway"))) {
+            streamTab("ai-gateway", request.streamIntervalMs()) {
+                buildAiGatewaySnapshot()
+            }
+        }
     }
 
     override suspend fun onStop(context: PluginRuntimeContext) {
@@ -204,6 +214,25 @@ class ObservabilityPlugin : StandardKeelPlugin {
             else  -> 1.hours
         }
         return System.currentTimeMillis() - duration.inWholeMilliseconds
+    }
+
+    private suspend fun buildAiGatewaySnapshot(): AiGatewaySnapshot {
+        val usage = runCatching { kernelKoin.getOrNull<UsageRecorder>()?.snapshot() }.getOrNull()
+        val pools = runCatching { kernelKoin.getOrNull<PoolChainSnapshotProvider>()?.snapshot() }.getOrNull()
+        val rateLimits = runCatching { kernelKoin.getOrNull<RateLimitSnapshotProvider>()?.snapshot() }.getOrNull()
+        return AiGatewaySnapshot(
+            costSummary = com.keel.contract.ai.CostSummary(
+                last1hUsd = usage?.totalCostUsd ?: 0.0,
+                last24hUsd = usage?.totalCostUsd ?: 0.0,
+                last7dUsd = usage?.totalCostUsd ?: 0.0,
+                totalRequests = usage?.totalRequests ?: 0,
+                avgLatencyMs = 0,
+                errorRate = 0.0
+            ),
+            poolHealth = pools,
+            rateLimitSnapshot = rateLimits,
+            usage = usage
+        )
     }
 
     private companion object {

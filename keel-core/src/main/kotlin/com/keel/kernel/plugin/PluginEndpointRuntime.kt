@@ -9,7 +9,9 @@ import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.ApplicationCall
 import io.ktor.server.request.receiveText
 import io.ktor.server.response.respond
+import io.ktor.server.response.respondBytes
 import io.ktor.server.response.respondText
+import io.ktor.utils.io.readAvailable
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonNull
@@ -179,4 +181,27 @@ internal suspend fun respondPluginResult(
     }
 
     call.respond(status, result.body)
+}
+
+internal suspend fun readRawBody(call: ApplicationCall): ByteArray {
+    return call.receiveText().toByteArray(Charsets.ISO_8859_1)
+}
+
+internal fun buildRawPluginRequest(call: ApplicationCall, context: KeelRequestContext, body: ByteArray): RawPluginRequest =
+    RawPluginRequest(
+        method = context.method,
+        path = context.rawPath,
+        query = context.queryParameters,
+        headers = context.requestHeaders,
+        body = body
+    )
+
+internal suspend fun respondRawPluginResult(call: ApplicationCall, result: PluginResult<RawPluginResponse>) {
+    val raw = result.body ?: RawPluginResponse(status = result.status)
+    val status = HttpStatusCode.fromValue(raw.status)
+    raw.headers.forEach { (key, values) ->
+        values.forEach { call.response.headers.append(key, it, safeOnly = false) }
+    }
+    val contentType = raw.contentType?.let { ContentType.parse(it) }
+    call.respondBytes(bytes = raw.body, contentType = contentType, status = status)
 }

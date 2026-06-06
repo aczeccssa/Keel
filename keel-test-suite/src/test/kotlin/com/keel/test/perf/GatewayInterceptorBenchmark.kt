@@ -2,15 +2,11 @@ package com.keel.test.perf
 
 import com.keel.kernel.plugin.KeelPlugin
 import com.keel.kernel.plugin.PluginDescriptor
-import com.keel.kernel.plugin.PluginDispatchDisposition
-import com.keel.kernel.plugin.PluginLifecycleState
 import com.keel.kernel.plugin.UnifiedPluginManager
-import com.keel.kernel.routing.GatewayInterceptor
 import kotlinx.coroutines.test.runTest
 import org.koin.core.context.startKoin
 import org.koin.core.context.stopKoin
 import kotlin.system.measureNanoTime
-import kotlin.system.measureTimeMillis
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertTrue
@@ -153,7 +149,7 @@ class GatewayInterceptorBenchmark {
             "/api/_system/plugins",
             "/api/_system/docs/openapi.json",
             "/",
-            "/static/index.html",
+            "/observability-ui/index.html",
         )
 
         val iterations = 1_000_000

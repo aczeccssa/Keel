@@ -1,0 +1,129 @@
+/* ============================================================================
+   KEEL AI GATEWAY — SWISS INDUSTRIAL BRUTALIST SYSTEM
+   Matte documentation paper · carbon ink · aviation hazard red · zero radius
+   Heavy grotesque headers (Archivo Black) + monospace telemetry (JetBrains Mono)
+   ============================================================================ */
+@import url('https://fonts.googleapis.com/css2?family=Archivo+Black&family=Archivo:wght@400;600;700;900&family=JetBrains+Mono:wght@400;500;700;800&display=swap');
+
+:root {
+    /* Typography */
+    --font-body: "Archivo", "Helvetica Neue", Arial, sans-serif;
+    --font-headline: "Archivo Black", "Helvetica Neue", Arial, sans-serif;
+    --font-mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+
+    /* Substrate — matte unbleached documentation paper */
+    --bg: #eae8e3;
+    --paper: #f4f4f0;
+    --panel: #f4f4f0;
+    --panel-strong: #f4f4f0;
+    --ink: #0b0b0b;            /* carbon ink */
+    --muted: #6b6b66;
+    --line: #0b0b0b;          /* structural dividers are SOLID ink, hairline */
+    --line-strong: #0b0b0b;
+
+    /* The single accent — aviation / hazard red */
+    --navy: #0b0b0b;          /* "navy" repurposed: primary action = carbon */
+    --navy-2: #2a2a2a;
+    --teal: #0d9488;          /* "teal" — primary interactive accent (real teal) */
+    --teal-soft: #e0f5f1;
+    --amber: #b45309;
+    --amber-soft: #f7e6cf;
+    --red: #e61919;
+    --red-soft: #fbe0e0;
+    --green: #1a7a3c;
+    --green-soft: #d8ecdd;
+
+    /* Surface helpers (used by panels/inputs) — kept as opaque paper tones */
+    --color-surface-container-lowest: #ffffff;
+    --color-surface-container-low: #ebe9e3;
+    --color-surface-container-high: #e2e0d9;
+
+    /* Hard, offset, NO-BLUR shadows (brutalist drop) */
+    --shadow-sm: 3px 3px 0 0 #0b0b0b;
+    --shadow-md: 5px 5px 0 0 #0b0b0b;
+    --shadow-lg: 8px 8px 0 0 #0b0b0b;
+    --glass-highlight: none;
+
+    --ease-smooth: cubic-bezier(0.2, 0, 0, 1);
+    --ease-spring: cubic-bezier(0.2, 0, 0, 1);
+
+    /* Geometry: absolute 90° corners */
+    --radius-xl: 0px;
+    --radius-lg: 0px;
+    --radius-md: 0px;
+    --radius-sm: 0px;
+
+    --border: 2px solid #0b0b0b;
+    --border-thin: 1px solid #0b0b0b;
+}
+
+*,
+*::before,
+*::after {
+    box-sizing: border-box;
+}
+
+html,
+body {
+    margin: 0;
+    min-height: 100%;
+}
+
+body {
+    font-family: var(--font-body);
+    color: var(--ink);
+    background-color: var(--bg);
+    /* Mechanical grain + faint blueprint grid */
+    background-image:
+        repeating-linear-gradient(0deg, transparent, transparent 39px, rgba(11, 11, 11, 0.035) 39px, rgba(11, 11, 11, 0.035) 40px),
+        repeating-linear-gradient(90deg, transparent, transparent 39px, rgba(11, 11, 11, 0.035) 39px, rgba(11, 11, 11, 0.035) 40px);
+    overflow-y: hidden;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+}
+
+a { color: inherit; text-decoration: none; }
+button, input, select, textarea { font: inherit; color: inherit; }
+svg, img { display: block; max-width: 100%; }
+[hidden] { display: none !important; }
+
+keel-observability-app,
+ai-proxy-app,
+c-end-playground { display: block; min-height: 100vh; }
+
+/* Global selection + scrollbar in keeping with the system */
+::selection { background: #0d9488; color: #f4f4f0; }
+::-webkit-scrollbar { width: 12px; height: 12px; }
+::-webkit-scrollbar-track { background: var(--bg); }
+::-webkit-scrollbar-thumb { background: #0b0b0b; border: 3px solid var(--bg); }
+
+/* ── Dark mode ───────────────────────────────────────────────────────────── */
+[data-theme="dark"] {
+    --bg: #111111;
+    --paper: #1a1a1a;
+    --panel: #1a1a1a;
+    --panel-strong: #222222;
+    --ink: #e8e6e1;
+    --muted: #8a8580;
+    --line: #333333;
+    --line-strong: #444444;
+    --teal: #14b8a6;
+    --teal-soft: #0d2e2a;
+    --red-soft: #2a1215;
+    --green-soft: #0d2818;
+    --amber-soft: #2a1f0d;
+    --color-surface-container-lowest: #0e0e0e;
+    --color-surface-container-low: #161616;
+    --color-surface-container-high: #242424;
+    --shadow-sm: 3px 3px 0 0 #000;
+    --shadow-md: 5px 5px 0 0 #000;
+    --shadow-lg: 8px 8px 0 0 #000;
+}
+
+[data-theme="dark"] body {
+    background-image:
+        repeating-linear-gradient(0deg, transparent, transparent 39px, rgba(255,255,255,0.02) 39px, rgba(255,255,255,0.02) 40px),
+        repeating-linear-gradient(90deg, transparent, transparent 39px, rgba(255,255,255,0.02) 39px, rgba(255,255,255,0.02) 40px);
+}
+
+[data-theme="dark"] ::-webkit-scrollbar-thumb { background: #444; border-color: #111; }

@@ -899,7 +899,7 @@ class PluginProcessSupervisor(
         }.toSet()
         if (expectedEndpointInventory != actualEndpointInventory) return false
 
-        val expectedRouteInventory = expectedRoutes.map { route ->
+        val expectedRouteInventory = expectedRoutes.mapNotNull { route ->
             when (route) {
                 is PluginEndpointDefinition<*, *> -> PluginRouteInventoryItem(
                     routeType = "ENDPOINT",
@@ -907,6 +907,7 @@ class PluginProcessSupervisor(
                     method = route.method.value,
                     endpointId = route.endpointId
                 )
+                is com.keel.kernel.plugin.PluginRawEndpointDefinition -> null
                 is com.keel.kernel.plugin.PluginSseDefinition -> PluginRouteInventoryItem(
                     routeType = "SSE",
                     path = route.path

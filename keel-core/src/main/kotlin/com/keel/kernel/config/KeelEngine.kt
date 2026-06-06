@@ -33,4 +33,13 @@ sealed class KeelEngine {
      * Allows custom engines if developers want to bring their own Ktor ApplicationEngineFactory.
      */
     class Custom(val factory: ApplicationEngineFactory<ApplicationEngine, *>) : KeelEngine()
+
+    companion object {
+        fun fromString(name: String) = when (name.lowercase().trim()) {
+            "cio" -> CIO
+            "tomcat" -> Tomcat
+            "jetty" -> Jetty
+            else -> Netty
+        }
+    }
 }

@@ -2,7 +2,6 @@ package com.keel.openapi.annotations
 
 import kotlinx.serialization.SerialInfo
 import kotlinx.serialization.ExperimentalSerializationApi
-import kotlinx.serialization.Serializable
 
 /**
  * Optional annotation for DTO/data classes to enrich the generated OpenAPI schema.

@@ -89,7 +89,7 @@ class AuthSamplePlugin : StandardKeelPlugin {
             }
         }
 
-        staticResources("/showcase", "authsample-ui", index = "index.html")
+        staticResources("/showcase", "ui/authsample-ui", index = "index.html")
     }
 }
 
