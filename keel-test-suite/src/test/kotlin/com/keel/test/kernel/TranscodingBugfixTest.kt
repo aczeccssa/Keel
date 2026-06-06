@@ -10,6 +10,7 @@ import com.keel.samples.aigateway.airelay.protocol.IrResponse
 import com.keel.samples.aigateway.airelay.protocol.IrStreamEvent
 import com.keel.samples.aigateway.airelay.protocol.IrTool
 import com.keel.samples.aigateway.airelay.protocol.ProtocolTranscoder
+import com.keel.samples.aigateway.airelay.protocol.string
 import com.keel.samples.aigateway.airelay.protocol.openai.responses.ResponsesStreamObserver
 import com.keel.contract.ai.RequestOutcome
 import com.keel.contract.ai.TokenUsage
@@ -214,5 +215,70 @@ class TranscodingBugfixTest {
 
         assertNull(responsesRequest["parallel_tool_calls"],
             "Without disable_parallel_tool_use, parallel_tool_calls should not be set")
+    }
+
+    @Test
+    fun fullAnthropicToResponsesRoundTripWithThinkingAndTools() {
+        val anthropicRequest = json.parseToJsonElement("""
+            {
+                "model": "claude-opus-4-8",
+                "max_tokens": 16384,
+                "thinking": {"type": "enabled", "budget_tokens": 10240},
+                "system": [
+                    {"type": "text", "text": "You are a helpful assistant."},
+                    {"type": "text", "text": "Follow user instructions."}
+                ],
+                "messages": [
+                    {"role": "user", "content": "Read the file test.kt"},
+                    {"role": "assistant", "content": [
+                        {"type": "tool_use", "id": "toolu_1", "name": "Read", "input": {"file_path": "test.kt"}}
+                    ]},
+                    {"role": "user", "content": [
+                        {"type": "tool_result", "tool_use_id": "toolu_1", "content": "fun main() {}"}
+                    ]},
+                    {"role": "assistant", "content": "The file contains a main function."}
+                ],
+                "tools": [
+                    {"name": "Read", "description": "Read a file", "input_schema": {"type": "object", "properties": {"file_path": {"type": "string"}}, "required": ["file_path"]}}
+                ],
+                "tool_choice": {"type": "auto", "disable_parallel_tool_use": true},
+                "stream": true
+            }
+        """.trimIndent()).jsonObject
+
+        val ir = anthropicCodec.decodeRequest(anthropicRequest)
+
+        assertEquals("medium", ir.reasoningEffort, "budget_tokens=10240 should map to medium")
+
+        val responsesRequest = responsesCodec.encodeRequest(ir)
+
+        assertEquals("claude-opus-4-8", responsesRequest.string("model"))
+        assertNotNull(responsesRequest["instructions"], "system should map to instructions")
+        assertTrue(responsesRequest["instructions"]!!.jsonPrimitive.content.contains("helpful assistant"))
+        assertNotNull(responsesRequest["input"], "messages should map to input")
+        assertEquals(JsonPrimitive(16384), responsesRequest["max_output_tokens"],
+            "max_tokens should map to max_output_tokens")
+        assertEquals(JsonPrimitive(false), responsesRequest["parallel_tool_calls"])
+        assertNotNull(responsesRequest["reasoning"], "thinking should produce reasoning field")
+        assertEquals("medium", responsesRequest["reasoning"]!!.jsonObject.string("effort"))
+
+        val tools = responsesRequest["tools"]!!.jsonArray
+        assertEquals(1, tools.size)
+        val tool = tools[0].jsonObject
+        assertEquals("function", tool.string("type"))
+        assertEquals("Read", tool.string("name"))
+        assertNotNull(tool["parameters"], "input_schema should map to parameters")
+
+        val input = responsesRequest["input"]!!.jsonArray
+        assertTrue(input.any { it.jsonObject.string("type") == "function_call" },
+            "tool_use should become function_call in input")
+        assertTrue(input.any { it.jsonObject.string("type") == "function_call_output" },
+            "tool_result should become function_call_output in input")
+
+        val funcCall = input.first { it.jsonObject.string("type") == "function_call" }.jsonObject
+        val args = funcCall["arguments"]!!.jsonPrimitive.content
+        assertTrue(args.contains("file_path"), "arguments should be a JSON string, not object")
+
+        assertEquals(JsonPrimitive(false), responsesRequest["store"])
     }
 }
