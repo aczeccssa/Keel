@@ -1,10 +1,11 @@
 import { KeelElement } from './base/KeelElement.js';
 import { requestJson, postJson, deleteJson } from '../api.js';
 import { API } from '../config.js';
-import { escapeHtml } from '../utils.js';
+import { escapeHtml, copyText } from '../utils.js';
 
-function copyToClipboard(text) {
-    navigator.clipboard.writeText(text).catch(() => {});
+async function copyToClipboard(text) {
+    const ok = await copyText(text);
+    if (!ok) { try { alert('Copy failed — text is selectable above.'); } catch {} }
 }
 
 const CLIENTS = [
@@ -409,6 +410,7 @@ export class PanelKeys extends KeelElement {
         if (this.refs.keyCount) this.refs.keyCount.textContent = `${keys.length} key${keys.length !== 1 ? 's' : ''}`;
 
         this.refs.table.render({
+            silent: !!this._hasRendered,
             headers: ['Key ID', 'Name', 'Group', 'User', 'Status', 'Budget', 'Spent', 'Remaining', 'Action'],
             rows: keys.map(k => [
                 `<code>${escapeHtml(k.keyId)}</code>`,
@@ -422,21 +424,22 @@ export class PanelKeys extends KeelElement {
                 `<data value="${k.currentSpendUsd || 0}">$${(k.currentSpendUsd || 0).toFixed(4)}</data>`,
                 `<data value="${k.remainingBudgetUsd || 0}">$${(k.remainingBudgetUsd || 0).toFixed(4)}</data>`,
                 k.status === 'active'
-                    ? `<button class="btn-ghost btn-connect" data-connect="${escapeHtml(k.keyId)}" style="margin-right:6px;padding:6px 10px;font-size:9px;">Connect</button><button class="btn-danger" data-revoke="${escapeHtml(k.keyId)}">Revoke</button>`
+                    ? `<button class="btn-ghost btn-connect" data-connect="${escapeHtml(k.keyId)}" style="margin-right:6px;padding:6px 10px;font-size:9px;">Connect</button><button class="btn-danger" data-delete-key="${escapeHtml(k.keyId)}">Delete</button>`
                     : ''
             ]),
             emptyHtml: '<div class="km-empty">// No API keys. Generate one above to get started.</div>'
         });
+        this._hasRendered = true;
 
         // Connect buttons
         this.refs.table.shadowRoot.querySelectorAll('[data-connect]').forEach(btn => {
             btn.addEventListener('click', () => this._openModal(btn.dataset.connect));
         });
-        // Revoke buttons
-        this.refs.table.shadowRoot.querySelectorAll('[data-revoke]').forEach(btn => {
+        // Delete buttons
+        this.refs.table.shadowRoot.querySelectorAll('[data-delete-key]').forEach(btn => {
             btn.addEventListener('click', async () => {
-                if (!confirm('Revoke this key? This cannot be undone.')) return;
-                try { await deleteJson(`${API.token}/v1/keys/${btn.dataset.revoke}`); this.refresh(); }
+                if (!confirm('Delete this key? This cannot be undone.')) return;
+                try { await deleteJson(`${API.token}/v1/keys/${btn.dataset.deleteKey}`); this.refresh(); }
                 catch (e) { alert(e.message); }
             });
         });

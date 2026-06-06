@@ -2,12 +2,17 @@ package com.keel.samples.aigateway.airelay.upstream
 
 import com.keel.samples.aigateway.airelay.pool.PoolSelection
 import com.keel.samples.aigateway.airelay.protocol.WireProtocol
+import com.keel.samples.aigateway.airelay.protocol.int
+import com.keel.samples.aigateway.airelay.protocol.obj
+import com.keel.samples.aigateway.airelay.protocol.string
 import io.ktor.client.HttpClient
+import io.ktor.client.call.body
 import io.ktor.client.engine.cio.CIO
 import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.request.headers
 import io.ktor.client.request.get
 import io.ktor.client.request.post
+import io.ktor.client.request.request
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.HttpResponse
 import io.ktor.client.statement.bodyAsText
@@ -18,7 +23,11 @@ import io.ktor.sse.ServerSentEvent
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonArray
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -60,6 +69,9 @@ class RealUpstreamHttpClient private constructor(
         val bodyText = response.bodyAsText()
         val body = runCatching { json.parseToJsonElement(bodyText).jsonObject }
             .getOrElse {
+                if (selection.provider.protocol == WireProtocol.OPENAI_RESPONSES) {
+                    aggregateResponsesSseBody(bodyText)?.let { return@getOrElse it }
+                }
                 throw UpstreamHttpException(
                     response.status.value,
                     "Invalid JSON body from upstream: ${bodyText.take(200)}"
@@ -69,6 +81,117 @@ class RealUpstreamHttpClient private constructor(
             .groupBy({ it.key }, { it.value })
             .mapValues { it.value.flatten() }
         return UpstreamResponse(status = response.status.value, body = body, headers = headers)
+    }
+
+    private data class PartialFunctionCall(
+        val id: String,
+        val callId: String,
+        val name: String,
+        val outputIndex: Int,
+        var arguments: String = ""
+    )
+
+    private fun aggregateResponsesSseBody(bodyText: String): JsonObject? {
+        val events = bodyText.split("\n\n").mapNotNull { parseSseBlock(it) }
+        if (events.isEmpty()) return null
+
+        val responseFields = linkedMapOf<String, JsonElement>()
+        val outputText = StringBuilder()
+        val functionCalls = linkedMapOf<String, PartialFunctionCall>()
+
+        fun functionKey(obj: JsonObject, item: JsonObject? = null): String =
+            item?.string("id")
+                ?: obj.string("item_id")
+                ?: obj.int("output_index")?.let { "output-$it" }
+                ?: "output-${functionCalls.size}"
+
+        events.forEach { event ->
+            val data = event.data ?: return@forEach
+            if (data == "[DONE]") return@forEach
+            val obj = runCatching { json.parseToJsonElement(data).jsonObject }.getOrNull() ?: return@forEach
+            when (event.event ?: obj.string("type")) {
+                "response.created", "response.in_progress", "response.completed" -> {
+                    val response = obj.obj("response") ?: obj
+                    responseFields.putAll(response)
+                }
+                "response.output_text.delta" -> outputText.append(obj.string("delta") ?: "")
+                "response.refusal.delta" -> outputText.append(obj.string("delta") ?: obj.string("refusal") ?: "")
+                "response.output_item.added" -> {
+                    val item = obj.obj("item") ?: return@forEach
+                    if (item.string("type") != "function_call") return@forEach
+                    val key = functionKey(obj, item)
+                    functionCalls[key] = PartialFunctionCall(
+                        id = item.string("id") ?: key,
+                        callId = item.string("call_id") ?: item.string("id") ?: key,
+                        name = item.string("name") ?: "function",
+                        outputIndex = obj.int("output_index") ?: functionCalls.size,
+                        arguments = item.string("arguments") ?: ""
+                    )
+                }
+                "response.function_call_arguments.delta" -> {
+                    val key = functionKey(obj)
+                    val call = functionCalls.getOrPut(key) {
+                        PartialFunctionCall(
+                            id = key,
+                            callId = obj.string("call_id") ?: obj.string("item_id") ?: key,
+                            name = obj.string("name") ?: "function",
+                            outputIndex = obj.int("output_index") ?: functionCalls.size,
+                        )
+                    }
+                    call.arguments += obj.string("delta").orEmpty()
+                }
+                "response.function_call_arguments.done" -> {
+                    val key = functionKey(obj)
+                    val call = functionCalls.getOrPut(key) {
+                        PartialFunctionCall(
+                            id = key,
+                            callId = obj.string("call_id") ?: obj.string("item_id") ?: key,
+                            name = obj.string("name") ?: "function",
+                            outputIndex = obj.int("output_index") ?: functionCalls.size,
+                        )
+                    }
+                    obj.string("arguments")?.let { call.arguments = it }
+                }
+            }
+        }
+
+        if (responseFields.isEmpty() && outputText.isEmpty() && functionCalls.isEmpty()) return null
+        if ("output" !in responseFields) {
+            responseFields["output"] = buildJsonArray {
+                if (outputText.isNotEmpty()) {
+                    add(buildJsonObject {
+                        put("id", JsonPrimitive("msg_0"))
+                        put("type", JsonPrimitive("message"))
+                        put("role", JsonPrimitive("assistant"))
+                        put("content", buildJsonArray {
+                            add(buildJsonObject {
+                                put("type", JsonPrimitive("output_text"))
+                                put("text", JsonPrimitive(outputText.toString()))
+                            })
+                        })
+                    })
+                }
+                functionCalls.values.sortedBy { it.outputIndex }.forEach { call ->
+                    add(buildJsonObject {
+                        put("id", JsonPrimitive(call.id))
+                        put("type", JsonPrimitive("function_call"))
+                        put("call_id", JsonPrimitive(call.callId))
+                        put("name", JsonPrimitive(call.name))
+                        put("arguments", JsonPrimitive(call.arguments.ifBlank { "{}" }))
+                    })
+                }
+            }
+        }
+        responseFields.putIfAbsent("id", JsonPrimitive("resp-sse-aggregate"))
+        responseFields.putIfAbsent("object", JsonPrimitive("response"))
+        responseFields.putIfAbsent("status", JsonPrimitive("completed"))
+        responseFields.putIfAbsent("model", JsonPrimitive("unknown"))
+        responseFields.putIfAbsent("output_text", JsonPrimitive(outputText.toString()))
+        responseFields.putIfAbsent("usage", buildJsonObject {
+            put("input_tokens", JsonPrimitive(0))
+            put("output_tokens", JsonPrimitive(0))
+        })
+        return JsonObject(responseFields)
     }
 
     override fun stream(
@@ -297,7 +420,7 @@ class RealUpstreamHttpClient private constructor(
             status = response.status.value,
             headers = headers,
             contentType = response.headers[HttpHeaders.ContentType],
-            body = response.bodyAsBytes()
+            body = response.body()
         )
     }
 

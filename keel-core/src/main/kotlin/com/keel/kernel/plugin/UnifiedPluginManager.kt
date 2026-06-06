@@ -400,7 +400,9 @@ class UnifiedPluginManager(
         routeDefinitions: List<PluginRouteDefinition>
     ) {
         val requiredServices = buildSet {
-            if (routeDefinitions.any { it is PluginEndpointDefinition<*, *> }) add(PluginServiceType.ENDPOINT)
+            if (routeDefinitions.any { it is PluginEndpointDefinition<*, *> || it is PluginRawEndpointDefinition }) {
+                add(PluginServiceType.ENDPOINT)
+            }
             if (routeDefinitions.any { it is PluginSseDefinition }) add(PluginServiceType.SSE)
             if (routeDefinitions.any { it is PluginStaticResourceDefinition }) add(PluginServiceType.STATIC_RESOURCE)
         }
@@ -642,7 +644,7 @@ class UnifiedPluginManager(
             val result = endpoint.handler.invoke(context, request)
             respondRawPluginResult(call, result)
         } catch (error: PluginApiException) {
-            call.respond(HttpStatusCode.fromValue(error.status), error.message ?: "Request failed")
+            call.respond(HttpStatusCode.fromValue(error.status), error.message)
         } catch (error: Exception) {
             call.respond(HttpStatusCode.InternalServerError, error.message ?: "Internal server error")
         }

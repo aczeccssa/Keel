@@ -8,7 +8,6 @@ import com.keel.samples.aigateway.airelay.upstream.MockFailure
 import com.keel.samples.aigateway.riskcontrol.RiskControlPlugin
 import com.keel.samples.aigateway.riskcontrol.UpsertRateLimitRuleRequest
 import com.keel.samples.aigateway.token.TokenPlugin
-import com.keel.samples.observability.ObservabilityPlugin
 import io.ktor.client.HttpClient
 import io.ktor.client.request.header
 import io.ktor.client.request.post
@@ -28,8 +27,10 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import java.nio.file.Files
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -47,11 +48,10 @@ class AiGatewayAcceptanceTest {
         runCatching { stopKoin() }
     }
 
-    /** Unwrap RelayResponse: { "response": "<json>" } -> parse inner JSON */
-    private fun unwrap(body: String): JsonObject {
+    private fun parseBody(body: String): JsonObject {
         val outer = json.parseToJsonElement(body).jsonObject
-        val inner = outer["response"]!!.jsonPrimitive.content
-        return json.parseToJsonElement(inner).jsonObject
+        val inner = outer["response"]?.jsonPrimitive?.contentOrNull
+        return if (inner != null) json.parseToJsonElement(inner).jsonObject else outer
     }
 
     @Test
@@ -70,7 +70,7 @@ class AiGatewayAcceptanceTest {
         for (case in cases) {
             val response = ctx.invokeClient(case.clientProtocol, case.model)
             assertEquals(HttpStatusCode.OK, response.status, "${case.label} should succeed")
-            val body = unwrap(response.bodyAsText())
+            val body = parseBody(response.bodyAsText())
             case.expectedShape.assert(body, case.model, case.label)
         }
     }
@@ -80,9 +80,9 @@ class AiGatewayAcceptanceTest {
         ctx.upstream.failKey("mock-default-1", MockFailure.Http(429, retryAfterSeconds = 1))
         val resp = ctx.invokeClient("chat", "gpt-4o-mini")
         assertEquals(HttpStatusCode.OK, resp.status, "Failover should pick L2 and succeed")
-        val body = unwrap(resp.bodyAsText())
+        val body = parseBody(resp.bodyAsText())
         ChatShape.assert(body, "gpt-4o-mini", "L1 cooldown -> L2 chat")
-        val pools = ctx.airelay.kernelKoinSnapshot()
+        val pools = ctx.poolSnapshot()
         val l1Status = pools.chains.first { it.chainId == "default-chain" }
             .levels.first().keys.first().status
         assertEquals("COOLDOWN", l1Status)
@@ -145,7 +145,7 @@ class AiGatewayAcceptanceTest {
     @Test
     fun observabilitySnapshotReflectsAfterTrafficFlows() = withGateway { ctx ->
         repeat(2) { ctx.invokeClient("chat", "gpt-chat-only") }
-        val pools = ctx.airelay.kernelKoinSnapshot()
+        val pools = ctx.poolSnapshot()
         val keys = pools.chains.first { it.chainId == "openai-chat-chain" }.levels.first().keys
         assertTrue(keys.any { it.totalRequests > 0 }, "Pool snapshot should record traffic")
         val rateSnap = ctx.risk.engine.snapshot()
@@ -216,12 +216,15 @@ class AiGatewayAcceptanceTest {
             }
         }
 
-        fun AIRelayPlugin.kernelKoinSnapshot(): com.keel.contract.ai.PoolChainSnapshot {
-            return kernelKoin.get<com.keel.contract.ai.PoolChainSnapshotProvider>().snapshot()
+        fun poolSnapshot(): com.keel.contract.ai.PoolChainSnapshot {
+            return airelay.kernelKoin.get<com.keel.contract.ai.PoolChainSnapshotProvider>().snapshot()
         }
     }
 
     private fun withGateway(block: suspend (GatewayContext) -> Unit) = testApplication {
+        val previousDataDir = System.getProperty("keel.data.dir")
+        val testDataDir = Files.createTempDirectory("keel-gateway-acceptance-").toFile()
+        System.setProperty("keel.data.dir", testDataDir.absolutePath)
         OpenApiRegistry.clear()
         val koin = startKoin {}.koin
         val manager = UnifiedPluginManager(koin)
@@ -229,12 +232,10 @@ class AiGatewayAcceptanceTest {
         val tokenPlugin = TokenPlugin()
         val riskPlugin = RiskControlPlugin()
         val airelayPlugin = AIRelayPlugin()
-        val observability = ObservabilityPlugin()
         manager.registerPlugin(accountPlugin)
         manager.registerPlugin(tokenPlugin)
         manager.registerPlugin(riskPlugin)
         manager.registerPlugin(airelayPlugin)
-        manager.registerPlugin(observability)
         application {
             install(ContentNegotiation) { json() }
             install(SSE)
@@ -244,20 +245,41 @@ class AiGatewayAcceptanceTest {
                 manager.startPlugin("token")
                 manager.startPlugin("riskcontrol")
                 manager.startPlugin("airelay")
-                manager.startPlugin("observability")
             }
         }
 
-        val rawKey = "sk-keel-demo-user"
-        block(
-            GatewayContext(
-                client = client,
-                manager = manager,
-                airelay = airelayPlugin,
-                token = tokenPlugin,
-                risk = riskPlugin,
-                rawKey = rawKey
+        try {
+            val loginResponse = client.post("/api/plugins/account/v1/auth/login") {
+                contentType(ContentType.Application.Json)
+                setBody("""{"email":"user@example.com","password":"user123"}""")
+            }
+            assertEquals(HttpStatusCode.OK, loginResponse.status)
+            val accessToken = json.parseToJsonElement(loginResponse.bodyAsText()).jsonObject["accessToken"]!!.jsonPrimitive.content
+
+            val keyResponse = client.post("/api/plugins/token/v1/keys") {
+                header("Authorization", "Bearer $accessToken")
+                contentType(ContentType.Application.Json)
+                setBody("""{"displayName":"Acceptance test key","maxBudgetUsd":100}""")
+            }
+            assertEquals(HttpStatusCode.OK, keyResponse.status)
+            val rawKey = json.parseToJsonElement(keyResponse.bodyAsText()).jsonObject["rawKey"]!!.jsonPrimitive.content
+
+            block(
+                GatewayContext(
+                    client = client,
+                    manager = manager,
+                    airelay = airelayPlugin,
+                    token = tokenPlugin,
+                    risk = riskPlugin,
+                    rawKey = rawKey
+                )
             )
-        )
+        } finally {
+            if (previousDataDir == null) {
+                System.clearProperty("keel.data.dir")
+            } else {
+                System.setProperty("keel.data.dir", previousDataDir)
+            }
+        }
     }
 }

@@ -790,13 +790,15 @@ class AiProxyApp extends KeelElement {
         if (!popover || !pill) return;
         const rect = pill.getBoundingClientRect();
         const width = Math.max(240, popover.offsetWidth || 240);
-        const left = Math.min(
-            window.innerWidth - width - 12,
-            Math.max(12, rect.right - width)
-        );
-        const top = Math.max(12, rect.top - 12 - (popover.offsetHeight || 120));
+        const height = popover.offsetHeight || 160;
+        let left = rect.right - width;
+        if (left < 12) left = 12;
+        if (left + width > window.innerWidth - 12) left = window.innerWidth - width - 12;
+        let top = rect.top - height - 12;
+        if (top < 12) top = rect.bottom + 12;
+        if (top + height > window.innerHeight - 12) top = window.innerHeight - height - 12;
         popover.style.left = `${left}px`;
-        popover.style.top = `${top}px`;
+        popover.style.top = `${Math.max(12, top)}px`;
         popover.style.right = 'auto';
         popover.style.bottom = 'auto';
         popover.style.width = `${width}px`;

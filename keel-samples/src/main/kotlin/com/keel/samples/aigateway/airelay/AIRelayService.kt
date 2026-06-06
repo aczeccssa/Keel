@@ -34,6 +34,7 @@ import com.keel.samples.aigateway.airelay.upstream.UpstreamHttpClient
 import com.keel.samples.aigateway.airelay.upstream.RawProxyRequest
 import com.keel.samples.aigateway.airelay.upstream.RawProxyResponse
 import com.keel.samples.aigateway.airelay.upstream.UpstreamHttpException
+import com.keel.samples.aigateway.airelay.usage.CreditChargeCalculator
 import com.keel.samples.aigateway.airelay.usage.CostCalculator
 import com.keel.samples.aigateway.airelay.usage.TokenEstimator
 import kotlinx.coroutines.flow.asFlow
@@ -68,6 +69,7 @@ class AIRelayService(
 ) {
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
     private val tokenEstimator = TokenEstimator()
+    private val creditChargeCalculator = CreditChargeCalculator()
 
     /** Was the request authenticated with a customer key? Stored so we know to charge. */
     private data class KeyContext(
@@ -161,7 +163,8 @@ class AIRelayService(
                 } else {
                     json.encodeToString(transcoder.encodeResponse(clientProtocol, upstreamIr))
                 }
-                val cost = costCalculator.calculate(upstreamIr.model, effectiveUsage, keyContext.verified.userGroupId, variantKeyFor(ir))
+                val resolvedVariantKey = variantKeyFor(ir)
+                val cost = costCalculator.calculate(selection.resolvedModel, effectiveUsage, keyContext.verified.userGroupId, resolvedVariantKey)
 
                 // Charge customer credits before recording operator-visible success. If local
                 // accounting fails, the upstream succeeded but the relay did not complete the
@@ -170,13 +173,14 @@ class AIRelayService(
                 val creditHeaders = try {
                     chargeCustomerCredits(
                         keyContext,
+                        selection,
                         effectiveUsage,
                         selection.provider.providerId,
                         keyContext.verified.routingGroupId,
                         clientProtocol,
                         ir.model,
                         upstreamIr.id,
-                        variantKeyFor(ir)
+                        resolvedVariantKey
                     )
                 } catch (error: Throwable) {
                     recordLocalAccountingFailure(keyContext.verified, clientProtocol, ir, started, error)
@@ -189,7 +193,7 @@ class AIRelayService(
                         UsageRecordInput(
                             keyId = keyContext.verified.keyId, userId = keyContext.verified.userId, userGroupId = keyContext.verified.userGroupId,
                             clientProtocol = clientProtocol.name, upstreamProtocol = selection.provider.protocol.name,
-                            model = ir.model, provider = selection.provider.providerId,
+                            model = operatorModelLabel(selection), provider = selection.provider.providerId,
                             poolLevelId = selection.level.levelId, upstreamKeyId = selection.keyState.key.keyId,
                             usage = effectiveUsage, cost = cost, latencyMs = elapsedMs(started),
                             status = upstream.status, errorCode = null, streamed = false, failoverCount = failoverCount,
@@ -281,7 +285,7 @@ class AIRelayService(
             val effectiveCost = if (isSemanticError && usageSource == com.keel.contract.ai.UsageSource.NONE) {
                 CostBreakdown()
             } else {
-                costCalculator.calculate(ir.model, effectiveUsage, keyContext.verified.userGroupId, variantKeyFor(ir))
+                costCalculator.calculate(selection.resolvedModel, effectiveUsage, keyContext.verified.userGroupId, variantKeyFor(ir))
             }
 
             // Charge customer only for successful streams or streams with real provider usage.
@@ -291,6 +295,7 @@ class AIRelayService(
                 try {
                     chargeCustomerCredits(
                         keyContext,
+                        selection,
                         effectiveUsage,
                         selection.provider.providerId,
                         keyContext.verified.routingGroupId,
@@ -315,7 +320,7 @@ class AIRelayService(
                         userGroupId = keyContext.verified.userGroupId,
                         clientProtocol = clientProtocol.name,
                         upstreamProtocol = selection.provider.protocol.name,
-                        model = ir.model,
+                        model = operatorModelLabel(selection),
                         provider = selection.provider.providerId,
                         poolLevelId = selection.level.levelId,
                         upstreamKeyId = selection.keyState.key.keyId,
@@ -354,11 +359,12 @@ class AIRelayService(
     /** Charge the customer for usage, if this was a customer-authenticated request. */
     private suspend fun chargeCustomerCredits(
         keyContext: KeyContext,
+        selection: com.keel.samples.aigateway.airelay.pool.PoolSelection,
         usage: TokenUsage,
         providerId: String,
         groupId: String,
         clientProtocol: WireProtocol,
-        model: String,
+        requestedModel: String,
         requestId: String,
         variantKey: String? = null,
     ): Map<String, List<String>> {
@@ -366,11 +372,16 @@ class AIRelayService(
         val ledger = creditLedger ?: return emptyMap()
         val totalTokens = usage.promptTokens + usage.completionTokens + usage.cacheReadInputTokens + usage.cacheCreationInputTokens
         if (totalTokens == 0) return emptyMap()
-        val breakdown = costCalculator.calculate(model, usage, "customer", variantKey)
-        val creditCost = estimateCredits(breakdown, usage)
+        val pricingModel = selection.resolvedModel
+        val breakdown = costCalculator.calculate(pricingModel, usage, "customer", variantKey)
+        val creditCost = creditChargeCalculator.calculate(
+            usage = usage,
+            modelCreditMultiplier = costCalculator.creditMultiplier(pricingModel, variantKey),
+            aliasCreditMultiplier = selection.matchedAliasCreditMultiplier,
+        )
         val usdMicros = (breakdown.totalCostUsd * 1_000_000).toLong()
         val row = CustomerUsageRow(
-            model = model,
+            model = requestedModel,
             groupId = groupId,
             providerId = providerId,
             wireProtocol = clientProtocol.name,
@@ -394,13 +405,6 @@ class AIRelayService(
         }
     }
 
-    private fun estimateCredits(breakdown: CostBreakdown, usage: TokenUsage): Long {
-        val usdMicros = (breakdown.totalCostUsd * 1_000_000).toLong().coerceAtLeast(0)
-        if (usdMicros > 0) return usdMicros.coerceAtLeast(1)
-        val total = usage.promptTokens + usage.completionTokens + usage.cacheReadInputTokens + usage.cacheCreationInputTokens
-        return total.coerceAtLeast(1).toLong()
-    }
-
     private fun variantKeyFor(ir: IrRequest): String? =
         ir.metadata["variantKey"]
             ?: ir.metadata["variant_key"]
@@ -410,6 +414,13 @@ class AIRelayService(
             ?: ir.extras["variant_key"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }
             ?: ir.extras["pricing_variant"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }
             ?: variantKeyForModel(ir.model)
+
+    private fun operatorModelLabel(selection: com.keel.samples.aigateway.airelay.pool.PoolSelection): String {
+        val alias = selection.matchedAliasName ?: return selection.requestedModel
+        val requestedAlias = selection.requestedModel.takeIf { it.isNotBlank() } ?: alias
+        val actual = selection.upstreamModel.takeIf { it.isNotBlank() } ?: selection.resolvedModel
+        return if (actual.isBlank() || actual == requestedAlias) requestedAlias else "$requestedAlias -> $actual"
+    }
 
     private fun variantKeyForModel(model: String): String? = modelVariantSemantics(model).variantKey
 

@@ -62,6 +62,7 @@ class ObservabilityPlugin : StandardKeelPlugin {
             dataEndpoint = "/api/plugins/observability/ai-gateway"
         )
         logger.info("Initialized observability plugin")
+
     }
 
     override fun endpoints(): List<PluginRouteDefinition> = pluginEndpoints(descriptor.pluginId) {
@@ -153,13 +154,6 @@ class ObservabilityPlugin : StandardKeelPlugin {
                 buildAiGatewaySnapshot()
             }
         }
-
-        staticResources(
-            path = "/ui",
-            basePackage = "static",
-            doc = OpenApiDoc(summary = "Open the observability static UI", tags = listOf("observability")),
-            index = "index.html"
-        )
     }
 
     override suspend fun onStop(context: PluginRuntimeContext) {

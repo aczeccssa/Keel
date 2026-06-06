@@ -8,7 +8,6 @@ import com.keel.samples.aigateway.airelay.protocol.IrStreamEvent
 import com.keel.samples.aigateway.airelay.protocol.ProtocolCodec
 import com.keel.samples.aigateway.airelay.protocol.WireProtocol
 import com.keel.samples.aigateway.airelay.protocol.arr
-import com.keel.samples.aigateway.airelay.protocol.asJsonLineEvents
 import com.keel.samples.aigateway.airelay.protocol.boolean
 import com.keel.samples.aigateway.airelay.protocol.double
 import com.keel.samples.aigateway.airelay.protocol.int
@@ -22,6 +21,7 @@ import com.keel.samples.aigateway.airelay.protocol.tokenUsageJson
 import com.keel.samples.aigateway.airelay.protocol.usageFromOpenAi
 import io.ktor.sse.ServerSentEvent
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.mapNotNull
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -180,12 +180,14 @@ class OpenAIChatCodec : ProtocolCodec {
         }
     }
 
-    override fun encodeStream(events: Flow<IrStreamEvent>): Flow<ServerSentEvent> = events.asJsonLineEvents { event ->
+    override fun encodeStream(events: Flow<IrStreamEvent>): Flow<ServerSentEvent> = events.map { event ->
         when (event) {
-            is IrStreamEvent.TextDelta -> json.encodeToString(buildChatDelta(event.delta))
-            is IrStreamEvent.ResponseDone -> "[DONE]"
-            is IrStreamEvent.Error -> json.encodeToString(buildJsonObject { put("error", JsonPrimitive(event.message)) })
-            else -> json.encodeToString(buildChatDelta(""))
+            is IrStreamEvent.TextDelta -> ServerSentEvent(data = json.encodeToString(buildChatDelta(event.delta)))
+            is IrStreamEvent.ResponseDone -> ServerSentEvent(data = "[DONE]")
+            is IrStreamEvent.Error -> ServerSentEvent(
+                data = json.encodeToString(buildJsonObject { put("error", JsonPrimitive(event.message)) })
+            )
+            else -> ServerSentEvent(data = json.encodeToString(buildChatDelta("")))
         }
     }
 

@@ -47,12 +47,19 @@ data class PoolSelection(
     val resolvedModel: String,
     val upstreamModel: String,
     val requestedModel: String,
+    val matchedAliasName: String? = null,
+    val matchedAliasCreditMultiplier: Double? = null,
 )
 
 class PoolChainManager(
     chains: List<PoolChainConfig>
 ) : PoolChainSnapshotProvider {
-    private val chainByGroup = chains.associateBy { it.chainId }
+    private val allChains = chains
+    private val chainByGroup = chains.associateBy { it.chainId }.toMutableMap().apply {
+        if (DEFAULT_ROUTING_GROUP_ID !in this) {
+            this["default-chain"]?.let { put(DEFAULT_ROUTING_GROUP_ID, it) }
+        }
+    }
     private val states = chains.associateWith { chain ->
         chain.levels.sortedBy { it.levelIndex }.associateWith { level ->
             level.keys.map { key -> UpstreamKeyState(chain, level, key) }
@@ -61,12 +68,21 @@ class PoolChainManager(
     private val cursors = ConcurrentHashMap<String, AtomicInteger>()
 
     fun resolve(groupId: String, model: String): PoolChainConfig {
-        val chain = chainByGroup[groupId]
-            ?: throw PluginApiException(404, "No routing group $groupId")
+        val chain = resolveChainForModel(groupId, model)
         if (resolveRequestedModel(chain, model) == null) {
             throw PluginApiException(404, "Model $model is not available in group $groupId")
         }
         return chain
+    }
+
+    private fun resolveChainForModel(groupId: String, model: String): PoolChainConfig {
+        val exact = chainByGroup[groupId]
+            ?: throw PluginApiException(404, "No routing group $groupId")
+        if (resolveRequestedModel(exact, model) != null) return exact
+        if (groupId == DEFAULT_ROUTING_GROUP_ID) {
+            allChains.firstOrNull { resolveRequestedModel(it, model) != null }?.let { return it }
+        }
+        return exact
     }
 
     fun selectCandidates(groupId: String, model: String): List<PoolSelection> {
@@ -74,7 +90,8 @@ class PoolChainManager(
         val now = System.currentTimeMillis()
         val routedModel = resolveRequestedModel(chain, model)
             ?: throw PluginApiException(404, "Model $model is not available in group $groupId")
-        val targetModels = resolveTargetModels(chain, model, routedModel)
+        val matchedAlias = resolveMatchedAlias(chain, model, routedModel)
+        val targetModels = resolveTargetModels(chain, model, routedModel, matchedAlias)
         return targetModels.flatMap { target ->
             states.getValue(chain).entries.sortedBy { it.key.levelIndex }.flatMap { (level, keyStates) ->
                 keyStates.forEach { maybeRecover(it, now) }
@@ -94,6 +111,8 @@ class PoolChainManager(
                         resolvedModel = resolvedModel,
                         upstreamModel = resolveUpstreamModel(it.key, target.model, resolvedModel),
                         requestedModel = model,
+                        matchedAliasName = matchedAlias?.aliasName,
+                        matchedAliasCreditMultiplier = matchedAlias?.creditMultiplier,
                     )
                 }
             }
@@ -127,17 +146,22 @@ class PoolChainManager(
         }
     }
 
+    private fun resolveMatchedAlias(
+        chain: PoolChainConfig,
+        requestedModel: String,
+        routedModel: String,
+    ) = chain.aliasRoutes.firstOrNull { it.enabled && it.aliasName == requestedModel }
+        ?: routedModel
+            .takeIf { it != requestedModel }
+            ?.let { fallback -> chain.aliasRoutes.firstOrNull { it.enabled && it.aliasName == fallback } }
+
     private fun resolveTargetModels(
         chain: PoolChainConfig,
         requestedModel: String,
         routedModel: String,
+        matchedAlias: com.keel.samples.aigateway.airelay.AliasRouteConfig?,
     ): List<com.keel.samples.aigateway.airelay.AliasTargetConfig> {
-        val alias = chain.aliasRoutes.firstOrNull { it.enabled && it.aliasName == requestedModel }
-        if (alias != null) return alias.orderedTargets()
-        if (routedModel != requestedModel) {
-            val fallbackAlias = chain.aliasRoutes.firstOrNull { it.enabled && it.aliasName == routedModel }
-            if (fallbackAlias != null) return fallbackAlias.orderedTargets()
-        }
+        if (matchedAlias != null) return matchedAlias.orderedTargets()
         return when (chain.exposureMode.normalized()) {
             GroupExposureMode.ALIASES_ONLY -> throw PluginApiException(404, "Model $requestedModel is not available in group ${chain.chainId}")
             GroupExposureMode.ALIASES_AND_MODELS,

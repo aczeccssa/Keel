@@ -126,6 +126,7 @@ export class PanelUsers extends KeelElement {
 
     _renderUsers(users) {
         this.refs.usersTable.render({
+            silent: !!this._hasUsersRendered,
             headers: ['User ID', 'Email', 'Display Name', 'Role', 'Group', 'Status', 'Action'],
             rows: users.map(u => [
                 `<code style="font-size:11px;">${u.userId}</code>`,
@@ -144,7 +145,7 @@ export class PanelUsers extends KeelElement {
             ]),
             emptyHtml: '<div class="empty">No users found.</div>'
         });
-
+        this._hasUsersRendered = true;
         this.refs.usersTable.shadowRoot.querySelectorAll('[data-suspend]').forEach(btn => {
             btn.addEventListener('click', async () => {
                 try { await postJson(`${API.account}/admin/users/${btn.dataset.suspend}/suspend`, {}); this.refresh(); }
@@ -161,6 +162,7 @@ export class PanelUsers extends KeelElement {
 
     _renderGroups(groups) {
         this.refs.groupsTable.render({
+            silent: !!this._hasGroupsRendered,
             headers: ['Group ID', 'Name', 'Cost Multiplier', 'Default RPM', 'Default TPM', 'Budget'],
             rows: groups.map(g => [
                 `<code>${g.groupId}</code>`,

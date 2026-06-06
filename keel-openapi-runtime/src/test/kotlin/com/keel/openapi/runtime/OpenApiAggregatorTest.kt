@@ -207,7 +207,7 @@ class OpenApiAggregatorTest {
         OpenApiRegistry.register(
             OpenApiOperation(
                 method = HttpMethod.Get,
-                path = "/static",
+                path = "/observability-ui",
                 responseContentTypes = listOf("application/octet-stream", "text/html"),
                 typeBound = false
             )
@@ -220,7 +220,7 @@ class OpenApiAggregatorTest {
         assertTrue("application/json" !in sseContent)
         assertTrue(sseContent["text/event-stream"]!!.jsonObject.isEmpty())
 
-        val staticContent = spec["paths"]!!.jsonObject["/static"]!!.jsonObject["get"]!!
+        val staticContent = spec["paths"]!!.jsonObject["/observability-ui"]!!.jsonObject["get"]!!
             .jsonObject["responses"]!!.jsonObject["200"]!!.jsonObject["content"]!!.jsonObject
         assertTrue("application/octet-stream" in staticContent)
         assertTrue("text/html" in staticContent)

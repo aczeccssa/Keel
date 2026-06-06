@@ -232,7 +232,7 @@ class MockableUpstreamHttpClient(
             status = 200,
             headers = mapOf("X-Mock-Upstream" to listOf(selection.provider.providerId)),
             contentType = request.contentType ?: "application/json",
-            body = request.body.ifEmpty { "{}".toByteArray() }
+            body = if (request.body.isEmpty()) "{}".toByteArray() else request.body
         )
     }
 

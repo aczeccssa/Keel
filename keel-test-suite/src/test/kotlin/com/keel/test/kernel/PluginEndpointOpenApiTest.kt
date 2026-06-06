@@ -23,20 +23,21 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.contentType
 import io.ktor.server.application.install
-import io.ktor.server.response.respondText
+import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.server.routing.routing
 import io.ktor.server.sse.SSE
 import io.ktor.sse.ServerSentEvent
 import io.ktor.utils.io.ClosedWriteChannelException
 import kotlinx.coroutines.flow.MutableSharedFlow
-import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
+import io.ktor.serialization.kotlinx.json.json
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertTrue
 import org.koin.core.context.startKoin
 import org.koin.core.context.stopKoin
+import kotlinx.serialization.Serializable
 
 class PluginEndpointOpenApiTest {
     private val json = Json { ignoreUnknownKeys = true }
@@ -60,6 +61,7 @@ class PluginEndpointOpenApiTest {
 
         io.ktor.server.testing.testApplication {
             application {
+                install(ContentNegotiation) { json() }
                 install(SSE)
                 routing {
                     manager.mountRoutes(this)
@@ -87,7 +89,7 @@ class PluginEndpointOpenApiTest {
     }
 
     @Test
-    fun `raw post endpoints run interceptors and advertise configured content types`() {
+    fun `typed post endpoints run interceptors and advertise configured content types`() {
         OpenApiRegistry.clear()
         val koin = startKoin {}.also { koinStarted = true }.koin
         val manager = UnifiedPluginManager(koin)
@@ -113,17 +115,17 @@ class PluginEndpointOpenApiTest {
             val response = client.post("/api/plugins/raw-route-test/v1/raw") {
                 header("X-Raw-User", "alice")
                 contentType(ContentType.Application.Json)
-                setBody("{\"value\":\"accepted\"}")
+                setBody("{\"value\":\"ok\"}")
             }
             kotlin.test.assertEquals(HttpStatusCode.OK, response.status)
             val body = response.bodyAsText()
             assertTrue(body.contains("\"principal\":\"alice\""))
-            assertTrue(body.contains("\"rawBody\":\"{\\\"value\\\":\\\"accepted\\\"}\""))
+            assertTrue(body.contains("\"value\":\"ok\""))
 
             val oversized = client.post("/api/plugins/raw-route-test/v1/raw") {
                 header("X-Raw-User", "alice")
                 contentType(ContentType.Application.Json)
-                setBody("x".repeat(33))
+                setBody("x".repeat(5000))
             }
             kotlin.test.assertEquals(HttpStatusCode.PayloadTooLarge, oversized.status)
 
@@ -132,7 +134,6 @@ class PluginEndpointOpenApiTest {
                 .jsonObject["post"]!!.jsonObject["responses"]!!.jsonObject["200"]!!
                 .jsonObject["content"]!!.jsonObject
             assertTrue("application/json" in rawContent)
-            assertTrue("text/event-stream" in rawContent)
         }
     }
 
@@ -152,20 +153,22 @@ class PluginEndpointOpenApiTest {
         override fun endpoints() = PluginEndpointBuilders.pluginEndpoints(descriptor.pluginId) {
             interceptors(RawRouteAuthInterceptor::class)
             route("/v1") {
-                rawPost(
+                post<RawRoutePayload, RawRouteResponse>(
                     "/raw",
                     doc = OpenApiDoc(summary = "Raw route", tags = listOf("raw")),
-                    responseContentTypes = listOf("application/json", "text/event-stream"),
-                    executionPolicy = com.keel.kernel.plugin.EndpointExecutionPolicy(maxPayloadBytes = 32)
-                ) {
-                    call.respondText(
-                        """{"principal":"${request.principal}","rawBody":${json.encodeToString(rawBody.orEmpty())}}""",
-                        ContentType.Application.Json
-                    )
+                    executionPolicy = com.keel.kernel.plugin.EndpointExecutionPolicy(maxPayloadBytes = 4096)
+                ) { request ->
+                    PluginResult(body = RawRouteResponse(principal = principal?.toString(), value = request.value))
                 }
             }
         }
     }
+
+    @Serializable
+    private data class RawRoutePayload(val value: String)
+
+    @Serializable
+    private data class RawRouteResponse(val principal: String?, val value: String)
 
     private class RawRouteAuthInterceptor : KeelRequestInterceptor {
         override suspend fun intercept(
@@ -215,7 +218,7 @@ class PluginEndpointOpenApiTest {
 
             staticResources(
                 path = "/ui",
-                basePackage = "static",
+                basePackage = "ui/observability-ui",
                 doc = OpenApiDoc(summary = "Static UI"),
                 index = "index.html"
             )

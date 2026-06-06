@@ -10,7 +10,7 @@ export class KeelDataTable extends KeelElement {
                 }
                 .table-wrap {
                     width: 100%;
-                    overflow-x: auto;
+                    overflow-x: hidden;
                     -webkit-overflow-scrolling: touch;
                 }
                 .table-wrap::-webkit-scrollbar {

@@ -168,6 +168,7 @@ export class PanelRateLimits extends KeelElement {
         `).join('');
 
         this.refs.rulesTable.render({
+            silent: !!this._hasRendered,
             headers: ['Name', 'Dimension', 'Path', 'Capacity', 'Refill/s', 'Priority', 'Enabled', 'Action'],
             rows: rules.map(r => [
                 escapeHtml(r.name || r.ruleId),
@@ -194,6 +195,7 @@ export class PanelRateLimits extends KeelElement {
 
         const buckets = snap.topBuckets || [];
         this.refs.bucketsTable.render({
+            silent: !!this._hasRendered,
             headers: ['Rule', 'Dimension', 'Value', 'Allowed', 'Rejected', 'Remaining', 'Capacity'],
             rows: buckets.map(b => [
                 `<code>${b.ruleId}</code>`,
@@ -206,6 +208,7 @@ export class PanelRateLimits extends KeelElement {
             ]),
             emptyHtml: '<div class="empty">No active buckets.</div>'
         });
+        this._hasRendered = true;
     }
 }
 

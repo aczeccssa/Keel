@@ -1,5 +1,8 @@
 package com.keel.samples.aigateway.airelay.config
 
+import com.keel.samples.aigateway.airelay.AliasRouteConfig
+import com.keel.samples.aigateway.airelay.AliasTargetConfig
+import com.keel.samples.aigateway.airelay.GroupExposureMode
 import com.keel.samples.aigateway.airelay.ModelPricing
 import com.keel.samples.aigateway.airelay.PoolChainConfig
 import com.keel.samples.aigateway.airelay.PoolLevelConfig
@@ -11,12 +14,9 @@ import java.util.concurrent.atomic.AtomicReference
 
 /**
  * Bridges persisted channels/models into the live gateway configuration and rebuilds the
- * [PoolChainManager] on every change (hot-apply, no restart). One enabled channel becomes one
- * single-level pool chain; each of its public model names becomes a chain alias. Pricing is
- * derived from the channel's models.
- *
- * The current [PoolChainManager] and [List]<[ModelPricing]> are published atomically so the relay
- * always sees a consistent snapshot.
+ * [PoolChainManager] on every change (hot-apply, no restart). One enabled group becomes one
+ * runtime pool chain; enabled channels inside the group are arranged into priority levels.
+ * Channels with the same priority share a level and are weighted by their channel weight.
  */
 class ConfigService(
     private val repository: ChannelRepository
@@ -29,10 +29,54 @@ class ConfigService(
 
     /** Rebuild the live config from the DB. Call after any channel/model mutation. */
     fun reload() {
+        // Drop pricing rows for models that no longer exist in any enabled channel.
+        repository.pruneUnconfiguredPricing()
+        // Absorb any newly added channel models into the standalone pricing table so
+        // the Pricing tab stays in sync without the operator having to re-enter rates.
+        repository.absorbChannelPricingIntoStandalone()
         val channels = repository.listChannels().filter { it.enabled }
-        val chains = channels.map { channel -> channel.toChain() }
-        val pricing = channels.flatMap { channel ->
-            channel.models.map { m ->
+        val enabledGroups = repository.listGroups().filter { it.enabled }
+        val chains = enabledGroups.mapNotNull { group ->
+            val groupChannels = channels.mapNotNull { channel ->
+                channel.memberships.firstOrNull { membership ->
+                    membership.groupId == group.groupId && membership.enabled
+                }?.let { membership -> channel to membership }
+            }
+            if (groupChannels.isEmpty() && group.aliasRoutes.isEmpty()) return@mapNotNull null
+            groupChannels.toGroupChain(group)
+        }
+        // Pricing: standalone ModelPricingTable rows take precedence; channel-embedded rates
+        // are the fallback for any model not in the standalone table.
+        val standalone = repository.listPricings().map { p ->
+            ModelPricing(
+                model = p.model,
+                variantKey = p.variantKey,
+                label = p.label,
+                billingUnitTokens = p.billingUnitTokens,
+                tiers = p.tiers.map { tier ->
+                    com.keel.samples.aigateway.airelay.ModelPricingTier(
+                        startTokensInclusive = tier.startTokensInclusive,
+                        endTokensExclusive = tier.endTokensExclusive,
+                        billingUnitTokens = tier.billingUnitTokens,
+                        inputCostPerUnit = tier.inputCostPerUnit,
+                        outputCostPerUnit = tier.outputCostPerUnit,
+                        cacheCreationCostPerUnit = tier.cacheCreationCostPerUnit,
+                        cacheReadCostPerUnit = tier.cacheReadCostPerUnit,
+                        reasoningOutputCostPerUnit = tier.reasoningOutputCostPerUnit,
+                    )
+                },
+                inputCostPerMTok = p.inputCostPerMTok,
+                outputCostPerMTok = p.outputCostPerMTok,
+                cacheCreationCostPerMTok = p.cacheCreationCostPerMTok,
+                cacheReadCostPerMTok = p.cacheReadCostPerMTok,
+                cachedInputDiscount = p.cachedInputDiscount,
+                reasoningOutputCostPerMTok = p.reasoningOutputCostPerMTok,
+                creditMultiplier = p.creditMultiplier
+            )
+        }
+        val standaloneModels = standalone.map { it.model }.toSet()
+        val fromChannels = channels.flatMap { channel ->
+            channel.models.filter { it.enabled }.map { m ->
                 ModelPricing(
                     model = m.publicModelName,
                     inputCostPerMTok = m.inputCostPerMTok,
@@ -40,44 +84,83 @@ class ConfigService(
                     cacheCreationCostPerMTok = m.cacheCreationCostPerMTok,
                     cacheReadCostPerMTok = m.cacheReadCostPerMTok,
                     cachedInputDiscount = m.cachedInputDiscount,
-                    reasoningOutputCostPerMTok = m.reasoningOutputCostPerMTok
+                    reasoningOutputCostPerMTok = m.reasoningOutputCostPerMTok,
+                    creditMultiplier = m.creditMultiplier
                 )
             }
-        }.distinctBy { it.model }
+        }.filter { it.model !in standaloneModels }.distinctBy { it.model }
+        val pricing = standalone + fromChannels
         managerRef.set(PoolChainManager(chains))
         pricingRef.set(pricing)
     }
 
-    private fun ChannelView.toChain(): PoolChainConfig {
-        val resolvedProtocol = runCatching { WireProtocol.valueOf(protocol) }
-            .getOrDefault(WireProtocol.ANTHROPIC_MESSAGES)
-        val aliases = models.filter { it.enabled }.map { it.publicModelName }.distinct()
-            .ifEmpty { listOf(name) }
-        val plainKey = repository.decryptedKey(channelId) ?: ""
-        return PoolChainConfig(
-            chainId = channelId,
-            modelAliases = aliases,
-            levels = listOf(
+    private fun List<Pair<ChannelView, ChannelMembershipView>>.toGroupChain(group: GroupView): PoolChainConfig {
+        val groupId = group.groupId
+        val directModels = flatMap { (channel, _) -> channel.models.filter { it.enabled }.map { it.publicModelName } }
+            .distinct()
+            .sorted()
+        val aliasNames = group.aliasRoutes.filter { it.enabled }.map { it.aliasName }.distinct().sorted()
+        val exposureMode = GroupExposureMode.from(group.exposureMode)
+        val exposedModels = when (exposureMode) {
+            GroupExposureMode.ALIASES_ONLY -> aliasNames
+            GroupExposureMode.ALIASES_AND_MODELS -> (directModels + aliasNames).distinct().sorted()
+            GroupExposureMode.ALL_MODELS -> directModels
+            GroupExposureMode.ALIAS_ONLY,
+            GroupExposureMode.ALIAS_AND_MODEL_NAMES,
+            GroupExposureMode.MODEL_NAMES_ONLY -> error("legacy exposure mode should be normalized")
+        }
+        val levels = groupBy { it.second.priority }
+            .toSortedMap(compareByDescending { it })
+            .entries
+            .mapIndexed { index, entry ->
+                val priority = entry.key
+                val levelChannels = entry.value.sortedBy { it.first.name }
                 PoolLevelConfig(
-                    levelId = "$channelId-l1",
-                    levelIndex = 1,
+                    levelId = "$groupId-p$priority",
+                    levelIndex = index + 1,
                     provider = UpstreamProviderConfig(
-                        providerId = name,
-                        baseUrl = baseUrl,
-                        protocol = resolvedProtocol,
-                        timeoutMs = timeoutMs
+                        providerId = "$groupId-priority-$priority",
+                        protocol = levelChannels.firstOrNull()?.first?.protocol?.let { runCatching { WireProtocol.valueOf(it) }.getOrNull() }
+                            ?: WireProtocol.ANTHROPIC_MESSAGES
                     ),
-                    keys = listOf(
-                        PooledKeyConfig(
-                            keyId = "$channelId-key",
-                            apiKeyEnv = apiKeyEnv,
-                            apiKey = plainKey.ifEmpty { "missing-key" },
-                            weight = weight,
-                            maxConcurrency = maxConcurrency,
-                            supportedModels = aliases
-                        )
-                    )
+                    keys = levelChannels.map { (channel, membership) -> channel.toPooledKey(membership, directModels) }
                 )
+            }
+        return PoolChainConfig(
+            chainId = groupId,
+            modelAliases = exposedModels,
+            levels = levels,
+            exposureMode = exposureMode,
+            aliasRoutes = group.aliasRoutes.map { alias ->
+                AliasRouteConfig(
+                    aliasName = alias.aliasName,
+                    targetModels = alias.targetModels,
+                    enabled = alias.enabled,
+                    creditMultiplier = alias.creditMultiplier,
+                    targets = alias.targets.map { target -> AliasTargetConfig(target.model, target.channelId) }
+                )
+            }
+        )
+    }
+
+    private fun ChannelView.toPooledKey(membership: ChannelMembershipView, groupDirectModels: List<String>): PooledKeyConfig {
+        val channelModels = models.filter { it.enabled }.map { it.publicModelName }.ifEmpty { groupDirectModels }
+        val protocol = runCatching { WireProtocol.valueOf(protocol) }.getOrDefault(WireProtocol.ANTHROPIC_MESSAGES)
+        return PooledKeyConfig(
+            keyId = channelId,
+            apiKeyEnv = apiKeyEnv,
+            apiKey = repository.decryptedKey(channelId)?.ifEmpty { "missing-key" } ?: "missing-key",
+            weight = membership.weight,
+            maxConcurrency = maxConcurrency,
+            supportedModels = channelModels,
+            modelMap = models.filter { it.enabled }.associate { model ->
+                model.publicModelName to model.upstreamModelName.ifBlank { model.publicModelName }
+            },
+            provider = UpstreamProviderConfig(
+                providerId = name,
+                baseUrl = baseUrl,
+                protocol = protocol,
+                timeoutMs = timeoutMs
             )
         )
     }

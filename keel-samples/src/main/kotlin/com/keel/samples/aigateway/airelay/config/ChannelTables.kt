@@ -3,6 +3,49 @@ package com.keel.samples.aigateway.airelay.config
 import com.keel.db.table.AuditPluginTable
 import org.jetbrains.exposed.sql.Column
 
+object GroupTable : AuditPluginTable("airelay", "group") {
+    val groupId: Column<String> = varchar("group_id", 64)
+    val name: Column<String> = varchar("name", 120)
+    val description: Column<String?> = varchar("description", 500).nullable()
+    val enabled: Column<Boolean> = bool("enabled").default(true)
+    val exposureMode: Column<String> = varchar("exposure_mode", 32).default("ALL_MODELS")
+
+    override val primaryKey = PrimaryKey(groupId)
+}
+
+/**
+ * Legacy one-to-one channel/group mapping. Kept for on-start migration into
+ * [ChannelMembershipTable] so existing H2 files continue to boot.
+ */
+object ChannelGroupTable : AuditPluginTable("airelay", "channel_group") {
+    val channelId: Column<String> = varchar("channel_id", 32)
+    val groupId: Column<String> = varchar("group_id", 64).index()
+
+    override val primaryKey = PrimaryKey(channelId)
+}
+
+object ChannelMembershipTable : AuditPluginTable("airelay", "channel_membership") {
+    val channelId: Column<String> = varchar("channel_id", 32)
+    val groupId: Column<String> = varchar("group_id", 64).index()
+    val priority: Column<Int> = integer("priority").default(0)
+    val weight: Column<Int> = integer("weight").default(100)
+    val enabled: Column<Boolean> = bool("enabled").default(true)
+
+    override val primaryKey = PrimaryKey(channelId, groupId)
+}
+
+object GroupAliasTable : AuditPluginTable("airelay", "group_alias") {
+    val aliasId: Column<String> = varchar("alias_id", 32)
+    val groupId: Column<String> = varchar("group_id", 64).index()
+    val aliasName: Column<String> = varchar("alias_name", 120).index()
+    /** Ordered alias targets stored as JSON. Supports legacy string arrays and {model, channelId?} objects. */
+    val targetModelsJson: Column<String> = text("target_models_json")
+    val enabled: Column<Boolean> = bool("enabled").default(true)
+    val creditMultiplier: Column<Double?> = double("credit_multiplier").nullable()
+
+    override val primaryKey = PrimaryKey(aliasId)
+}
+
 /**
  * Persisted upstream channel (a.k.a. provider). One row = one connection to one upstream:
  * its wire protocol, base URL, encrypted key, and routing weight/priority. Modeled on
@@ -49,6 +92,7 @@ object ChannelModelTable : AuditPluginTable("airelay", "model") {
     val cacheReadCostPerMTok: Column<Double?> = double("cache_read_cost_per_mtok").nullable()
     val cachedInputDiscount: Column<Double?> = double("cached_input_discount").nullable()
     val reasoningOutputCostPerMTok: Column<Double?> = double("reasoning_output_cost_per_mtok").nullable()
+    val creditMultiplier: Column<Double?> = double("credit_multiplier").nullable()
     val enabled: Column<Boolean> = bool("enabled").default(true)
 
     override val primaryKey = PrimaryKey(modelId)

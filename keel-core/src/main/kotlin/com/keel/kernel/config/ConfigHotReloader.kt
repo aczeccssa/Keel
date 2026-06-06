@@ -292,8 +292,9 @@ class ConfigHotReloader private constructor(
 
         fun getServerPort(): Int {
             val sysProp = System.getProperty(KeelConstants.PORT_SYSTEM_PROPERTY)?.toIntOrNull()
-            val envProp = System.getenv(KeelConstants.PORT_ENV_VARIABLE)?.toIntOrNull()
-            return sysProp ?: envProp ?: KeelConstants.DEFAULT_SERVER_PORT
+            val keelEnvProp = System.getenv(KeelConstants.PORT_ENV_VARIABLE)?.toIntOrNull()
+            val standardEnvProp = System.getenv(KeelConstants.STANDARD_PORT_ENV_VARIABLE)?.toIntOrNull()
+            return sysProp ?: keelEnvProp ?: standardEnvProp ?: KeelConstants.DEFAULT_SERVER_PORT
         }
     }
 

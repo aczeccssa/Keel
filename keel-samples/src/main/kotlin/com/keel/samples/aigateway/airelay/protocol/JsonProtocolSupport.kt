@@ -28,7 +28,10 @@ fun textOf(parts: List<IrContentPart>): String = parts.joinToString("") { part -
         is IrContentPart.Text -> part.text
         is IrContentPart.Reasoning -> part.summary.orEmpty()
         is IrContentPart.Image -> "[image:${part.mimeType}]"
-        is IrContentPart.ToolUse -> ""
+        is IrContentPart.ToolUse -> "[tool_use:${part.name}]"
+        is IrContentPart.ToolResult -> part.content.toString()
+        is IrContentPart.Document -> "[document:${part.mediaType}]${part.title?.let { " ($it)" } ?: ""}"
+        is IrContentPart.Passthrough -> "[${part.type}]"
     }
 }
 

@@ -104,7 +104,6 @@ export class PanelAiGateway extends KeelElement {
                 }
                 .table-wrap {
                     width: 100%;
-                    overflow-x: auto;
                 }
                 table {
                     width: 100%;

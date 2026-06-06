@@ -12,8 +12,8 @@ import com.keel.samples.aigateway.airelay.protocol.WireProtocol
 import com.keel.samples.aigateway.airelay.upstream.RealUpstreamHttpClient
 import com.keel.samples.aigateway.riskcontrol.RiskControlPlugin
 import com.keel.samples.aigateway.token.TokenPlugin
-import com.keel.samples.observability.ObservabilityPlugin
 import io.ktor.client.request.header
+import io.ktor.client.request.get
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.bodyAsText
@@ -28,10 +28,12 @@ import io.ktor.server.sse.SSE
 import io.ktor.server.testing.testApplication
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
-import org.junit.Assume.assumeTrue
+import org.junit.jupiter.api.Assumptions.assumeTrue
+import java.nio.file.Files
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -87,7 +89,7 @@ class RealUpstreamAnthropicTest {
             )
         }
         assertEquals(HttpStatusCode.OK, resp.status, "Direct Anthropic call failed: ${resp.bodyAsText()}")
-        val body = unwrapRelayResponse(resp.bodyAsText()).jsonObject
+        val body = parseGatewayBody(resp.bodyAsText()).jsonObject
         assertEquals("message", body["type"]!!.jsonPrimitive.content)
         val content = body["content"]!!.jsonArray
         assertTrue(content.isNotEmpty(), "Anthropic response must contain at least one content block")
@@ -117,7 +119,7 @@ class RealUpstreamAnthropicTest {
             )
         }
         assertEquals(HttpStatusCode.OK, resp.status, "Responses->Anthropic failed: ${resp.bodyAsText()}")
-        val body = unwrapRelayResponse(resp.bodyAsText()).jsonObject
+        val body = parseGatewayBody(resp.bodyAsText()).jsonObject
         assertEquals("response", body["object"]!!.jsonPrimitive.content, "Client must receive Responses envelope")
         assertTrue((body["output"]!!.jsonArray).isNotEmpty(), "Responses output must be non-empty")
         // The X-Upstream-Protocol header should be Anthropic (proving the conversion happened).
@@ -129,10 +131,10 @@ class RealUpstreamAnthropicTest {
         )
     }
 
-    private fun unwrapRelayResponse(body: String): kotlinx.serialization.json.JsonElement {
+    private fun parseGatewayBody(body: String): kotlinx.serialization.json.JsonElement {
         val outer = json.parseToJsonElement(body).jsonObject
-        val inner = outer["response"]!!.jsonPrimitive.content
-        return json.parseToJsonElement(inner)
+        val inner = outer["response"]?.jsonPrimitive?.contentOrNull
+        return if (inner != null) json.parseToJsonElement(inner) else outer
     }
 
     private class GatewayContext(
@@ -143,6 +145,9 @@ class RealUpstreamAnthropicTest {
     )
 
     private fun withRealGateway(baseUrl: String, block: suspend (GatewayContext) -> Unit) = testApplication {
+        val previousDataDir = System.getProperty("keel.data.dir")
+        val testDataDir = Files.createTempDirectory("keel-gateway-real-").toFile()
+        System.setProperty("keel.data.dir", testDataDir.absolutePath)
         OpenApiRegistry.clear()
         val koin = startKoin {}.koin
         val manager = UnifiedPluginManager(koin)
@@ -150,12 +155,10 @@ class RealUpstreamAnthropicTest {
         val tokenPlugin = TokenPlugin()
         val riskPlugin = RiskControlPlugin()
         val airelayPlugin = AIRelayPlugin()
-        val observability = ObservabilityPlugin()
         manager.registerPlugin(accountPlugin)
         manager.registerPlugin(tokenPlugin)
         manager.registerPlugin(riskPlugin)
         manager.registerPlugin(airelayPlugin)
-        manager.registerPlugin(observability)
 
         // Override the default chain to point at the local account pool.
         val apiKey = System.getenv("ANTHROPIC_AUTH_TOKEN")
@@ -186,32 +189,51 @@ class RealUpstreamAnthropicTest {
             )
         )
         // Replace the upstream client in the airelay plugin with a real one.
-        runBlocking {
-            airelayPlugin.installRealUpstream(RealUpstreamHttpClient.create(), chains)
-        }
+        runBlocking { airelayPlugin.installRealUpstream(RealUpstreamHttpClient.create(), chains) }
 
-        application {
-            install(ContentNegotiation) { json() }
-            install(SSE)
-            routing { manager.mountRoutes(this) }
-            runBlocking {
-                manager.startPlugin("account")
-                manager.startPlugin("token")
-                manager.startPlugin("riskcontrol")
-                manager.startPlugin("airelay")
-                manager.startPlugin("observability")
+        try {
+            application {
+                install(ContentNegotiation) { json() }
+                install(SSE)
+                routing { manager.mountRoutes(this) }
+                runBlocking {
+                    manager.startPlugin("account")
+                    manager.startPlugin("token")
+                    manager.startPlugin("riskcontrol")
+                    manager.startPlugin("airelay")
+                }
+            }
+
+            val loginResponse = client.post("/api/plugins/account/v1/auth/login") {
+                contentType(ContentType.Application.Json)
+                setBody("""{"email":"user@example.com","password":"user123"}""")
+            }
+            assertEquals(HttpStatusCode.OK, loginResponse.status)
+            val accessToken = json.parseToJsonElement(loginResponse.bodyAsText()).jsonObject["accessToken"]!!.jsonPrimitive.content
+
+            val keyResponse = client.post("/api/plugins/token/v1/keys") {
+                header("Authorization", "Bearer $accessToken")
+                contentType(ContentType.Application.Json)
+                setBody("""{"displayName":"Real upstream key","maxBudgetUsd":100}""")
+            }
+            assertEquals(HttpStatusCode.OK, keyResponse.status)
+            val rawKey = json.parseToJsonElement(keyResponse.bodyAsText()).jsonObject["rawKey"]!!.jsonPrimitive.content
+
+            block(
+                GatewayContext(
+                    client = client,
+                    rawKey = rawKey,
+                    model = "claude-sonnet-4-20250514",
+                    localUpstreamReachable = localUpstreamReachable
+                )
+            )
+        } finally {
+            if (previousDataDir == null) {
+                System.clearProperty("keel.data.dir")
+            } else {
+                System.setProperty("keel.data.dir", previousDataDir)
             }
         }
-
-        val rawKey = "sk-keel-demo-user"
-        block(
-            GatewayContext(
-                client = client,
-                rawKey = rawKey,
-                model = "claude-sonnet-4-20250514",
-                localUpstreamReachable = localUpstreamReachable
-            )
-        )
     }
 
     private suspend fun probeUpstream(baseUrl: String): Boolean = try {
@@ -229,14 +251,4 @@ class RealUpstreamAnthropicTest {
     } catch (_: Exception) {
         false
     }
-}
-
-private suspend fun io.ktor.client.HttpClient.get(url: String): io.ktor.client.statement.HttpResponse =
-    io.ktor.client.request.get(url)
-
-private fun AIRelayPlugin.installRealUpstream(
-    client: RealUpstreamHttpClient,
-    @Suppress("UNUSED_PARAMETER") chains: List<PoolChainConfig>
-) {
-    this.upstreamClient = client
 }

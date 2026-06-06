@@ -16,6 +16,7 @@ import com.keel.kernel.plugin.PluginRuntimeContext
 import com.keel.kernel.plugin.StandardKeelPlugin
 import com.keel.openapi.annotations.KeelApiPlugin
 import com.keel.openapi.runtime.OpenApiDoc
+import com.keel.samples.aigateway.GatewayDataPaths
 import org.koin.dsl.module
 
 @KeelApiPlugin(
@@ -47,7 +48,10 @@ class TokenPlugin : StandardKeelPlugin {
     override suspend fun onInit(context: PluginInitContext) {
         val userDirectory = context.kernelKoin.get<UserDirectory>()
         jwtVerifier = context.kernelKoin.get<JwtPrincipalVerifier>()
-        dbFactory = DatabaseFactory.h2Memory(name = "aigateway_token", poolSize = 5)
+        dbFactory = DatabaseFactory.h2File(
+            filePath = GatewayDataPaths.databasePath("aigateway_token"),
+            poolSize = 5
+        )
         database = dbFactory.init()
         repository = TokenRepository(database, userDirectory)
         repository.initializeSchema()
@@ -90,9 +94,9 @@ class TokenPlugin : StandardKeelPlugin {
                         PluginResult(body = repository.updateKey(requireAiPrincipal().userId, requireKeyId(), request, includeAll = false))
                     }
                     delete<ApiKeyView>(
-                        doc = OpenApiDoc(summary = "Revoke virtual API key", tags = listOf("ai-gateway", "token"), errorStatuses = setOf(401, 403, 404))
+                        doc = OpenApiDoc(summary = "Delete virtual API key", tags = listOf("ai-gateway", "token"), errorStatuses = setOf(401, 403, 404))
                     ) {
-                        PluginResult(body = repository.revokeKey(requireAiPrincipal().userId, requireKeyId(), includeAll = false))
+                        PluginResult(body = repository.deleteKey(requireAiPrincipal().userId, requireKeyId(), includeAll = false))
                     }
                     post<TempBudgetRequest, ApiKeyView>(
                         "/temp-budget",
@@ -123,6 +127,13 @@ class TokenPlugin : StandardKeelPlugin {
                 doc = OpenApiDoc(summary = "Get global AI Gateway usage summary", tags = listOf("ai-gateway", "token", "admin"), errorStatuses = setOf(401, 403))
             ) {
                 PluginResult(body = repository.snapshot())
+            }
+            get<UsageListResponse>(
+                "/usage/records",
+                doc = OpenApiDoc(summary = "List recent usage records with full token + cost breakdown", tags = listOf("ai-gateway", "token", "admin"), errorStatuses = setOf(401, 403))
+            ) {
+                val limit = queryParameters["limit"]?.firstOrNull()?.toIntOrNull() ?: 50
+                PluginResult(body = repository.recentRecords(limit))
             }
         }
     }

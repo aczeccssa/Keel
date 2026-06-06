@@ -68,6 +68,7 @@ data class AIRelaySettings(
                                 cacheReadCostPerMTok = p?.cacheReadCostPerMTok,
                                 cachedInputDiscount = p?.cachedInputDiscount,
                                 reasoningOutputCostPerMTok = p?.reasoningOutputCostPerMTok,
+                                creditMultiplier = p?.creditMultiplier,
                                 enabled = true
                             )
                         }
@@ -82,8 +83,57 @@ data class AIRelaySettings(
 data class PoolChainConfig(
     val chainId: String,
     val modelAliases: List<String>,
-    val levels: List<PoolLevelConfig>
+    val levels: List<PoolLevelConfig>,
+    val exposureMode: GroupExposureMode = GroupExposureMode.ALL_MODELS,
+    val aliasRoutes: List<AliasRouteConfig> = emptyList()
 )
+
+@Serializable
+enum class GroupExposureMode {
+    ALL_MODELS,
+    ALIASES_ONLY,
+    ALIASES_AND_MODELS,
+
+    /** Legacy value kept so older JSON/H2 rows continue to decode. */
+    ALIAS_ONLY,
+    /** Legacy value kept so older JSON/H2 rows continue to decode. */
+    ALIAS_AND_MODEL_NAMES,
+    /** Legacy value kept so older JSON/H2 rows continue to decode. */
+    MODEL_NAMES_ONLY;
+
+    fun normalized(): GroupExposureMode = when (this) {
+        ALIAS_ONLY -> ALIASES_ONLY
+        ALIAS_AND_MODEL_NAMES -> ALIASES_AND_MODELS
+        MODEL_NAMES_ONLY -> ALL_MODELS
+        else -> this
+    }
+
+    companion object {
+        fun from(value: String?): GroupExposureMode = runCatching {
+            value?.takeIf { it.isNotBlank() }?.let { valueOf(it) }
+        }.getOrNull()?.normalized() ?: ALL_MODELS
+    }
+}
+
+@Serializable
+data class AliasTargetConfig(
+    val model: String,
+    val channelId: String? = null
+)
+
+@Serializable
+data class AliasRouteConfig(
+    val aliasName: String,
+    /** Legacy flat target model list. New writes should prefer [targets]. */
+    val targetModels: List<String> = emptyList(),
+    val enabled: Boolean = true,
+    val creditMultiplier: Double? = null,
+    val targets: List<AliasTargetConfig> = emptyList()
+) {
+    fun orderedTargets(): List<AliasTargetConfig> = targets.ifEmpty {
+        targetModels.map { AliasTargetConfig(it) }
+    }.filter { it.model.isNotBlank() }
+}
 
 @Serializable
 data class PoolLevelConfig(
@@ -110,18 +160,37 @@ data class PooledKeyConfig(
     val apiKey: String = "mock-key",
     val weight: Int = 100,
     val maxConcurrency: Int = 10,
-    val supportedModels: List<String> = emptyList()
+    val supportedModels: List<String> = emptyList(),
+    val modelMap: Map<String, String> = emptyMap(),
+    val provider: UpstreamProviderConfig? = null
 )
 
 @Serializable
 data class ModelPricing(
     val model: String,
+    val variantKey: String? = null,
+    val label: String? = null,
+    val billingUnitTokens: Long = 1_000_000,
+    val tiers: List<ModelPricingTier> = emptyList(),
     val inputCostPerMTok: Double,
     val outputCostPerMTok: Double,
     val cacheCreationCostPerMTok: Double? = null,
     val cacheReadCostPerMTok: Double? = null,
     val cachedInputDiscount: Double? = null,
-    val reasoningOutputCostPerMTok: Double? = null
+    val reasoningOutputCostPerMTok: Double? = null,
+    val creditMultiplier: Double? = null
+)
+
+@Serializable
+data class ModelPricingTier(
+    val startTokensInclusive: Long = 0,
+    val endTokensExclusive: Long? = null,
+    val billingUnitTokens: Long = 1_000_000,
+    val inputCostPerUnit: Double = 0.0,
+    val outputCostPerUnit: Double = 0.0,
+    val cacheCreationCostPerUnit: Double? = null,
+    val cacheReadCostPerUnit: Double? = null,
+    val reasoningOutputCostPerUnit: Double? = null,
 )
 
 fun defaultChains(): List<PoolChainConfig> = listOf(

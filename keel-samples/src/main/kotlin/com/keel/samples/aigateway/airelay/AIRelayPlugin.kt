@@ -173,6 +173,7 @@ class AIRelayPlugin : StandardKeelPlugin {
                                         cacheReadCostPerMTok = p.cacheReadCostPerMTok,
                                         cachedInputDiscount = p.cachedInputDiscount,
                                         reasoningOutputCostPerMTok = p.reasoningOutputCostPerMTok,
+                                        creditMultiplier = p.creditMultiplier,
                                     )
                                 }
                             }
@@ -396,8 +397,9 @@ class AIRelayPlugin : StandardKeelPlugin {
                 val result = buildService().proxyAnthropicRaw(this, raw, "/v1/messages/batches/$batchId/results", io.ktor.http.HttpMethod.Get)
                 PluginResult(status = result.status, headers = result.headers, body = result)
             }
-            // ---- Count Tokens ----
-            post<CountTokensRequest, String>(
+            // ---- Models ----
+            get<String>(
+                "/models",
                 doc = OpenApiDoc(summary = "List AI Gateway models", tags = listOf("ai-gateway", "airelay", "anthropic", "openai-responses"))
             ) {
                 val visibleModels = resolveVisibleModelsForRequest(this)

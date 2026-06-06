@@ -1,7 +1,7 @@
 import { KeelElement } from './base/KeelElement.js';
 import { requestJson, postJson, putJson, deleteJson } from '../api.js';
 import { API } from '../config.js';
-import { escapeHtml } from '../utils.js';
+import { escapeHtml, copyText } from '../utils.js';
 
 const PROTOCOLS = [
     { value: 'ANTHROPIC_MESSAGES', label: 'Anthropic Messages' },
@@ -21,6 +21,14 @@ const STATUS_STYLE = {
  * entry point for pointing the gateway at a provider (e.g. http://127.0.0.1:15721) at runtime.
  */
 export class PanelProviders extends KeelElement {
+    constructor() {
+        super();
+        this._editingId = null;
+        this._groups = [];
+        this._channels = [];
+        this._hasRendered = false;
+    }
+
     hostStyles() { return 'height:100%;'; }
 
     template() {
@@ -93,13 +101,28 @@ export class PanelProviders extends KeelElement {
                     width: 100%; padding: 11px 13px; border: 0; border-radius: var(--radius-sm); font-size: 13px;
                     background: var(--color-surface-container-high, #e4e2dc); color: var(--ink); transition: all 150ms ease;
                 }
-                .field textarea { font-family: var(--font-mono); min-height: 90px; resize: vertical; }
                 .field input:focus, .field select:focus, .field textarea:focus { outline: none; box-shadow: var(--shadow-sm); background: var(--color-surface-container-lowest, #fff); }
                 .field .hint { font-size: 10px; color: var(--muted); margin-top: 6px; }
                 .modal-actions { display: flex; gap: 12px; margin-top: 8px; }
                 .test-banner { margin: 0 0 18px; padding: 12px 16px; border-radius: var(--radius-sm); font-size: 12px; font-weight: 600; display: none; }
                 .test-banner.ok { display: block; background: var(--green-soft); color: var(--green); }
                 .test-banner.err { display: block; background: var(--red-soft); color: var(--red); }
+                .auth-preview { padding: 10px 12px; background: var(--color-surface-container-lowest, #fff); border: 1px dashed var(--ink); font-family: var(--font-mono); font-size: 11px; }
+                .model-toolbar { display:flex; justify-content:space-between; align-items:center; gap:12px; margin-bottom:10px; }
+                .model-rows { display:grid; gap:10px; }
+                .model-row { display:grid; grid-template-columns: 1.2fr 1.2fr auto auto; gap:8px; align-items:end; }
+                .model-row .field { margin:0; }
+                .model-row .field label { font-size:9px; margin-bottom:6px; }
+                .model-row .btn-ghost, .model-row .btn-mini { align-self:stretch; }
+                .model-row .btn-mini {
+                    padding: 8px 10px; border: 1px solid var(--line-strong); background: transparent; color: var(--ink); font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; cursor: pointer;
+                }
+                .model-row .btn-mini:hover { background: var(--panel-strong); }
+                .membership-toolbar { display:flex; justify-content:space-between; align-items:center; gap:12px; margin-bottom:10px; }
+                .membership-rows { display:grid; gap:10px; }
+                .membership-row { display:grid; grid-template-columns: 1.2fr 0.7fr 0.7fr auto; gap:8px; align-items:end; }
+                .membership-row .field { margin:0; }
+                .membership-row .field label { font-size:9px; margin-bottom:6px; }
             </style>
             <div class="panel-layout">
                 <div class="toolbar">
@@ -115,19 +138,33 @@ export class PanelProviders extends KeelElement {
                     <div class="test-banner" data-ref="testBanner"></div>
                     <div class="form-grid">
                         <div class="field"><label>Name</label><input data-ref="fName" placeholder="My Anthropic backup"></div>
-                        <div class="field"><label>Group</label><select data-ref="fGroup"></select></div>
                         <div class="field"><label>Protocol</label>
                             <select data-ref="fProtocol">${PROTOCOLS.map(p => `<option value="${p.value}">${p.label}</option>`).join('')}</select>
                         </div>
+                        <div class="field"><label>Status</label><div class="auth-preview" data-ref="membershipSummary">1 membership</div></div>
                         <div class="field full"><label>Base URL</label><input data-ref="fBaseUrl" placeholder="http://127.0.0.1:15721"></div>
                         <div class="field full"><label>API Key</label><input data-ref="fApiKey" type="password" placeholder="leave blank to keep existing"><div class="hint">Stored encrypted. For env-based keys, set "API Key Env" instead.</div></div>
                         <div class="field"><label>API Key Env</label><input data-ref="fApiKeyEnv" placeholder="ANTHROPIC_AUTH_TOKEN"></div>
-                        <div class="field"><label>Priority</label><input data-ref="fPriority" type="number" value="0"></div>
-                        <div class="field"><label>Weight</label><input data-ref="fWeight" type="number" value="100"></div>
+                        <div class="field"><label>Auth Preview</label><div class="auth-preview" data-ref="authPreview">x-api-key: $KEY</div></div>
                         <div class="field"><label>Max Concurrency</label><input data-ref="fMaxConc" type="number" value="10"></div>
-                        <div class="field full"><label>Models (one per line: publicName[=upstreamName])</label>
-                            <textarea data-ref="fModels" placeholder="claude-sonnet-4-20250514&#10;claude-opus-4-20250514=claude-opus-4"></textarea>
-                            <div class="hint">These are the model names clients can request through this channel.</div>
+                        <div class="field full">
+                            <div class="membership-toolbar">
+                                <label>Memberships</label>
+                                <button class="btn-ghost" data-ref="addMembershipBtn">+ Add Membership</button>
+                            </div>
+                            <div class="membership-rows" data-ref="membershipRows"></div>
+                            <div class="hint">A channel can belong to multiple groups with different priority/weight values.</div>
+                        </div>
+                        <div class="field full">
+                            <div class="model-toolbar">
+                                <label>Models</label>
+                                <div style="display:flex;gap:8px;">
+                                    <button class="btn-ghost" data-ref="fetchModelsBtn">Fetch Models</button>
+                                    <button class="btn-ghost" data-ref="addModelBtn">+ Add Model</button>
+                                </div>
+                            </div>
+                            <div class="model-rows" data-ref="modelRows"></div>
+                            <div class="hint">These are the model names clients can request through this channel. Fetch will add upstream ids as both public and upstream names.</div>
                         </div>
                     </div>
                     <div class="modal-actions">
@@ -142,13 +179,16 @@ export class PanelProviders extends KeelElement {
 
     afterMount() {
         this.refs.hero.render({ label: 'Channel Management', title: 'Channels', metaHtml: '' });
-        this._editingId = null;
-        this._groups = [];
         this.refs.addBtn.addEventListener('click', () => this._openModal(null));
         this.refs.cancelBtn.addEventListener('click', () => this._closeModal());
         this.refs.overlay.addEventListener('click', (e) => { if (e.target === this.refs.overlay) this._closeModal(); });
         this.refs.saveBtn.addEventListener('click', () => this._save());
         this.refs.testInModalBtn.addEventListener('click', () => this._testFromForm());
+        this.refs.addModelBtn.addEventListener('click', () => this._addModelRow());
+        this.refs.addMembershipBtn.addEventListener('click', () => this._addMembershipRow());
+        this.refs.fetchModelsBtn.addEventListener('click', () => this._fetchModels());
+        this.refs.fProtocol.addEventListener('change', () => this._applyProtocolHints());
+        this.refs.grid.addEventListener('click', (event) => this._handleGridAction(event));
     }
 
     async refresh() {
@@ -158,13 +198,15 @@ export class PanelProviders extends KeelElement {
                 requestJson(`${API.airelay}/admin/groups`).catch(() => ({ groups: [] })),
             ]);
             this._groups = groups.groups || [];
-            this._render(data.channels || []);
+            this._channels = data.channels || [];
+            this._render(this._channels, { silent: this._hasRendered });
+            this._hasRendered = true;
         } catch (e) {
             this.refs.grid.innerHTML = `<div class="empty">Failed to load channels: ${escapeHtml(e.message)}</div>`;
         }
     }
 
-    _render(channels) {
+    _render(channels, { silent = false } = {}) {
         this.refs.hero.render({
             label: 'Channel Management',
             title: 'Channels',
@@ -176,9 +218,14 @@ export class PanelProviders extends KeelElement {
             return;
         }
 
-        this.refs.grid.innerHTML = `<div class="channel-grid">${channels.map(c => this._cardHtml(c)).join('')}</div>`;
-        this._bindCardActions(channels);
-        this._animateCards();
+        const grid = this.refs.grid.querySelector('.channel-grid');
+        if (!silent || !grid) {
+            this.refs.grid.innerHTML = `<div class="channel-grid">${channels.map(c => this._cardHtml(c)).join('')}</div>`;
+            if (!this._hasRendered) this._animateCards();
+            return;
+        }
+
+        this._patchCards(grid, channels);
     }
 
     _cardHtml(c) {
@@ -188,9 +235,8 @@ export class PanelProviders extends KeelElement {
         const latency = c.lastTestLatencyMs != null
             ? `Last test: ${c.lastTestError ? `<span style="color:var(--red)">failed</span>` : `${c.lastTestLatencyMs}ms OK`}`
             : 'Not tested yet';
-        const group = escapeHtml(c.groupId || 'default');
-        const priority = c.priority ?? 0;
-        const weight = c.weight ?? 100;
+        const memberships = (c.memberships && c.memberships.length ? c.memberships : [{ groupId: c.groupId || 'default', priority: c.priority ?? 0, weight: c.weight ?? 100, enabled: c.enabled }]);
+        const membershipText = memberships.map(m => `${m.groupId}:P${m.priority}/W${m.weight}`).join(' · ');
         return `
             <div class="channel-card" data-card="${c.channelId}">
                 <div class="cc-head">
@@ -199,7 +245,7 @@ export class PanelProviders extends KeelElement {
                         <span class="chip" style="background:${s.bg};color:${s.color};">${s.label}</span>
                     </div>
                     <div class="cc-meta">${escapeHtml(c.baseUrl)}</div>
-                    <span class="cc-proto">${escapeHtml(c.protocol)} · GROUP ${group} · P${priority} · W${weight}</span>
+                    <span class="cc-proto">${escapeHtml(c.protocol)} · ${escapeHtml(membershipText)}</span>
                 </div>
                 <div class="cc-body">
                     <div class="cc-models">${models}</div>
@@ -214,12 +260,84 @@ export class PanelProviders extends KeelElement {
             </div>`;
     }
 
-    _bindCardActions(channels) {
-        const byId = Object.fromEntries(channels.map(c => [c.channelId, c]));
-        this.shadowRoot.querySelectorAll('[data-test]').forEach(btn => btn.addEventListener('click', () => this._test(btn.dataset.test, btn)));
-        this.shadowRoot.querySelectorAll('[data-edit]').forEach(btn => btn.addEventListener('click', () => this._openModal(byId[btn.dataset.edit])));
-        this.shadowRoot.querySelectorAll('[data-toggle]').forEach(btn => btn.addEventListener('click', () => this._toggle(btn.dataset.toggle, btn.dataset.enabled !== 'true')));
-        this.shadowRoot.querySelectorAll('[data-delete]').forEach(btn => btn.addEventListener('click', () => this._delete(btn.dataset.delete)));
+    _handleGridAction(event) {
+        const testBtn = event.target.closest('[data-test]');
+        if (testBtn) {
+            this._test(testBtn.dataset.test, testBtn);
+            return;
+        }
+        const editBtn = event.target.closest('[data-edit]');
+        if (editBtn) {
+            const channel = this._channels.find(c => c.channelId === editBtn.dataset.edit);
+            if (channel) this._openModal(channel);
+            return;
+        }
+        const toggleBtn = event.target.closest('[data-toggle]');
+        if (toggleBtn) {
+            this._toggle(toggleBtn.dataset.toggle, toggleBtn.dataset.enabled !== 'true');
+            return;
+        }
+        const deleteBtn = event.target.closest('[data-delete]');
+        if (deleteBtn) this._delete(deleteBtn.dataset.delete);
+    }
+
+    _patchCards(grid, channels) {
+        const existing = new Map(Array.from(grid.querySelectorAll('.channel-card')).map(card => [card.dataset.card, card]));
+        const cardsInOrder = channels.map(channel => {
+            const snapshot = this._cardSnapshot(channel);
+            let card = existing.get(channel.channelId);
+            if (!card) {
+                card = this._createCard(channel);
+            } else if (card.dataset.snapshot !== snapshot) {
+                const replacement = this._createCard(channel);
+                card.replaceWith(replacement);
+                card = replacement;
+            }
+            return card;
+        });
+
+        cardsInOrder.forEach((card, index) => {
+            if (grid.children[index] !== card) {
+                grid.insertBefore(card, grid.children[index] || null);
+            }
+        });
+        existing.forEach((card, id) => {
+            if (!channels.some(channel => channel.channelId === id) && card.isConnected) {
+                card.remove();
+            }
+        });
+    }
+
+    _createCard(channel) {
+        const wrapper = document.createElement('div');
+        wrapper.innerHTML = this._cardHtml(channel).trim();
+        const card = wrapper.firstElementChild;
+        card.dataset.snapshot = this._cardSnapshot(channel);
+        return card;
+    }
+
+    _cardSnapshot(channel) {
+        return JSON.stringify({
+            channelId: channel.channelId,
+            name: channel.name,
+            protocol: channel.protocol,
+            baseUrl: channel.baseUrl,
+            enabled: channel.enabled,
+            status: channel.status,
+            lastTestLatencyMs: channel.lastTestLatencyMs,
+            lastTestError: channel.lastTestError,
+            models: (channel.models || []).map(model => ({
+                publicModelName: model.publicModelName,
+                upstreamModelName: model.upstreamModelName,
+                enabled: model.enabled,
+            })),
+            memberships: (channel.memberships || []).map(membership => ({
+                groupId: membership.groupId,
+                priority: membership.priority,
+                weight: membership.weight,
+                enabled: membership.enabled,
+            })),
+        });
     }
 
     _animateCards() {
@@ -233,22 +351,23 @@ export class PanelProviders extends KeelElement {
         this._editingId = channel ? channel.channelId : null;
         this.refs.modalTitle.textContent = channel ? 'Edit Channel' : 'Add Channel';
         this.refs.testBanner.className = 'test-banner';
-        const groupOptions = (this._groups && this._groups.length ? this._groups : [{ groupId: 'default', name: 'Default' }])
-            .map(g => `<option value="${escapeHtml(g.groupId)}">${escapeHtml(g.name || g.groupId)}</option>`).join('');
-        this.refs.fGroup.innerHTML = groupOptions;
-        this.refs.fGroup.value = channel?.groupId || 'default';
         this.refs.fName.value = channel?.name || '';
         this.refs.fProtocol.value = channel?.protocol || 'ANTHROPIC_MESSAGES';
         this.refs.fBaseUrl.value = channel?.baseUrl || '';
         this.refs.fApiKey.value = '';
         this.refs.fApiKey.placeholder = channel ? 'leave blank to keep existing' : 'sk-...';
         this.refs.fApiKeyEnv.value = channel?.apiKeyEnv || '';
-        this.refs.fPriority.value = channel?.priority ?? 0;
-        this.refs.fWeight.value = channel?.weight ?? 100;
         this.refs.fMaxConc.value = channel?.maxConcurrency ?? 10;
-        this.refs.fModels.value = (channel?.models || [])
-            .map(m => m.upstreamModelName ? `${m.publicModelName}=${m.upstreamModelName}` : m.publicModelName)
-            .join('\n');
+        this.refs.membershipRows.innerHTML = '';
+        const memberships = channel?.memberships?.length
+            ? channel.memberships
+            : [{ groupId: channel?.groupId || 'default', priority: channel?.priority ?? 0, weight: channel?.weight ?? 100, enabled: true }];
+        memberships.forEach(m => this._addMembershipRow(m));
+        this.refs.modelRows.innerHTML = '';
+        const models = channel?.models?.length ? channel.models : [{ publicModelName: '', upstreamModelName: '', enabled: true, creditMultiplier: '' }];
+        models.forEach(m => this._addModelRow(m));
+        this._applyProtocolHints();
+        this._renderMembershipSummary();
         this.refs.overlay.classList.add('open');
         const gsap = window.gsap;
         if (gsap) gsap.fromTo(this.refs.modal, { autoAlpha: 0, y: 20, scale: 0.98 }, { autoAlpha: 1, y: 0, scale: 1, duration: 0.3, ease: 'power2.out' });
@@ -258,11 +377,110 @@ export class PanelProviders extends KeelElement {
         this.refs.overlay.classList.remove('open');
     }
 
-    _collectForm() {
-        const models = this.refs.fModels.value.split('\n').map(l => l.trim()).filter(Boolean).map(line => {
-            const [pub, up] = line.split('=').map(s => s.trim());
-            return { publicModelName: pub, upstreamModelName: up || '', enabled: true };
+    _applyProtocolHints() {
+        const protocol = this.refs.fProtocol.value;
+        if (protocol === 'ANTHROPIC_MESSAGES') {
+            this.refs.fApiKeyEnv.placeholder = 'ANTHROPIC_API_KEY';
+            this.refs.authPreview.textContent = 'x-api-key: $KEY';
+        } else {
+            this.refs.fApiKeyEnv.placeholder = 'OPENAI_API_KEY';
+            this.refs.authPreview.textContent = 'Authorization: Bearer $KEY';
+        }
+    }
+
+    _addModelRow(model = { publicModelName: '', upstreamModelName: '', enabled: true, creditMultiplier: '' }) {
+        const row = document.createElement('div');
+        row.className = 'model-row';
+        row.innerHTML = `
+            <div class="field">
+                <label>Public Name</label>
+                <input data-role="public" value="${escapeHtml(model.publicModelName || '')}" placeholder="claude-sonnet-4-20250514">
+            </div>
+            <div class="field">
+                <label>Upstream Name</label>
+                <input data-role="upstream" value="${escapeHtml(model.upstreamModelName || '')}" placeholder="claude-sonnet-4-20250514">
+            </div>
+            <div class="field">
+                <label>Credit ×</label>
+                <input data-role="credit" type="number" step="0.1" min="0" value="${escapeHtml(model.creditMultiplier ?? '')}" placeholder="1.0">
+            </div>
+            <div class="field" style="flex-direction:row;align-items:center;gap:6px;">
+                <label style="margin:0;"><input type="checkbox" data-role="model-enabled" ${model.enabled !== false ? 'checked' : ''} /> On</label>
+            </div>
+            <div style="display:flex;gap:6px;">
+                <button class="btn-mini" data-role="test-model">Test</button>
+                <button class="btn-mini" data-role="remove-model">Remove</button>
+            </div>
+            <div class="field full" data-role="test-result" style="display:none;margin-top:4px;">
+                <div class="test-banner" style="margin:0;"></div>
+            </div>
+        `;
+        row.querySelector('[data-role="remove-model"]').addEventListener('click', () => {
+            row.remove();
+            if (!this.refs.modelRows.children.length) this._addModelRow();
         });
+        row.querySelector('[data-role="test-model"]').addEventListener('click', () => this._testModelRow(row));
+        this.refs.modelRows.appendChild(row);
+    }
+
+    _addMembershipRow(membership = { groupId: 'default', priority: 0, weight: 100, enabled: true }) {
+        const groupOptions = (this._groups && this._groups.length ? this._groups : [{ groupId: 'default', name: 'Default' }])
+            .map(g => `<option value="${escapeHtml(g.groupId)}"${g.groupId === membership.groupId ? ' selected' : ''}>${escapeHtml(g.name || g.groupId)}</option>`).join('');
+        const row = document.createElement('div');
+        row.className = 'membership-row';
+        row.innerHTML = `
+            <div class="field">
+                <label>Group</label>
+                <select data-role="group">${groupOptions}</select>
+            </div>
+            <div class="field">
+                <label>Priority</label>
+                <input data-role="priority" type="number" value="${Number(membership.priority ?? 0)}">
+            </div>
+            <div class="field">
+                <label>Weight</label>
+                <input data-role="weight" type="number" value="${Number(membership.weight ?? 100)}">
+            </div>
+            <button class="btn-mini" data-role="remove-membership">Remove</button>
+        `;
+        row.querySelector('[data-role="remove-membership"]').addEventListener('click', () => {
+            row.remove();
+            if (!this.refs.membershipRows.children.length) this._addMembershipRow();
+            this._renderMembershipSummary();
+        });
+        row.querySelectorAll('select,input').forEach(el => el.addEventListener('change', () => this._renderMembershipSummary()));
+        this.refs.membershipRows.appendChild(row);
+        this._renderMembershipSummary();
+    }
+
+    _readMembershipRows() {
+        return Array.from(this.refs.membershipRows.querySelectorAll('.membership-row')).map(row => ({
+            groupId: row.querySelector('[data-role="group"]').value.trim() || 'default',
+            priority: parseInt(row.querySelector('[data-role="priority"]').value, 10) || 0,
+            weight: parseInt(row.querySelector('[data-role="weight"]').value, 10) || 100,
+            enabled: true,
+        }));
+    }
+
+    _renderMembershipSummary() {
+        const memberships = this._readMembershipRows();
+        this.refs.membershipSummary.textContent = `${memberships.length} membership${memberships.length === 1 ? '' : 's'}`;
+    }
+
+    _readModelRows() {
+        return Array.from(this.refs.modelRows.querySelectorAll('.model-row'))
+            .map(row => {
+                const publicModelName = row.querySelector('[data-role="public"]').value.trim();
+                const upstreamModelName = row.querySelector('[data-role="upstream"]').value.trim();
+                const creditMultiplierRaw = row.querySelector('[data-role="credit"]').value.trim();
+                const enabled = row.querySelector('[data-role="model-enabled"]')?.checked ?? true;
+                return publicModelName ? { publicModelName, upstreamModelName, creditMultiplier: creditMultiplierRaw ? parseFloat(creditMultiplierRaw) : null, enabled } : null;
+            })
+            .filter(Boolean);
+    }
+
+    _collectForm() {
+        const models = this._readModelRows();
         return {
             name: this.refs.fName.value.trim(),
             protocol: this.refs.fProtocol.value,
@@ -270,13 +488,83 @@ export class PanelProviders extends KeelElement {
             apiKey: this.refs.fApiKey.value,
             apiKeyEnv: this.refs.fApiKeyEnv.value.trim() || null,
             enabled: true,
-            priority: parseInt(this.refs.fPriority.value) || 0,
-            weight: parseInt(this.refs.fWeight.value) || 100,
+            priority: this._readMembershipRows()[0]?.priority || 0,
+            weight: this._readMembershipRows()[0]?.weight || 100,
             maxConcurrency: parseInt(this.refs.fMaxConc.value) || 10,
             timeoutMs: 60000,
-            groupId: this.refs.fGroup.value || 'default',
+            groupId: this._readMembershipRows()[0]?.groupId || 'default',
+            memberships: this._readMembershipRows(),
             models,
         };
+    }
+
+    async _fetchModels() {
+        this.refs.fetchModelsBtn.disabled = true;
+        try {
+            let result;
+            if (this._editingId) {
+                result = await postJson(`${API.airelay}/admin/channels/${this._editingId}/discover-models`, {});
+            } else {
+                result = await postJson(`${API.airelay}/admin/channels/discover-models`, {
+                    protocol: this.refs.fProtocol.value,
+                    baseUrl: this.refs.fBaseUrl.value.trim(),
+                    apiKey: this.refs.fApiKey.value,
+                    apiKeyEnv: this.refs.fApiKeyEnv.value.trim() || null,
+                });
+            }
+            if (result.error) {
+                this._banner(false, result.error);
+                return;
+            }
+            // Append discovered models that are not already present (preserve existing rows)
+            const existingNames = new Set(
+                Array.from(this.refs.modelRows.querySelectorAll('.model-row'))
+                    .map(r => r.querySelector('[data-role="public"]').value.trim().toLowerCase())
+                    .filter(Boolean)
+            );
+            (result.models || []).forEach(model => {
+                if (!existingNames.has(model.toLowerCase())) {
+                    this._addModelRow({ publicModelName: model, upstreamModelName: model, enabled: true });
+                }
+            });
+            if (!this.refs.modelRows.children.length) this._addModelRow();
+            this._banner(true, `Fetched ${(result.models || []).length} model(s) in ${result.latencyMs}ms`);
+        } catch (e) {
+            this._banner(false, e.message);
+        } finally {
+            this.refs.fetchModelsBtn.disabled = false;
+        }
+    }
+
+    async _testModelRow(row) {
+        const publicModelName = row.querySelector('[data-role="public"]').value.trim();
+        const upstreamModelName = row.querySelector('[data-role="upstream"]').value.trim();
+        const resultDiv = row.querySelector('[data-role="test-result"]');
+        const banner = resultDiv?.querySelector('.test-banner');
+        if (!publicModelName) {
+            if (banner) { banner.className = 'test-banner err'; banner.textContent = 'Public model name is required.'; }
+            if (resultDiv) resultDiv.style.display = 'block';
+            return;
+        }
+        if (!this._editingId) {
+            if (banner) { banner.className = 'test-banner err'; banner.textContent = 'Save the channel first, then run model-level test.'; }
+            if (resultDiv) resultDiv.style.display = 'block';
+            return;
+        }
+        try {
+            const res = await postJson(`${API.airelay}/admin/channels/${this._editingId}/test-model`, {
+                publicModelName,
+                upstreamModelName: upstreamModelName || null,
+            });
+            if (banner) {
+                banner.className = `test-banner ${res.ok ? 'ok' : 'err'}`;
+                banner.textContent = res.ok ? `OK in ${res.latencyMs}ms` : (res.error || 'Failed');
+            }
+            if (resultDiv) resultDiv.style.display = 'block';
+        } catch (e) {
+            if (banner) { banner.className = 'test-banner err'; banner.textContent = e.message; }
+            if (resultDiv) resultDiv.style.display = 'block';
+        }
     }
 
     async _save() {

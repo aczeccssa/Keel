@@ -35,8 +35,8 @@ interface CreditLedger {
     suspend fun chargeForUsage(
         customerId: String,
         keyId: String,
-        creditCost: Long,
-        usdMicrosCost: Long,
+        usageCreditCost: Long,
+        usageUsdMicrosCost: Long,
         usageRow: CustomerUsageRow,
     ): ChargeResult
 }
@@ -56,5 +56,31 @@ data class CustomerUsageRow(
     val outputTokens: Long,
     val cacheReadInputTokens: Long,
     val cacheCreationInputTokens: Long,
+    val cachedPromptTokens: Long = 0,
+    val reasoningTokens: Long = 0,
+    val inputCostMicros: Long = 0,
+    val outputCostMicros: Long = 0,
+    val cacheWriteCostMicros: Long = 0,
+    val cacheReadCostMicros: Long = 0,
+    val cacheHitRate: Double? = null,
     val requestId: String,
+)
+
+/**
+ * Read-only directory of end-customers used by the B-end admin UI.
+ */
+interface CustomerDirectory {
+    suspend fun listAll(): List<CustomerSummary>
+    suspend fun count(): Long
+}
+
+@Serializable
+data class CustomerSummary(
+    val customerId: String,
+    val email: String,
+    val displayName: String,
+    val status: String,
+    val balanceCredits: Long,
+    val totalKeys: Int,
+    val createdAt: String,
 )

@@ -30,6 +30,12 @@ class ProtocolTranscoder(
 
     fun encodeResponse(protocol: WireProtocol, ir: IrResponse): JsonObject = codec(protocol).encodeResponse(ir)
 
+    fun decodeStream(protocol: WireProtocol, upstream: Flow<ServerSentEvent>): Flow<IrStreamEvent> =
+        codec(protocol).decodeStream(upstream)
+
+    fun encodeStream(protocol: WireProtocol, events: Flow<IrStreamEvent>): Flow<ServerSentEvent> =
+        codec(protocol).encodeStream(events)
+
     fun transcodeResponse(from: WireProtocol, to: WireProtocol, rawJson: JsonObject): JsonObject {
         return encodeResponse(to, decodeResponse(from, rawJson))
     }

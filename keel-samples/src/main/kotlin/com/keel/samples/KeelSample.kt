@@ -5,14 +5,13 @@ import com.keel.samples.aigateway.account.AccountPlugin
 import com.keel.samples.aigateway.airelay.AIRelayPlugin
 import com.keel.samples.aigateway.riskcontrol.RiskControlPlugin
 import com.keel.samples.aigateway.token.TokenPlugin
+import com.keel.samples.aigateway.customerportal.CustomerPortalPlugin
 import com.keel.samples.authsample.AuthSamplePlugin
 import com.keel.samples.observability.ObservabilityPlugin
 import com.keel.samples.ordersample.OrderSamplePlugin
 import com.keel.samples.productsample.ProductSamplePlugin
 import io.ktor.server.http.content.*
 import io.ktor.server.plugins.cors.routing.CORS
-import io.ktor.server.response.respondRedirect
-import io.ktor.server.routing.get
 
 /**
  * Sample application demonstrating the Keel framework.
@@ -56,6 +55,7 @@ fun main() = runKeel {
     plugin(TokenPlugin())
     plugin(RiskControlPlugin())
     plugin(AIRelayPlugin())
+    plugin(CustomerPortalPlugin())
     plugin(AuthSamplePlugin())
     plugin(ProductSamplePlugin())
     plugin(OrderSamplePlugin())
@@ -65,12 +65,10 @@ fun main() = runKeel {
     enablePluginHotReload(false)
 
     // Global ktor plugin: CORS + engine selection.
-    // Engine defaults to Netty but can be overridden with -Dkeel.engine=cio. CIO handles many
-    // long-lived SSE connections (the dashboards) with less per-connection overhead.
     server {
-        if (System.getProperty("keel.engine").equals("cio", ignoreCase = true)) {
-            engine = com.keel.kernel.config.KeelEngine.CIO
-        }
+        // @Mark: Specific network engin to CIO for better handling of long-lived connections (e.g. SSE in the ObservabilityPlugin dashboard).
+        // engine = KeelEngine.CIO
+
         globalKtorPlugin {
             install(CORS) {
                 anyHost()
@@ -89,14 +87,10 @@ fun main() = runKeel {
     // /api/plugins/observability/ui/, /api/plugins/airelay/ui/). The root "/" and "/index"
     // paths are handled by explicit redirect handlers below.
     routing {
-        get("/") {
-            call.respondRedirect("/api/plugins/observability/ui/")
-        }
-        get("/index") {
-            call.respondRedirect("/api/plugins/observability/ui/")
-        }
-        get("/index.html") {
-            call.respondRedirect("/api/plugins/observability/ui/")
-        }
+        staticResources(
+            remotePath = "/",
+            basePackage = "ui/observability-ui",
+            index = "index.html"
+        )
     }
 }

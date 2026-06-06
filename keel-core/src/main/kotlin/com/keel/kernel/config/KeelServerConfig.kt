@@ -13,7 +13,7 @@ class KeelServerConfig {
     /**
      * The engine to use for the Keel Server. Defaults to Netty.
      */
-    var engine: KeelEngine = KeelEngine.Netty
+    var engine: KeelEngine = getHttpEngine()
 
     /**
      * The port to bind the server to. Defaults to 8080.
@@ -68,6 +68,15 @@ class KeelServerConfig {
     fun installConfiguredGlobalKtorPlugins(application: Application) {
         globalKtorPluginInstallers.forEach { installer ->
             installer(application)
+        }
+    }
+
+    companion object {
+        private fun getHttpEngine(): KeelEngine {
+            val sysProp = System.getProperty(KeelConstants.HTTP_ENGINE_SYSTEM_PROPERTY)
+            val envVar = System.getenv(KeelConstants.HTTP_ENGINE_ENV_VARIABLE)
+            val engineName = sysProp ?: envVar ?: KeelConstants.HTTP_ENGINE_ENV_DEFAULT
+            return KeelEngine.fromString(engineName)
         }
     }
 }
