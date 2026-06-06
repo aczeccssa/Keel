@@ -145,6 +145,49 @@ class AnthropicCodecConformanceTest {
     }
 
     @Test
+    fun decodeRequestConvertsThinkingToReasoningEffort() {
+        val request = json.parseToJsonElement("""
+            {
+                "model": "claude-opus-4-8",
+                "max_tokens": 16384,
+                "thinking": {"type": "enabled", "budget_tokens": 10240},
+                "messages": [{"role": "user", "content": "hello"}]
+            }
+        """.trimIndent()).jsonObject
+        val ir = codec.decodeRequest(request)
+        assertEquals("medium", ir.reasoningEffort, "budget_tokens 10240 (>= 4000 and < 16000) should map to medium")
+        assertNotNull(ir.thinking, "raw thinking should still be preserved")
+    }
+
+    @Test
+    fun decodeRequestConvertsAdaptiveThinkingToXhigh() {
+        val request = json.parseToJsonElement("""
+            {
+                "model": "claude-opus-4-8",
+                "max_tokens": 16384,
+                "thinking": {"type": "adaptive"},
+                "messages": [{"role": "user", "content": "hello"}]
+            }
+        """.trimIndent()).jsonObject
+        val ir = codec.decodeRequest(request)
+        assertEquals("xhigh", ir.reasoningEffort)
+    }
+
+    @Test
+    fun decodeRequestConvertsLowBudgetToLow() {
+        val request = json.parseToJsonElement("""
+            {
+                "model": "claude-opus-4-8",
+                "max_tokens": 16384,
+                "thinking": {"type": "enabled", "budget_tokens": 2000},
+                "messages": [{"role": "user", "content": "hello"}]
+            }
+        """.trimIndent()).jsonObject
+        val ir = codec.decodeRequest(request)
+        assertEquals("low", ir.reasoningEffort)
+    }
+
+    @Test
     fun passthroughContentBlockSurvivesRoundtrip() {
         val raw = """
             {"type":"message","id":"msg_1","role":"assistant","model":"claude",

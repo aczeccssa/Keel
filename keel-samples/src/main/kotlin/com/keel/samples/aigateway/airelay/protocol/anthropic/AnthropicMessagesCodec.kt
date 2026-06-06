@@ -48,7 +48,7 @@ class AnthropicMessagesCodec : ProtocolCodec {
             tools = decodeTools(rawJson.arr("tools")),
             toolChoice = rawJson["tool_choice"],
             stream = rawJson.boolean("stream") ?: false,
-            reasoningEffort = null,
+            reasoningEffort = extractReasoningEffort(rawJson["thinking"]),
             responseFormat = rawJson["output_config"]?.jsonObject?.get("format"),
             metadata = rawJson.obj("metadata")?.let { m ->
                 mapOf("user_id" to (m.string("user_id") ?: ""))
@@ -559,6 +559,19 @@ class AnthropicMessagesCodec : ProtocolCodec {
 
     private fun buildExtras(rawJson: JsonObject, skip: Set<String>): Map<String, JsonElement> {
         return rawJson.entries.filter { it.key !in skip }.associate { it.key to it.value }
+    }
+
+    private fun extractReasoningEffort(thinking: JsonElement?): String? {
+        val obj = thinking as? JsonObject ?: return null
+        val type = obj.string("type") ?: return null
+        if (type == "adaptive") return "xhigh"
+        if (type != "enabled") return null
+        val budget = obj.int("budget_tokens") ?: return "medium"
+        return when {
+            budget < 4000 -> "low"
+            budget < 16000 -> "medium"
+            else -> "high"
+        }
     }
 
     companion object {
