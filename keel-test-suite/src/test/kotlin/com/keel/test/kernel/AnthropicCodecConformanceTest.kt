@@ -3,7 +3,11 @@ package com.keel.test.kernel
 import com.keel.samples.aigateway.airelay.protocol.IrContentPart
 import com.keel.samples.aigateway.airelay.protocol.IrItem
 import com.keel.samples.aigateway.airelay.protocol.IrRequest
+import com.keel.samples.aigateway.airelay.protocol.IrStreamEvent
 import com.keel.samples.aigateway.airelay.protocol.anthropic.AnthropicMessagesCodec
+import kotlinx.coroutines.flow.asFlow
+import kotlinx.coroutines.flow.toList
+import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.*
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -202,5 +206,16 @@ class AnthropicCodecConformanceTest {
         // Passthrough preserves the original type
         val first = content[0].jsonObject
         assertEquals("server_tool_use", first["type"]?.jsonPrimitive?.content)
+    }
+
+    @Test
+    fun encodeStreamEmitsMessageStartBeforeError() = runBlocking {
+        val events = listOf(
+            IrStreamEvent.Error("upstream failed", code = "500", errorType = "api_error")
+        )
+        val sseEvents = codec.encodeStream(events.asFlow()).toList()
+        assertTrue(sseEvents.size >= 2, "Should have message_start + error, got ${sseEvents.size}")
+        assertEquals("message_start", sseEvents.first().event, "First event must be message_start")
+        assertEquals("error", sseEvents.last().event, "Last event must be error")
     }
 }

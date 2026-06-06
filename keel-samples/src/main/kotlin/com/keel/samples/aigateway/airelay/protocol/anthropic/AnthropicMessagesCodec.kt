@@ -296,7 +296,10 @@ class AnthropicMessagesCodec : ProtocolCodec {
                     ensureMessageStarted()
                     emit(messageDeltaEvent("end_turn", null, event.usage))
                 }
-                is IrStreamEvent.Error -> emit(errorEvent(event))
+                is IrStreamEvent.Error -> {
+                    ensureMessageStarted()
+                    emit(errorEvent(event))
+                }
             }
         }
     }
