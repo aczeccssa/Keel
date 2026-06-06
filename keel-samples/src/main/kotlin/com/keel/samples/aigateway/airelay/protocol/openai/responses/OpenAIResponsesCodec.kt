@@ -260,30 +260,92 @@ class OpenAIResponsesCodec : ProtocolCodec {
 
     private fun Int?.orZero(): Int = this ?: 0
 
-    override fun encodeStream(events: Flow<IrStreamEvent>): Flow<ServerSentEvent> = events.map { event ->
-        when (event) {
-            is IrStreamEvent.TextDelta -> ServerSentEvent(
-                data = json.encodeToString(buildJsonObject {
+    override fun encodeStream(events: Flow<IrStreamEvent>): Flow<ServerSentEvent> = flow {
+        events.collect { event ->
+            val (eventType, data) = when (event) {
+                is IrStreamEvent.ResponseStart -> "response.created" to buildJsonObject {
+                    put("type", JsonPrimitive("response.created"))
+                    put("response", buildJsonObject {
+                        put("id", JsonPrimitive(event.id))
+                        put("model", JsonPrimitive(event.model))
+                        put("status", JsonPrimitive("in_progress"))
+                    })
+                }
+                is IrStreamEvent.ContentBlockStart -> {
+                    if (event.blockType == "tool_use") {
+                        val block = event.blockData.jsonObject
+                        "response.output_item.added" to buildJsonObject {
+                            put("type", JsonPrimitive("response.output_item.added"))
+                            put("output_index", JsonPrimitive(event.index))
+                            put("item", buildJsonObject {
+                                put("type", JsonPrimitive("function_call"))
+                                put("id", JsonPrimitive("fc_${event.index}"))
+                                put("call_id", JsonPrimitive(block.string("id") ?: "call_${event.index}"))
+                                put("name", JsonPrimitive(block.string("name") ?: "function"))
+                                put("arguments", JsonPrimitive(""))
+                                put("status", JsonPrimitive("in_progress"))
+                            })
+                        }
+                    } else {
+                        "response.content_part.added" to buildJsonObject {
+                            put("type", JsonPrimitive("response.content_part.added"))
+                            put("output_index", JsonPrimitive(0))
+                            put("content_index", JsonPrimitive(event.index))
+                            put("part", buildJsonObject {
+                                put("type", JsonPrimitive("output_text"))
+                                put("text", JsonPrimitive(""))
+                            })
+                        }
+                    }
+                }
+                is IrStreamEvent.TextDelta -> "response.output_text.delta" to buildJsonObject {
                     put("type", JsonPrimitive("response.output_text.delta"))
+                    put("content_index", JsonPrimitive(event.index))
                     put("delta", JsonPrimitive(event.delta))
-                }),
-                event = "response.output_text.delta"
-            )
-            is IrStreamEvent.ResponseDone -> ServerSentEvent(
-                data = json.encodeToString(buildJsonObject { put("type", JsonPrimitive("response.completed")) }),
-                event = "response.completed"
-            )
-            is IrStreamEvent.Error -> ServerSentEvent(
-                data = json.encodeToString(buildJsonObject {
+                }
+                is IrStreamEvent.InputJsonDelta -> "response.function_call_arguments.delta" to buildJsonObject {
+                    put("type", JsonPrimitive("response.function_call_arguments.delta"))
+                    put("output_index", JsonPrimitive(event.index))
+                    put("delta", JsonPrimitive(event.partialJson))
+                }
+                is IrStreamEvent.ThinkingDelta -> "response.reasoning.delta" to buildJsonObject {
+                    put("type", JsonPrimitive("response.reasoning.delta"))
+                    put("output_index", JsonPrimitive(event.index))
+                    put("delta", JsonPrimitive(event.thinking))
+                }
+                is IrStreamEvent.ContentBlockStop -> "response.output_item.done" to buildJsonObject {
+                    put("type", JsonPrimitive("response.output_item.done"))
+                    put("output_index", JsonPrimitive(event.index))
+                }
+                is IrStreamEvent.MessageDelta -> "response.completed" to buildJsonObject {
+                    put("type", JsonPrimitive("response.completed"))
+                    put("response", buildJsonObject {
+                        put("status", JsonPrimitive(if (event.stopReason == "error") "failed" else "completed"))
+                    })
+                }
+                is IrStreamEvent.ResponseDone -> "response.completed" to buildJsonObject {
+                    put("type", JsonPrimitive("response.completed"))
+                    put("response", buildJsonObject {
+                        put("status", JsonPrimitive("completed"))
+                        put("usage", tokenUsageJson(event.finalUsage))
+                    })
+                }
+                is IrStreamEvent.Error -> "error" to buildJsonObject {
                     put("type", JsonPrimitive("error"))
                     put("message", JsonPrimitive(event.message))
-                }),
-                event = "error"
-            )
-            else -> ServerSentEvent(
-                data = json.encodeToString(buildJsonObject { put("type", JsonPrimitive("response.created")) }),
-                event = "response.created"
-            )
+                    event.code?.let { put("code", JsonPrimitive(it)) }
+                }
+                is IrStreamEvent.Ping -> "ping" to buildJsonObject {
+                    put("type", JsonPrimitive("ping"))
+                }
+                else -> "response.created" to buildJsonObject {
+                    put("type", JsonPrimitive("response.created"))
+                }
+            }
+            emit(ServerSentEvent(
+                data = json.encodeToString(data),
+                event = eventType
+            ))
         }
     }
 

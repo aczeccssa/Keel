@@ -127,4 +127,52 @@ class TranscodingBugfixTest {
             .joinToString("") { it.text }
         assertTrue(outputText.isBlank(), "Error response body should not produce meaningful output text")
     }
+
+    @Test
+    fun responsesEncodeStreamHandlesToolUseEvents() = runBlocking {
+        val events = listOf(
+            IrStreamEvent.ResponseStart("resp_1", "gpt-5.4"),
+            IrStreamEvent.ContentBlockStart(0, "tool_use", buildJsonObject {
+                put("type", JsonPrimitive("tool_use"))
+                put("id", JsonPrimitive("call_abc"))
+                put("name", JsonPrimitive("Read"))
+                put("input", buildJsonObject {})
+            }),
+            IrStreamEvent.InputJsonDelta(0, """{"file_path":"""),
+            IrStreamEvent.InputJsonDelta(0, """"test.kt"}"""),
+            IrStreamEvent.ContentBlockStop(0),
+            IrStreamEvent.ResponseDone("tool_use", TokenUsage(promptTokens = 100, completionTokens = 50)),
+        )
+        val sseEvents = responsesCodec.encodeStream(events.asFlow()).toList()
+
+        val eventTypes = sseEvents.map { it.event }
+        assertTrue("response.created" in eventTypes, "Should have response.created")
+        assertTrue("response.output_item.added" in eventTypes, "Should have output_item.added for tool_use")
+        assertTrue("response.function_call_arguments.delta" in eventTypes, "Should have function_call_arguments.delta")
+        assertTrue("response.completed" in eventTypes, "Should have response.completed")
+
+        val argDeltaEvents = sseEvents.filter { it.event == "response.function_call_arguments.delta" }
+        assertEquals(2, argDeltaEvents.size, "Should have 2 argument delta events")
+    }
+
+    @Test
+    fun responsesEncodeStreamHandlesTextEvents() = runBlocking {
+        val events = listOf(
+            IrStreamEvent.ResponseStart("resp_2", "gpt-5.4"),
+            IrStreamEvent.ContentBlockStart(0, "text", buildJsonObject {
+                put("type", JsonPrimitive("text"))
+                put("text", JsonPrimitive(""))
+            }),
+            IrStreamEvent.TextDelta(0, "Hello"),
+            IrStreamEvent.TextDelta(0, " world"),
+            IrStreamEvent.ContentBlockStop(0),
+            IrStreamEvent.ResponseDone("end_turn", TokenUsage(promptTokens = 10, completionTokens = 5)),
+        )
+        val sseEvents = responsesCodec.encodeStream(events.asFlow()).toList()
+        val eventTypes = sseEvents.map { it.event }
+        assertTrue("response.content_part.added" in eventTypes, "Should have content_part.added for text")
+        assertTrue("response.output_text.delta" in eventTypes, "Should have output_text.delta")
+        val textDeltas = sseEvents.filter { it.event == "response.output_text.delta" }
+        assertEquals(2, textDeltas.size)
+    }
 }
