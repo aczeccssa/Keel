@@ -154,6 +154,12 @@ class AIRelayService(
                     upstreamRequest,
                     upstreamHeaders
                 )
+                if (upstream.status >= 400) {
+                    val errorMsg = upstream.body.obj("error")?.string("message")
+                        ?: upstream.body.string("message")
+                        ?: "Upstream returned ${upstream.status}"
+                    throw UpstreamHttpException(upstream.status, errorMsg)
+                }
                 val upstreamIr = transcoder.decodeResponse(selection.provider.protocol, upstream.body)
                 val effectiveUsage = normalizeUsage(
                     ir = ir,

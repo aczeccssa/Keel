@@ -113,4 +113,18 @@ class TranscodingBugfixTest {
         assertEquals(500, outcome.semanticStatus)
         assertEquals("server_error", outcome.errorType)
     }
+
+    @Test
+    fun upstreamErrorResponseShouldNotDecodeAsSuccess() {
+        val errorBody = json.parseToJsonElement("""
+            {"error": {"message": "Internal server error", "type": "server_error"}}
+        """.trimIndent()).jsonObject
+
+        val ir = responsesCodec.decodeResponse(errorBody)
+        val outputText = ir.output.filterIsInstance<IrItem.Message>()
+            .flatMap { it.content }
+            .filterIsInstance<IrContentPart.Text>()
+            .joinToString("") { it.text }
+        assertTrue(outputText.isBlank(), "Error response body should not produce meaningful output text")
+    }
 }
