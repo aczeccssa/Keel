@@ -81,7 +81,12 @@ class OpenAIResponsesCodec : ProtocolCodec {
         ir.topP?.let { put("top_p", JsonPrimitive(it)) }
         if (ir.stopSequences.isNotEmpty()) put("stop", stringArray(ir.stopSequences))
         if (ir.tools.isNotEmpty()) put("tools", encodeTools(ir.tools))
-        ir.toolChoice?.let { put("tool_choice", encodeToolChoice(it)) }
+        ir.toolChoice?.let { tc ->
+            put("tool_choice", encodeToolChoice(tc))
+            (tc as? JsonObject)?.boolean("disable_parallel_tool_use")?.let { disable ->
+                put("parallel_tool_calls", JsonPrimitive(!disable))
+            }
+        }
         put("stream", JsonPrimitive(ir.stream))
         put("store", JsonPrimitive(false))
         ir.reasoningEffort?.let { put("reasoning", buildJsonObject { put("effort", JsonPrimitive(it)) }) }

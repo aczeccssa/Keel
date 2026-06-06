@@ -175,4 +175,44 @@ class TranscodingBugfixTest {
         val textDeltas = sseEvents.filter { it.event == "response.output_text.delta" }
         assertEquals(2, textDeltas.size)
     }
+
+    @Test
+    fun anthropicDisableParallelToolUseMapsToResponsesParallelToolCalls() {
+        val anthropicRequest = json.parseToJsonElement("""
+            {
+                "model": "claude-opus-4-8",
+                "max_tokens": 8192,
+                "messages": [{"role": "user", "content": "hello"}],
+                "tools": [{"name": "read_file", "description": "Read a file", "input_schema": {"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"]}}],
+                "tool_choice": {"type": "auto", "disable_parallel_tool_use": true}
+            }
+        """.trimIndent()).jsonObject
+
+        val ir = anthropicCodec.decodeRequest(anthropicRequest)
+        val responsesRequest = responsesCodec.encodeRequest(ir)
+
+        assertEquals(JsonPrimitive("auto"), responsesRequest["tool_choice"],
+            "tool_choice type=auto should map to string 'auto'")
+        assertEquals(JsonPrimitive(false), responsesRequest["parallel_tool_calls"],
+            "disable_parallel_tool_use=true should map to parallel_tool_calls=false")
+    }
+
+    @Test
+    fun anthropicToolChoiceWithoutDisableOmitsParallelToolCalls() {
+        val anthropicRequest = json.parseToJsonElement("""
+            {
+                "model": "claude-opus-4-8",
+                "max_tokens": 8192,
+                "messages": [{"role": "user", "content": "hello"}],
+                "tools": [{"name": "read_file", "description": "Read", "input_schema": {"type": "object", "properties": {}, "required": []}}],
+                "tool_choice": {"type": "auto"}
+            }
+        """.trimIndent()).jsonObject
+
+        val ir = anthropicCodec.decodeRequest(anthropicRequest)
+        val responsesRequest = responsesCodec.encodeRequest(ir)
+
+        assertNull(responsesRequest["parallel_tool_calls"],
+            "Without disable_parallel_tool_use, parallel_tool_calls should not be set")
+    }
 }
