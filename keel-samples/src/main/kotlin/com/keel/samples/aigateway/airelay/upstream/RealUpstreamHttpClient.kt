@@ -203,7 +203,7 @@ class RealUpstreamHttpClient private constructor(
     ): Flow<ServerSentEvent> = flow {
         val url = endpointUrl(selection, stream = true)
         val apiKey = resolveApiKey(selection)
-        val bodyText: String = client.post(url) {
+        val response = client.post(url) {
             headers {
                 selection.provider.defaultHeaders.forEach { (k, v) -> append(k, v) }
                 extraHeaders.forEach { (k, v) -> append(k, v) }
@@ -212,11 +212,31 @@ class RealUpstreamHttpClient private constructor(
                     WireProtocol.ANTHROPIC_MESSAGES -> append("x-api-key", apiKey)
                     else -> append(HttpHeaders.Authorization, "Bearer $apiKey")
                 }
-                if ("anthropic-version" !in extraHeaders) append("anthropic-version", "2023-06-01")
+                if (selection.provider.protocol == WireProtocol.ANTHROPIC_MESSAGES) {
+                    if ("anthropic-version" !in extraHeaders) append("anthropic-version", "2023-06-01")
+                }
             }
             contentType(ContentType.Application.Json)
             setBody(json.encodeToString(JsonObject.serializer(), request))
-        }.bodyAsText()
+        }
+        val bodyText = response.bodyAsText()
+
+        // Non-2xx: emit a synthetic error event so codecs and observers can detect it
+        if (response.status.value >= 400) {
+            val errorJson = runCatching { json.parseToJsonElement(bodyText).jsonObject }.getOrNull()
+            val errorMessage = errorJson?.obj("error")?.string("message")
+                ?: errorJson?.string("message")
+                ?: "Upstream error: HTTP ${response.status.value}"
+            emit(ServerSentEvent(
+                data = json.encodeToString(buildJsonObject {
+                    put("type", JsonPrimitive("error"))
+                    put("message", JsonPrimitive(errorMessage))
+                    put("code", JsonPrimitive(response.status.value.toString()))
+                }),
+                event = "error"
+            ))
+            return@flow
+        }
 
         // The CIO client returns the full body once the server closes the connection. The
         // body is a sequence of SSE blocks separated by \n\n; within each block, lines of
