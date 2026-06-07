@@ -47,12 +47,12 @@ subprojects {
 
     tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
         compilerOptions {
-            jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_23)
+            jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_21)
         }
     }
 
     tasks.withType<JavaCompile>().configureEach {
-        options.release.set(23)
+        options.release.set(21)
     }
 
     tasks.withType<org.gradle.jvm.tasks.Jar>().configureEach {
@@ -80,7 +80,7 @@ subprojects {
     }
 
     tasks.withType<Detekt>().configureEach {
-        jvmTarget = "22"
+        jvmTarget = "21"
         reports {
             sarif.required.set(true)
             html.required.set(true)

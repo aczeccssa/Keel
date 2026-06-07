@@ -36,7 +36,7 @@ dependencies {
 }
 
 kotlin {
-    jvmToolchain(23)
+    jvmToolchain(21)
 }
 
 tasks.test {
