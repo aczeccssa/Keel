@@ -259,6 +259,7 @@ class AIRelayService(
         val anthropicObserver = if (selection.provider.protocol == WireProtocol.ANTHROPIC_MESSAGES) AnthropicStreamObserver() else null
         val responsesObserver = if (selection.provider.protocol == WireProtocol.OPENAI_RESPONSES) ResponsesStreamObserver() else null
         val rawEvents = upstreamStream.toList()
+        System.err.println("airelay_upstream_response model=${ir.model} upstream=${selection.provider.protocol} events=${rawEvents.size} sample=${rawEvents.take(3).joinToString { (it.event ?: "none") + ":" + (it.data ?: "").take(120) }}")
         rawEvents.forEach { event ->
             anthropicObserver?.observe(event)
             responsesObserver?.observe(event)
@@ -569,7 +570,9 @@ class AIRelayService(
         if (sameProtocolPassThrough(clientProtocol, upstreamProtocol)) {
             return patchRequestModel(rawRequest, ir.model)
         }
-        return transcoder.encodeRequest(upstreamProtocol, ir)
+        val encoded = transcoder.encodeRequest(upstreamProtocol, ir)
+        System.err.println("airelay_upstream_request model=${ir.model} upstream=$upstreamProtocol size=${encoded.toString().length} body=${encoded.toString().take(2000)}")
+        return encoded
     }
 
     private fun patchRequestModel(rawRequest: JsonObject, model: String): JsonObject =
