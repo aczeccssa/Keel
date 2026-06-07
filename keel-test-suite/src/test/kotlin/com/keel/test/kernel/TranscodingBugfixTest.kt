@@ -278,7 +278,5 @@ class TranscodingBugfixTest {
         val funcCall = input.first { it.jsonObject.string("type") == "function_call" }.jsonObject
         val args = funcCall["arguments"]!!.jsonPrimitive.content
         assertTrue(args.contains("file_path"), "arguments should be a JSON string, not object")
-
-        assertEquals(JsonPrimitive(false), responsesRequest["store"])
     }
 }

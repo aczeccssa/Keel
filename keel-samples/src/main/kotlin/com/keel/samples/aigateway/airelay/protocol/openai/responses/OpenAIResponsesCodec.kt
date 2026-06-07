@@ -88,7 +88,6 @@ class OpenAIResponsesCodec : ProtocolCodec {
             }
         }
         put("stream", JsonPrimitive(ir.stream))
-        put("store", JsonPrimitive(false))
         ir.reasoningEffort?.let { put("reasoning", buildJsonObject { put("effort", JsonPrimitive(it)) }) }
         ir.responseFormat?.let { put("text", buildJsonObject { put("format", it) }) }
         if (ir.metadata.isNotEmpty()) {
@@ -504,9 +503,37 @@ class OpenAIResponsesCodec : ProtocolCodec {
                 put("type", JsonPrimitive("function"))
                 put("name", JsonPrimitive(tool.name))
                 tool.description?.let { put("description", JsonPrimitive(it)) }
-                put("parameters", tool.inputSchema)
+                put("parameters", cleanSchema(tool.inputSchema))
             })
         }
+    }
+
+    /**
+     * Strip fields that cause Responses API strict tool schema validation to fail.
+     * Mirrors cc-switch's clean_schema(): remove additionalProperties, unsupported JSON Schema
+     * meta-keys that differ between Anthropic and OpenAI tool schema requirements.
+     */
+    private fun cleanSchema(schema: JsonObject): JsonObject {
+        val cleaned = mutableMapOf<String, JsonElement>()
+        for ((key, value) in schema.entries) {
+            when (key) {
+                "additionalProperties" -> {} // strip — Responses API strict mode rejects schemas with this
+                "exclusiveMinimum", "exclusiveMaximum" -> {} // not supported by Responses API
+                "minLength", "maxLength", "pattern" -> {} // sometimes rejected in strict mode
+                else -> {
+                    cleaned[key] = when (value) {
+                        is JsonObject -> cleanSchema(value)
+                        is JsonArray -> buildJsonArray {
+                            value.forEach { item ->
+                                add(if (item is JsonObject) cleanSchema(item) else item)
+                            }
+                        }
+                        else -> value
+                    }
+                }
+            }
+        }
+        return JsonObject(cleaned)
     }
 
     private fun encodeToolChoice(toolChoice: JsonElement): JsonElement {
