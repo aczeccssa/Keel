@@ -1,10 +1,13 @@
 import org.gradle.api.tasks.bundling.Jar
 import org.gradle.api.artifacts.ProjectDependency
+import org.gradle.api.plugins.JavaPluginExtension
 import org.gradle.api.publish.PublishingExtension
 import org.gradle.api.publish.maven.MavenPublication
+import org.gradle.jvm.toolchain.JavaLanguageVersion
 import org.jetbrains.dokka.gradle.DokkaExtension
 import io.gitlab.arturbosch.detekt.Detekt
 import io.gitlab.arturbosch.detekt.extensions.DetektExtension
+import org.jetbrains.kotlin.gradle.dsl.KotlinJvmProjectExtension
 
 plugins {
     alias(libs.plugins.dokka)
@@ -45,14 +48,14 @@ subprojects {
         maven("https://jitpack.io")
     }
 
-    tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
-        compilerOptions {
-            jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_21)
+    pluginManager.withPlugin("org.jetbrains.kotlin.jvm") {
+        extensions.configure<KotlinJvmProjectExtension> {
+            jvmToolchain(21)
         }
     }
 
-    tasks.withType<JavaCompile>().configureEach {
-        options.release.set(21)
+    pluginManager.withPlugin("java") {
+        the<JavaPluginExtension>().toolchain.languageVersion.set(JavaLanguageVersion.of(21))
     }
 
     tasks.withType<org.gradle.jvm.tasks.Jar>().configureEach {

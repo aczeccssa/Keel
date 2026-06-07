@@ -21,10 +21,6 @@ dependencies {
     testRuntimeOnly("org.junit.platform:junit-platform-launcher:1.11.0")
 }
 
-kotlin {
-    jvmToolchain(21)
-}
-
 tasks.test {
     useJUnitPlatform()
     failOnNoDiscoveredTests = false

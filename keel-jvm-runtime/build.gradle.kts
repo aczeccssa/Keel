@@ -14,10 +14,6 @@ dependencies {
     testImplementation("org.junit.jupiter:junit-jupiter:5.11.0")
 }
 
-kotlin {
-    jvmToolchain(21)
-}
-
 tasks.test {
     useJUnitPlatform()
     failOnNoDiscoveredTests = false
