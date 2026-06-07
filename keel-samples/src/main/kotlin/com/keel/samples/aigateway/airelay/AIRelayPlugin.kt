@@ -89,6 +89,8 @@ class AIRelayPlugin : StandardKeelPlugin {
     private lateinit var pricing: ModelPricingRegistry
     lateinit var upstreamClient: MockableUpstreamHttpClient
         private set
+    private var installedUpstreamOverride: UpstreamHttpClient? = null
+    private var installedPoolChainOverride: PoolChainManager? = null
 
     // Runtime-configurable provider/model store (DB-backed). When channels exist, the relay
     // routes through them; otherwise it falls back to the static settings.chains. This is what
@@ -106,7 +108,7 @@ class AIRelayPlugin : StandardKeelPlugin {
     override suspend fun onInit(context: PluginInitContext) {
         kernelKoin = context.kernelKoin
         settings = AIRelaySettings.load()
-        poolChainManager = PoolChainManager(settings.chains)
+        poolChainManager = installedPoolChainOverride ?: PoolChainManager(settings.chains)
         transcoder = ProtocolTranscoder(listOf(OpenAIChatCodec(), OpenAIResponsesCodec(), AnthropicMessagesCodec()))
         pricing = ModelPricingRegistry(settings.pricings)
         // When any chain in the configured set targets a non-mock baseUrl we wire a real
@@ -186,10 +188,13 @@ class AIRelayPlugin : StandardKeelPlugin {
 
     /** The live pool manager: DB-backed if channels are configured, else the static one. */
     private fun activeManager(): PoolChainManager {
+        installedPoolChainOverride?.let { return it }
         val svc = configService ?: return poolChainManager
         val managed = svc.poolChainManager
         return if (managed.snapshot().chains.isNotEmpty()) managed else poolChainManager
     }
+
+    private fun activeUpstreamClient(): UpstreamHttpClient = installedUpstreamOverride ?: upstreamClient
 
     private fun activePricing(): ModelPricingRegistry {
         val svc = configService ?: return pricing
@@ -279,8 +284,11 @@ class AIRelayPlugin : StandardKeelPlugin {
      * is also reloaded so downstream snapshot readers see the new chains.
      */
     fun installRealUpstream(client: UpstreamHttpClient, chains: List<PoolChainConfig>) {
-        this.upstreamClient = MockableUpstreamHttpClient(realClient = client)
-        this.poolChainManager = PoolChainManager(chains)
+        installedUpstreamOverride = client
+        installedPoolChainOverride = PoolChainManager(chains)
+        if (this::poolChainManager.isInitialized) {
+            poolChainManager = installedPoolChainOverride!!
+        }
     }
 
     override suspend fun onStop(context: com.keel.kernel.plugin.PluginRuntimeContext) {
@@ -301,7 +309,7 @@ class AIRelayPlugin : StandardKeelPlugin {
             userDirectory = userDirectory,
             poolChainManager = activeManager(),
             transcoder = transcoder,
-            upstreamClient = upstreamClient,
+            upstreamClient = activeUpstreamClient(),
             costCalculator = CostCalculator(activePricing(), userDirectory),
             customerKeyVerifier = customerKeyVerifier,
             creditLedger = creditLedger,
