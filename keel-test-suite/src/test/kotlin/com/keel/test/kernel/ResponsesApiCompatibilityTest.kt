@@ -66,7 +66,12 @@ class ResponsesApiCompatibilityTest {
 
     /** Requests captured by the custom mock client, keyed by test name. */
     private val capturedRequests = mutableListOf<JsonObject>()
-    private var mockClient: CapturingMockClient? = null
+
+    @AfterTest
+    fun cleanup() {
+        OpenApiRegistry.clear()
+        runCatching { stopKoin() }
+    }
 
     // ---- Request format validation tests ----
 
@@ -481,7 +486,6 @@ class ResponsesApiCompatibilityTest {
 
         val delegate = MockableUpstreamHttpClient(realClient = null)
         val capturingClient = CapturingMockClient(delegate, capturedRequests)
-        mockClient = capturingClient
         capturedRequests.clear()
         runBlocking { airelayPlugin.installRealUpstream(capturingClient, chains) }
 
