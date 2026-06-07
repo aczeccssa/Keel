@@ -558,8 +558,10 @@ class OpenAIResponsesCodec : ProtocolCodec {
 
     companion object {
         private val RESERVED = setOf(
-            "model", "input", "instructions", "max_output_tokens", "temperature", "top_p", "stop",
-            "stream", "reasoning", "text", "tools", "tool_choice", "metadata"
+            "model", "input", "instructions", "max_output_tokens", "temperature", "top_p", "top_k", "stop",
+            "stream", "reasoning", "text", "tools", "tool_choice", "metadata",
+            "system", "max_tokens", "stop_sequences", "thinking", "cache_control",
+            "service_tier", "container", "inference_geo", "output_config"
         )
     }
 }
