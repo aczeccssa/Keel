@@ -74,12 +74,11 @@ class OpenAIResponsesCodec : ProtocolCodec {
 
     override fun encodeRequest(ir: IrRequest): JsonObject = buildJsonObject {
         put("model", JsonPrimitive(ir.model))
-        ir.instructions?.let { put("instructions", JsonPrimitive(it)) }
+        ir.instructions?.let { put("instructions", JsonPrimitive(stripAnthropicBillingHeader(it))) }
         put("input", encodeInputItems(ir.items))
         ir.maxOutputTokens?.let { put("max_output_tokens", JsonPrimitive(it)) }
         ir.temperature?.let { put("temperature", JsonPrimitive(it)) }
         ir.topP?.let { put("top_p", JsonPrimitive(it)) }
-        if (ir.stopSequences.isNotEmpty()) put("stop", stringArray(ir.stopSequences))
         if (ir.tools.isNotEmpty()) put("tools", encodeTools(ir.tools))
         ir.toolChoice?.let { tc ->
             put("tool_choice", encodeToolChoice(tc))
@@ -88,8 +87,8 @@ class OpenAIResponsesCodec : ProtocolCodec {
             }
         }
         put("stream", JsonPrimitive(ir.stream))
+        put("store", JsonPrimitive(false))
         ir.reasoningEffort?.let { put("reasoning", buildJsonObject { put("effort", JsonPrimitive(it)) }) }
-        ir.responseFormat?.let { put("text", buildJsonObject { put("format", it) }) }
         if (ir.metadata.isNotEmpty()) {
             put("metadata", buildJsonObject {
                 ir.metadata.forEach { (key, value) -> put(key, JsonPrimitive(value)) }
@@ -553,6 +552,14 @@ class OpenAIResponsesCodec : ProtocolCodec {
 
     private fun buildExtras(rawJson: JsonObject, skip: Set<String>): Map<String, JsonElement> =
         rawJson.entries.filter { it.key !in skip }.associate { it.key to it.value }
+
+    /**
+     * Strip the x-anthropic-billing-header line that Claude Code injects into system prompts.
+     * cc-switch does the same before forwarding to non-Anthropic upstreams.
+     */
+    private fun stripAnthropicBillingHeader(text: String): String {
+        return text.replace(Regex("^x-anthropic-billing-header:.*\\n?", RegexOption.MULTILINE), "").trimStart()
+    }
 
     companion object {
         private val RESERVED = setOf(
