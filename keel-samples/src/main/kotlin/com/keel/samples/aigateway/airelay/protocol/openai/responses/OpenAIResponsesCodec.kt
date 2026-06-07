@@ -89,11 +89,6 @@ class OpenAIResponsesCodec : ProtocolCodec {
         put("stream", JsonPrimitive(ir.stream))
         put("store", JsonPrimitive(false))
         ir.reasoningEffort?.let { put("reasoning", buildJsonObject { put("effort", JsonPrimitive(it)) }) }
-        if (ir.metadata.isNotEmpty()) {
-            put("metadata", buildJsonObject {
-                ir.metadata.forEach { (key, value) -> put(key, JsonPrimitive(value)) }
-            })
-        }
         ir.extras.forEach { (k, v) -> if (k !in RESERVED) put(k, v) }
     }
 
