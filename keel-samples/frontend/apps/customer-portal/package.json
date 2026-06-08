@@ -1,0 +1,18 @@
+{
+  "name": "@keel/customer-portal-ui",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "build": "vite build",
+    "dev": "vite",
+    "test": "vitest",
+    "test:run": "vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@keel/sample-ui": "0.0.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  }
+}
