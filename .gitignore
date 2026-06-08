@@ -56,3 +56,8 @@ bin/
 **/dist
 /tui/Cargo.lock
 docs/superpowers
+
+### Agents ###
+.claude
+.codex
+.kagent
