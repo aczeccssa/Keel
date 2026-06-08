@@ -4,8 +4,8 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "build": "vite build",
-    "dev": "vite",
+    "build": "tsc -p tsconfig.json --noEmit && vite build",
+    "dev": "vite --host 127.0.0.1 --port 5175",
     "test": "vitest",
     "test:run": "vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit"
