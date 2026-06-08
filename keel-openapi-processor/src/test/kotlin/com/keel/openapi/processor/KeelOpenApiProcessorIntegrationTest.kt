@@ -8,15 +8,13 @@ import org.gradle.testkit.runner.GradleRunner
 
 class KeelOpenApiProcessorIntegrationTest {
     private val repoRoot: File = findRepoRoot()
+    private val gradleUserHome: File = File(System.getProperty("user.home"), ".gradle")
 
     @Test
     fun `build fails with migration guidance when legacy KeelApi is used`() {
         val fixtureDir = createFixtureProject(useLegacyKeelApi = true)
 
-        val result = GradleRunner.create()
-            .withProjectDir(fixtureDir)
-            .withArguments("compileKotlin", "--stacktrace")
-            .buildAndFail()
+        val result = gradleRunner(fixtureDir).buildAndFail()
 
         val hasProcessorMessage = result.output.contains(
             "@KeelApi is no longer supported. Migrate endpoint docs to doc = OpenApiDoc(...) on DSL calls."
@@ -34,10 +32,7 @@ class KeelOpenApiProcessorIntegrationTest {
     fun `build passes when only OpenApiDoc-based annotations are used`() {
         val fixtureDir = createFixtureProject(useLegacyKeelApi = false)
 
-        val result = GradleRunner.create()
-            .withProjectDir(fixtureDir)
-            .withArguments("compileKotlin", "--stacktrace")
-            .build()
+        val result = gradleRunner(fixtureDir).build()
 
         assertTrue(result.output.contains("BUILD SUCCESSFUL"), "Expected successful build, but got:\n${result.output}")
         assertTrue(
@@ -54,10 +49,7 @@ class KeelOpenApiProcessorIntegrationTest {
     fun `build passes when annotated plugins share the same simple name`() {
         val fixtureDir = createSimpleNameCollisionFixtureProject()
 
-        val result = GradleRunner.create()
-            .withProjectDir(fixtureDir)
-            .withArguments("compileKotlin", "--stacktrace")
-            .build()
+        val result = gradleRunner(fixtureDir).build()
 
         assertTrue(result.output.contains("BUILD SUCCESSFUL"), "Expected successful build, but got:\n${result.output}")
         assertTrue(
@@ -219,6 +211,17 @@ class KeelOpenApiProcessorIntegrationTest {
         val output = resolve(path)
         output.parentFile.mkdirs()
         output.writeText(content.trimIndent())
+    }
+
+    private fun gradleRunner(projectDir: File): GradleRunner {
+        return GradleRunner.create()
+            .withProjectDir(projectDir)
+            .withTestKitDir(gradleUserHome)
+            .withArguments(
+                "--offline",
+                "--stacktrace",
+                "compileKotlin"
+            )
     }
 
     private fun File.invariantSeparatorsPath(): String = absolutePath.replace('\\', '/')

@@ -154,6 +154,13 @@ class ObservabilityPlugin : StandardKeelPlugin {
                 buildAiGatewaySnapshot()
             }
         }
+
+        staticResources(
+            path = "/ui",
+            basePackage = "ui/observability-ui",
+            doc = OpenApiDoc(summary = "Open the observability static UI", tags = listOf("observability")),
+            index = "index.html"
+        )
     }
 
     override suspend fun onStop(context: PluginRuntimeContext) {

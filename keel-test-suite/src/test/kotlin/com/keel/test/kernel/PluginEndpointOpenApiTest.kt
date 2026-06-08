@@ -97,6 +97,7 @@ class PluginEndpointOpenApiTest {
 
         io.ktor.server.testing.testApplication {
             application {
+                install(ContentNegotiation) { json() }
                 install(SSE)
                 routing {
                     manager.mountRoutes(this)
