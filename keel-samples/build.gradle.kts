@@ -47,7 +47,7 @@ val installFrontendDependencies by tasks.registering(Exec::class) {
     description = "Install npm dependencies for the sample React frontends"
     group = "frontend"
     workingDir = frontendDir.asFile
-    commandLine("npm", "install")
+    commandLine("npm", "ci")
     inputs.file(frontendDir.file("package.json"))
     inputs.file(frontendDir.file("package-lock.json")).optional()
     inputs.dir(frontendDir.dir("packages"))
