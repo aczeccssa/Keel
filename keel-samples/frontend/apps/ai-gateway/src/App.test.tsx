@@ -13,6 +13,6 @@ describe('AI Gateway App', () => {
     localStorage.setItem('keel-ai-gateway-auth', JSON.stringify({ accessToken: 'token', refreshToken: 'refresh', email: 'admin@example.com' }));
     render(<App />);
     expect(screen.getByLabelText('Keel AI Relay')).toBeInTheDocument();
-    expect(screen.getByTestId('ai-gateway-active-tab')).toHaveTextContent('dashboard');
+    expect(screen.getByRole('heading', { name: 'Dashboard' })).toBeInTheDocument();
   });
 });

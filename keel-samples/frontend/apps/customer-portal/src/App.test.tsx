@@ -13,6 +13,6 @@ describe('Customer Portal App', () => {
     localStorage.setItem('keel-customer-portal-auth', JSON.stringify({ accessToken: 'token', refreshToken: 'refresh', email: 'demo@example.com' }));
     render(<App />);
     expect(screen.getByLabelText('Keel Customer Portal')).toBeInTheDocument();
-    expect(screen.getByTestId('customer-active-tab')).toHaveTextContent('home');
+    expect(screen.getByRole('heading', { name: 'Dashboard' })).toBeInTheDocument();
   });
 });
