@@ -18,6 +18,23 @@ export ANTHROPIC_AUTH_TOKEN=<your-token>        # the test pool key
 
 The app serves on http://localhost:8080.
 
+## 1a. React sample frontends
+
+The AI Gateway Console and Customer Portal are built from `keel-samples/frontend`.
+Gradle builds them automatically before `:keel-samples:processResources`, so `./gradlew :keel-samples:run`
+is enough for normal runs.
+
+To build just the frontends:
+
+```bash
+./gradlew :keel-samples:buildSampleFrontends
+```
+
+The generated classpath resources are written under:
+
+- `keel-samples/build/generated-resources/frontend/ui/ai-gateway-ui`
+- `keel-samples/build/generated-resources/frontend/ui/customer-portal-ui`
+
 ## 2. Verify /index no longer blocks
 
 ```bash
@@ -36,6 +53,10 @@ If `/api/*` stays responsive with the dashboard open, the SSE-exhaustion fix wor
 Open the management console:
 ```
 http://localhost:8080/api/plugins/airelay/ui/
+```
+Customer Portal:
+```
+http://localhost:8080/api/plugins/customer-portal/ui/
 ```
 Sign in (`admin@example.com` / `admin123`), go to the **Providers** tab → **Add Provider**:
 - Name: `Local Anthropic`

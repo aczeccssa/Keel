@@ -53,8 +53,25 @@ keel-samples/
 ```
 
 应用启动后访问：
+- AI Gateway Console: `http://localhost:8080/api/plugins/airelay/ui/`
+- Customer Portal: `http://localhost:8080/api/plugins/customer-portal/ui/`
 - API 网关: `http://localhost:8080/api/plugins/{pluginId}`
 - Swagger UI: `http://localhost:8080/swagger-ui`
+
+## Sample frontends
+
+`keel-samples` includes two React + Vite frontends:
+
+- AI Gateway Console: `/api/plugins/airelay/ui/`
+- Customer Portal: `/api/plugins/customer-portal/ui/`
+
+Build them directly with:
+
+```bash
+./gradlew :keel-samples:buildSampleFrontends
+```
+
+They are also built automatically as part of `:keel-samples:processResources`, so `./gradlew :keel-samples:run` serves the latest compiled bundles.
 
 ## 工具任务
 
