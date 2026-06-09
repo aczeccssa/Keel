@@ -5,37 +5,12 @@ plugins {
     id("application")
 }
 
-// Custom source set for tools
-sourceSets {
-    create("tools") {
-        kotlin.srcDir("src/tools/kotlin")
-        compileClasspath += sourceSets["main"].compileClasspath
-        runtimeClasspath += sourceSets["main"].runtimeClasspath
-    }
-}
-
-// Task to export H2 database data to CSV via TCP
-tasks.register<JavaExec>("exportH2Data") {
-    description = "Export airelay config tables to CSV (requires H2 TCP server on port 9092)"
-    group = "keel-sample"
-    
-    classpath = sourceSets["tools"].runtimeClasspath
-    mainClass.set("ExportH2DataKt")
-    
-    findProperty("dbFolder")?.let { systemProperty("dbFolder", it.toString()) }
-}
-
-kotlin {
-    jvmToolchain(23)
-}
-
 // Custom source set for tools + generated frontend resources.
 val generatedFrontendResources = layout.buildDirectory.dir("generated-resources/frontend")
 
 sourceSets {
     named("main") {
         resources {
-            // React/Vite builds replace these two checked-in legacy bundles at processResources time.
             exclude("ui/customer-portal-ui/**")
             exclude("ui/ai-gateway-ui/**")
             srcDir(generatedFrontendResources)
@@ -47,6 +22,21 @@ sourceSets {
         compileClasspath += sourceSets["main"].compileClasspath
         runtimeClasspath += sourceSets["main"].runtimeClasspath
     }
+}
+
+// Task to export H2 database data to CSV via TCP
+tasks.register<JavaExec>("exportH2Data") {
+    description = "Export airelay config tables to CSV (requires H2 TCP server on port 9092)"
+    group = "keel-sample"
+
+    classpath = sourceSets["tools"].runtimeClasspath
+    mainClass.set("ExportH2DataKt")
+
+    findProperty("dbFolder")?.let { systemProperty("dbFolder", it.toString()) }
+}
+
+kotlin {
+    jvmToolchain(23)
 }
 
 val frontendDir = layout.projectDirectory.dir("frontend")
