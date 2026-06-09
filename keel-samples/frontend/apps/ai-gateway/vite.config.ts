@@ -1,9 +1,10 @@
+/// <reference types="vitest/config" />
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
-export default defineConfig({
+export default defineConfig(({ command }) => ({
   plugins: [react()],
-  base: './',
+  base: command === 'build' ? '/api/plugins/airelay/ui/' : '/',
   build: {
     outDir: 'dist',
     emptyOutDir: true,
@@ -13,4 +14,4 @@ export default defineConfig({
     environment: 'jsdom',
     setupFiles: '../../vitest.setup.ts',
   },
-} as Parameters<typeof defineConfig>[0] & { test: Record<string, unknown> });
+}));

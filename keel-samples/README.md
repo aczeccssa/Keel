@@ -71,6 +71,10 @@ Build them directly with:
 ./gradlew :keel-samples:buildSampleFrontends
 ```
 
+Gradle installs frontend dependencies automatically, so you do not need to run
+`npm install` manually before `./gradlew`. The build tolerates a missing
+`package-lock.json` and will install from `package.json` when needed.
+
 They are also built automatically as part of `:keel-samples:processResources`, so `./gradlew :keel-samples:run` serves the latest compiled bundles.
 
 ## 工具任务

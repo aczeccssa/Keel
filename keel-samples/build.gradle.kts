@@ -5,16 +5,13 @@ plugins {
     id("application")
 }
 
-// Custom source set for tools + generated frontend resources.
+// Generated React/Vite bundles are staged here and added to the main resources
+// classpath ahead of checked-in fallback assets.
 val generatedFrontendResources = layout.buildDirectory.dir("generated-resources/frontend")
 
 sourceSets {
     named("main") {
-        resources {
-            exclude("ui/customer-portal-ui/**")
-            exclude("ui/ai-gateway-ui/**")
-            srcDir(generatedFrontendResources)
-        }
+        resources.setSrcDirs(listOf(generatedFrontendResources, "src/main/resources"))
     }
 
     create("tools") {
@@ -47,9 +44,11 @@ val installFrontendDependencies by tasks.registering(Exec::class) {
     description = "Install npm dependencies for the sample React frontends"
     group = "frontend"
     workingDir = frontendDir.asFile
-    commandLine("npm", "ci")
+    // Keep Gradle self-contained for developers: install dependencies even when
+    // package-lock.json is missing or stale after ad-hoc local npm usage.
+    commandLine("npm", "install", "--no-package-lock")
     inputs.file(frontendDir.file("package.json"))
-    inputs.file(frontendDir.file("package-lock.json")).optional()
+    inputs.file(frontendDir.file(".npmrc")).optional()
     inputs.dir(frontendDir.dir("packages"))
     inputs.dir(frontendDir.dir("apps"))
     outputs.dir(frontendDir.dir("node_modules"))

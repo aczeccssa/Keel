@@ -22,7 +22,8 @@ The app serves on http://localhost:8080.
 
 The AI Gateway Console and Customer Portal are built from `keel-samples/frontend`.
 Gradle builds them automatically before `:keel-samples:processResources`, so `./gradlew :keel-samples:run`
-is enough for normal runs.
+is enough for normal runs. You do not need to run `npm install` manually first;
+if `package-lock.json` is missing, Gradle installs from `package.json`.
 
 To build just the frontends:
 
