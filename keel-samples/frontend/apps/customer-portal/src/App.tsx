@@ -1,8 +1,24 @@
 import { useMemo, useState } from 'react';
-import { AppShell, Card } from '@keel/sample-ui';
+import { AppShell } from '@keel/sample-ui';
 import { CustomerPortalApi } from './api/customerPortalApi';
-import { clearCustomerAuth, loadCustomerAuth } from './state/customerAuth';
+import { clearCustomerAuth, loadCustomerAuth, saveCustomerAuth } from './state/customerAuth';
 import { CUSTOMER_TABS, tabFromHash, writeTabHash, type CustomerTabId } from './state/navigation';
+
+import { BillingPanel } from './panels/BillingPanel';
+import { DashboardPanel } from './panels/DashboardPanel';
+import { KeysPanel } from './panels/KeysPanel';
+import { LoginPanel } from './panels/LoginPanel';
+import { PricingPanel } from './panels/PricingPanel';
+
+function renderPanel(activeTab: CustomerTabId, api: CustomerPortalApi) {
+  switch (activeTab) {
+    case 'keys': return <KeysPanel api={api} />;
+    case 'billing': return <BillingPanel api={api} />;
+    case 'pricing': return <PricingPanel api={api} />;
+    case 'home':
+    default: return <DashboardPanel api={api} />;
+  }
+}
 
 export function App() {
   const [auth, setAuth] = useState(loadCustomerAuth);
@@ -18,7 +34,7 @@ export function App() {
   const logout = () => setAuth(clearCustomerAuth());
 
   if (!auth.accessToken) {
-    return <Card className="customer-login-card"><h1>Customer Portal</h1><p>Login panel will be ported in the panel parity task.</p></Card>;
+    return <LoginPanel onAuthenticated={(response) => setAuth(saveCustomerAuth(response))} />;
   }
 
   return (
@@ -30,10 +46,7 @@ export function App() {
       userLabel={auth.email ?? 'customer'}
       onLogout={logout}
     >
-      <Card>
-        <h1>{CUSTOMER_TABS.find((tab) => tab.id === activeTab)?.label}</h1>
-        <p data-testid="customer-active-tab">{activeTab}</p>
-      </Card>
+      {renderPanel(activeTab, api)}
     </AppShell>
   );
 }
