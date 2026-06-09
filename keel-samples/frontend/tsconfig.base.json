@@ -16,5 +16,6 @@
     "noEmit": true,
     "jsx": "react-jsx",
     "types": ["vitest/globals", "@testing-library/jest-dom"]
-  }
+  },
+  "include": ["vite-env.d.ts"]
 }
