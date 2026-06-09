@@ -138,3 +138,76 @@ dependencies {
 
     ksp(project(":keel-openapi-processor"))
 }
+
+val frontendDir = layout.projectDirectory.dir("frontend")
+val customerPortalAppDir = frontendDir.dir("apps/customer-portal")
+val aiGatewayAppDir = frontendDir.dir("apps/ai-gateway")
+
+val installFrontendDependencies by tasks.registering(Exec::class) {
+    description = "Install npm dependencies for the sample React frontends"
+    group = "frontend"
+    workingDir = frontendDir.asFile
+    commandLine("npm", "install")
+    inputs.file(frontendDir.file("package.json"))
+    inputs.file(frontendDir.file("package-lock.json")).optional()
+    inputs.dir(frontendDir.dir("packages"))
+    inputs.dir(frontendDir.dir("apps"))
+    outputs.dir(frontendDir.dir("node_modules"))
+}
+
+val buildCustomerPortalFrontend by tasks.registering(Exec::class) {
+    description = "Build the Customer Portal React frontend"
+    group = "frontend"
+    dependsOn(installFrontendDependencies)
+    workingDir = frontendDir.asFile
+    commandLine("npm", "run", "build:customer")
+    inputs.dir(customerPortalAppDir.dir("src"))
+    inputs.file(customerPortalAppDir.file("index.html"))
+    inputs.file(customerPortalAppDir.file("package.json"))
+    inputs.file(customerPortalAppDir.file("tsconfig.json"))
+    inputs.file(customerPortalAppDir.file("vite.config.ts"))
+    inputs.dir(frontendDir.dir("packages/ui/src"))
+    outputs.dir(customerPortalAppDir.dir("dist"))
+}
+
+val buildAiGatewayFrontend by tasks.registering(Exec::class) {
+    description = "Build the AI Gateway React frontend"
+    group = "frontend"
+    dependsOn(installFrontendDependencies)
+    workingDir = frontendDir.asFile
+    commandLine("npm", "run", "build:ai-gateway")
+    inputs.dir(aiGatewayAppDir.dir("src"))
+    inputs.file(aiGatewayAppDir.file("index.html"))
+    inputs.file(aiGatewayAppDir.file("package.json"))
+    inputs.file(aiGatewayAppDir.file("tsconfig.json"))
+    inputs.file(aiGatewayAppDir.file("vite.config.ts"))
+    inputs.dir(frontendDir.dir("packages/ui/src"))
+    outputs.dir(aiGatewayAppDir.dir("dist"))
+}
+
+val syncCustomerPortalFrontend by tasks.registering(Sync::class) {
+    description = "Sync Customer Portal dist into generated classpath resources"
+    group = "frontend"
+    dependsOn(buildCustomerPortalFrontend)
+    from(customerPortalAppDir.dir("dist"))
+    into(generatedFrontendResources.map { it.dir("ui/customer-portal-ui") })
+}
+
+val syncAiGatewayFrontend by tasks.registering(Sync::class) {
+    description = "Sync AI Gateway dist into generated classpath resources"
+    group = "frontend"
+    dependsOn(buildAiGatewayFrontend)
+    from(aiGatewayAppDir.dir("dist"))
+    into(generatedFrontendResources.map { it.dir("ui/ai-gateway-ui") })
+}
+
+tasks.register("buildSampleFrontends") {
+    description = "Build both React/Vite sample frontends"
+    group = "frontend"
+    dependsOn(syncCustomerPortalFrontend, syncAiGatewayFrontend)
+}
+
+tasks.processResources {
+    dependsOn(syncCustomerPortalFrontend, syncAiGatewayFrontend)
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+}

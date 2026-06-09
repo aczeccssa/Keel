@@ -1,8 +1,37 @@
 import { useMemo, useState } from 'react';
-import { AppShell, Card } from '@keel/sample-ui';
+import { AppShell } from '@keel/sample-ui';
 import { AiGatewayApi } from './api/aiGatewayApi';
-import { clearAdminAuth, loadAdminAuth } from './state/adminAuth';
+import { clearAdminAuth, loadAdminAuth, saveAdminAuth } from './state/adminAuth';
 import { AI_GATEWAY_TABS, tabFromHash, writeTabHash, type AiGatewayTabId } from './state/navigation';
+
+import { CustomersPanel } from './panels/CustomersPanel';
+import { DashboardPanel } from './panels/DashboardPanel';
+import { GroupsPanel } from './panels/GroupsPanel';
+import { KeysPanel } from './panels/KeysPanel';
+import { LoginPanel } from './panels/LoginPanel';
+import { PoolsPanel } from './panels/PoolsPanel';
+import { PricingPanel } from './panels/PricingPanel';
+import { ProvidersPanel } from './panels/ProvidersPanel';
+import { RateLimitsPanel } from './panels/RateLimitsPanel';
+import { RedemptionCodesPanel } from './panels/RedemptionCodesPanel';
+import { UsagePanel } from './panels/UsagePanel';
+import { UsersPanel } from './panels/UsersPanel';
+
+function renderPanel(activeTab: AiGatewayTabId, api: AiGatewayApi) {
+  switch (activeTab) {
+    case 'usage': return <UsagePanel api={api} />;
+    case 'channels': return <ProvidersPanel api={api} />;
+    case 'groups': return <GroupsPanel api={api} />;
+    case 'keys': return <KeysPanel api={api} />;
+    case 'pricing': return <PricingPanel api={api} />;
+    case 'ratelimits': return <RateLimitsPanel api={api} />;
+    case 'users': return <UsersPanel api={api} />;
+    case 'customers': return <CustomersPanel api={api} />;
+    case 'codes': return <RedemptionCodesPanel api={api} />;
+    case 'dashboard':
+    default: return <DashboardPanel api={api} />;
+  }
+}
 
 export function App() {
   const [auth, setAuth] = useState(loadAdminAuth);
@@ -18,7 +47,7 @@ export function App() {
   const logout = () => setAuth(clearAdminAuth());
 
   if (!auth.accessToken) {
-    return <Card className="admin-login-card"><h1>AI Relay Console</h1><p>Login panel will be ported in the panel parity task.</p></Card>;
+    return <LoginPanel onAuthenticated={(response) => setAuth(saveAdminAuth(response))} />;
   }
 
   return (
@@ -30,10 +59,7 @@ export function App() {
       userLabel={auth.email ?? 'admin'}
       onLogout={logout}
     >
-      <Card>
-        <h1>{AI_GATEWAY_TABS.find((tab) => tab.id === activeTab)?.label}</h1>
-        <p data-testid="ai-gateway-active-tab">{activeTab}</p>
-      </Card>
+      {renderPanel(activeTab, api)}
     </AppShell>
   );
 }
