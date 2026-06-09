@@ -4,7 +4,7 @@
 
 The transported React frontends in `keel-samples/frontend` currently have three separate quality problems:
 
-1. **Foundation loss:** Several UI styles were lost during transport. AI Relay Manager Console has a partially styled shell, but footer controls, panel content, tables, forms, and many lower-level elements still fall back to browser defaults. Customer Portal is more severe: the unauthenticated login/register view renders almost like raw HTML.
+1. **Migration parity loss:** The transported React frontends did not preserve the full pre-existing backend static UI functionality. Step 1 therefore treats the original backend static UI assets as the functional and visual source of truth, and migrates those complete custom-element apps into the Vite build without redesigning them.
 2. **API uncertainty:** The React frontends call a broad set of backend plugin APIs across `account`, `token`, `airelay`, `riskcontrol`, and `customer-portal`. Before doing a full UI rewrite, every frontend API path must be checked against the backend route definitions and runtime behavior.
 3. **Wrong visual direction:** The current yellow/brown industrial/brutalist visual language is not the target. The final UI should be rebuilt as a clean, premium, mostly white SaaS experience with soft 3D minimal surfaces. Existing business functionality stays intact, and new product Landing/Hero pages are added.
 
@@ -14,52 +14,43 @@ This spec replaces the narrower frontend style repair spec. The work should proc
 
 Upgrade Customer Portal and AI Relay Manager Console through a three-step roadmap:
 
-1. restore a complete shared React UI foundation,
+1. restore full frontend migration parity without changing the existing UI style,
 2. verify all frontend API calls against working backend endpoints,
 3. redesign every page into a Premium Minimal SaaS Landing Page / Soft 3D Minimal Web Design system, including new product Landing/Hero pages and a redesigned primary logo.
+
+## Progress
+
+- **Step 1: Complete.** Corrected implementation preserves the existing backend static UIs by serving the full legacy custom-element apps through Vite. Result recorded in `docs/superpowers/specs-result/2026-06-10-ai-gateway-frontend-quality-roadmap-step1-result.md`.
+- **Step 2: Complete.** Validated 59 frontend API contracts against the running backend OpenAPI document and safe runtime probes, fixed TypeScript client shape mismatches, and verified relay/customer success paths through mock-backed Gradle integration tests. Result recorded in `docs/superpowers/specs-result/2026-06-10-ai-gateway-frontend-quality-roadmap-step2-result.md`.
+- **Step 3: Not started.** Premium Minimal / Soft 3D redesign is now unblocked and remains the next serial step.
 
 ## Non-Goals
 
 - Do not change the product's core business behavior.
 - Do not remove existing routes, panels, auth flows, or data workflows.
-- Do not preserve the current yellow/brown industrial/brutalist style.
+- Do not redesign the current yellow/brown industrial/brutalist style in Step 1. Step 3 replaces it after migration and API verification are complete.
 - Do not finalize the concrete logo artwork, brand illustration assets, or detailed hero compositions in this spec. This spec defines the required direction and constraints; Step 3 includes the asset exploration and final asset production work.
 - Do not introduce new third-party UI or animation dependencies unless the implementation plan justifies them after checking `package.json`.
 
 ## Serial Roadmap
 
-### Step 1: Restore The React UI Foundation
+### Step 1: Restore Migration Parity
 
-Step 1 fixes the transported frontend so the app is no longer visually broken.
+Step 1 fixes the transported frontend so the served Vite apps preserve all pre-existing UI functionality and the current visual style. It is a migration stabilization phase only.
 
 Requirements:
 
-- Centralize shared styles in `keel-samples/frontend/packages/ui/src/styles/tokens.css`.
-- Keep app stylesheets small and app-specific:
-  - `keel-samples/frontend/apps/ai-gateway/src/styles/app.css`
-  - `keel-samples/frontend/apps/customer-portal/src/styles/app.css`
-- Style the shared `keel-*` component vocabulary completely:
-  - `.keel-app-shell`
-  - `.keel-sidebar`
-  - `.keel-brand`
-  - `.keel-logo`
-  - `.keel-nav-section`
-  - `.keel-main`
-  - `.keel-card`
-  - `.keel-button`
-  - `.keel-data-table`
-  - `.keel-table-empty`
-  - `.keel-empty`
-  - `.keel-error-banner`
-  - `.keel-stat-grid`
-  - `.keel-stat`
-  - `.keel-chart-placeholder`
-  - `.keel-theme-toggle`
-- Scope raw element styling for forms, labels, inputs, buttons, headings, paragraphs, and tables so existing panels stop using browser defaults.
+- Preserve the complete existing AI Relay Manager Console frontend from `keel-samples/src/main/resources/ui/ai-gateway-ui`.
+- Preserve the complete existing Customer Portal frontend from `keel-samples/src/main/resources/ui/customer-portal-ui`.
+- Serve those legacy custom-element apps from the Vite frontend app entries:
+  - AI Relay Manager Console uses `<ai-proxy-app>`.
+  - Customer Portal uses `<customer-app>`.
+- Preserve current UI style, assets, theme bootstrapping, auth storage behavior, routes, panels, controls, empty states, and error states.
+- Add parity tests proving migrated legacy JS/CSS file lists and contents match the original backend static UI sources.
 - Add Vite dev proxy behavior so `/api` calls go to `http://localhost:8080` while frontend assets hot reload from the app dev server.
 - Verify both dev-server rendering and backend-served static rendering.
 
-Step 1 is a stabilization phase. It should not attempt the final Premium Minimal redesign yet, but it should avoid adding more industrial/brutalist styling.
+Step 1 must not attempt the final Premium Minimal redesign. The simplified React panel implementation can remain in source as future scaffolding, but it is not the served Step 1 app entry.
 
 ### Step 2: Validate Frontend API Contracts
 
@@ -338,10 +329,10 @@ Regression checks:
   - `/api/plugins/airelay/ui/`
   - `/api/plugins/customer-portal/ui/`
 - Theme preference continues to use `keel-theme-pref`.
-- Auth storage keys continue to work:
+- Legacy auth storage behavior continues to work:
   - `keel-ai-gateway-auth`
   - `keel-customer-portal-auth`
-- No browser-default form or button styling remains inside either React app after Step 1.
+- Step 1 browser checks confirm the served apps are the legacy custom elements, not the incomplete React `#root` entries.
 - No yellow/brown/industrial/brutalist palette remains after Step 3.
 
 ## Risks
@@ -355,7 +346,7 @@ Regression checks:
 ## Acceptance Criteria
 
 - The work is implemented serially as Step 1, then Step 2, then Step 3.
-- Step 1 restores a complete shared React UI foundation and removes raw browser-default styling.
+- Step 1 restores full migration parity by serving the complete legacy custom-element UIs through Vite without changing the current UI style or dropping functionality.
 - Step 2 verifies every frontend API method against a working backend route and records the compatibility matrix.
 - Step 3 replaces all Customer Portal and AI Relay Manager Console pages with the new Premium Minimal / Soft 3D visual system.
 - New product Landing/Hero pages exist and route naturally into the product flows.

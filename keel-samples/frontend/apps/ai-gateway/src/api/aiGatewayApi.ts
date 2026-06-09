@@ -7,6 +7,7 @@ const RISK_BASE = '/api/plugins/riskcontrol';
 const CUSTOMER_BASE = '/api/plugins/customer-portal';
 
 export interface AdminCredentials { email: string; password: string; }
+export interface AdminRegisterRequest extends AdminCredentials { displayName: string; }
 export interface AdminAuthResponse { accessToken: string; refreshToken: string; user?: { email?: string; userId?: string }; }
 
 export class AiGatewayApi {
@@ -20,7 +21,7 @@ export class AiGatewayApi {
     return requestJson<AdminAuthResponse>(`${ACCOUNT_BASE}/v1/auth/login`, { method: 'POST', body });
   }
 
-  register(body: AdminCredentials) {
+  register(body: AdminRegisterRequest) {
     return requestJson<AdminAuthResponse>(`${ACCOUNT_BASE}/v1/auth/register`, { method: 'POST', body });
   }
 

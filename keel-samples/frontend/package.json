@@ -8,6 +8,8 @@
     "apps/*"
   ],
   "scripts": {
+    "api:contracts": "node scripts/verify-api-contracts.mjs",
+    "api:contracts:matrix": "node scripts/verify-api-contracts.mjs --matrix",
     "build": "npm run build --workspaces --if-present",
     "build:customer": "npm run build -w @keel/customer-portal-ui",
     "build:ai-gateway": "npm run build -w @keel/ai-gateway-ui",

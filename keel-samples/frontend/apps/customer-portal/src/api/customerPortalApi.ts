@@ -4,10 +4,11 @@ const CUSTOMER_BASE = '/api/plugins/customer-portal';
 const AIRELAY_BASE = '/api/plugins/airelay';
 
 export interface CustomerCredentials { email: string; password: string; }
-export interface CustomerRegisterRequest extends CustomerCredentials { name?: string; }
-export interface CustomerAuthResponse { accessToken: string; refreshToken: string; customer?: { email?: string; name?: string; customerId?: string }; }
-export interface CustomerKeyCreateRequest { name: string; groupId?: string; }
+export interface CustomerRegisterRequest extends CustomerCredentials { displayName: string; }
+export interface CustomerAuthResponse { accessToken: string; refreshToken: string; email?: string; displayName?: string; customerId?: string; }
+export interface CustomerKeyCreateRequest { name: string; routingGroupId?: string; monthlyBudgetCredits?: number; }
 export interface CustomerKeyView { keyId: string; name: string; prefix?: string; createdAt?: string; }
+export interface CustomerKeyCreatedResponse { key: CustomerKeyView; rawKey: string; }
 
 export class CustomerPortalApi {
   constructor(private token: string | null = null) {}
@@ -53,7 +54,7 @@ export class CustomerPortalApi {
   }
 
   createKey(body: CustomerKeyCreateRequest) {
-    return requestJson<CustomerKeyView>(`${CUSTOMER_BASE}/v1/customer/keys`, { method: 'POST', body, token: this.token });
+    return requestJson<CustomerKeyCreatedResponse>(`${CUSTOMER_BASE}/v1/customer/keys`, { method: 'POST', body, token: this.token });
   }
 
   deleteKey(keyId: string) {

@@ -15,7 +15,7 @@ export function LoginPanel({ onAuthenticated }: { onAuthenticated: (response: Cu
     try {
       const response = mode === 'login'
         ? await api.login({ email, password })
-        : await api.register({ email, password });
+        : await api.register({ email, password, displayName: email.split('@')[0] || email });
       onAuthenticated(response);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Authentication failed');

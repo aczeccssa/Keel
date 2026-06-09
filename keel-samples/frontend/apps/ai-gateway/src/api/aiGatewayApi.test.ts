@@ -13,6 +13,18 @@ describe('AiGatewayApi', () => {
     expect(fetch).toHaveBeenCalledWith('/api/plugins/account/v1/auth/login', expect.objectContaining({ method: 'POST' }));
   });
 
+  it('registers with the displayName field required by account auth', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ accessToken: 'token', refreshToken: 'refresh' }), { status: 200 })));
+
+    const api = new AiGatewayApi();
+    await api.register({ email: 'new@example.com', password: 'admin123', displayName: 'New Admin' });
+
+    expect(fetch).toHaveBeenCalledWith('/api/plugins/account/v1/auth/register', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({ email: 'new@example.com', password: 'admin123', displayName: 'New Admin' })
+    }));
+  });
+
   it('loads nav counts from airelay admin endpoint', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ customers: 2 }), { status: 200 })));
 

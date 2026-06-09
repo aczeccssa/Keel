@@ -23,7 +23,7 @@ export function saveCustomerAuth(response: CustomerAuthResponse): CustomerAuthSt
   const state = {
     accessToken: response.accessToken,
     refreshToken: response.refreshToken,
-    email: response.customer?.email ?? null
+    email: response.email ?? null
   };
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
   return state;
