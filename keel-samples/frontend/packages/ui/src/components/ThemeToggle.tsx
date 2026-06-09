@@ -1,12 +1,21 @@
-import { getInitialTheme, setStoredTheme, type ThemePreference } from '../theme/theme';
+import { useEffect, useState } from 'react';
+import { THEME_STORAGE_KEY, type ThemePreference } from '../theme/theme';
 
 export function ThemeToggle() {
-  const current = getInitialTheme();
-  const setTheme = (theme: ThemePreference) => setStoredTheme(theme);
+  const [theme, setTheme] = useState<ThemePreference>(() => {
+    const stored = localStorage.getItem(THEME_STORAGE_KEY);
+    return stored === 'dark' || stored === 'light' ? stored : 'light';
+  });
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme);
+    localStorage.setItem(THEME_STORAGE_KEY, theme);
+  }, [theme]);
+
   return (
-    <div className="keel-theme-toggle" aria-label="Theme">
-      <button type="button" aria-pressed={current === 'light'} onClick={() => setTheme('light')}>Light</button>
-      <button type="button" aria-pressed={current === 'dark'} onClick={() => setTheme('dark')}>Dark</button>
+    <div role="group" aria-label="Theme" className="keel-theme-toggle">
+      <button type="button" aria-pressed={theme === 'light'} onClick={() => setTheme('light')}>Light</button>
+      <button type="button" aria-pressed={theme === 'dark'} onClick={() => setTheme('dark')}>Dark</button>
     </div>
   );
 }

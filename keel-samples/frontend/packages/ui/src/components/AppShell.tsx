@@ -34,6 +34,7 @@ export function AppShell({ productLabel, tabs, activeTab, onSelectTab, userLabel
                   type="button"
                   key={tab.id}
                   className={tab.id === activeTab ? 'is-active' : ''}
+                  aria-current={tab.id === activeTab ? 'page' : undefined}
                   onClick={() => onSelectTab(tab.id)}
                 >
                   <strong>{tab.label}</strong>

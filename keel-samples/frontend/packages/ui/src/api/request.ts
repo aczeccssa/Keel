@@ -33,14 +33,22 @@ export async function requestJson<T>(url: string, options: RequestJsonOptions = 
   });
 
   const text = await response.text();
-  const parsed = text ? safeJson(text) : null;
 
   if (!response.ok) {
+    const parsed = safeJson(text);
     const message = extractMessage(parsed) ?? `${response.status} ${response.statusText}`.trim();
     throw new ApiError(response.status, message, parsed);
   }
 
-  return parsed as T;
+  return strictJson<T>(text, url);
+}
+
+function strictJson<T>(text: string, url: string): T {
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new ApiError(0, `Invalid JSON from ${url}`, text);
+  }
 }
 
 function safeJson(text: string): unknown {

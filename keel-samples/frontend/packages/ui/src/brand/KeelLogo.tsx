@@ -1,4 +1,4 @@
-const logoUrl = new URL('../assets/keel-logo-light.png', import.meta.url).href;
+import logoUrl from '../assets/keel-logo.svg';
 
 export interface KeelLogoProps {
   label?: string;
