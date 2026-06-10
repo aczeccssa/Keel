@@ -8,6 +8,7 @@ import { KeysPanel } from './KeysPanel';
 import { LoginPanel } from './LoginPanel';
 import { PoolsPanel } from './PoolsPanel';
 import { PricingPanel } from './PricingPanel';
+import { PlaygroundPanel } from './PlaygroundPanel';
 import { ProvidersPanel } from './ProvidersPanel';
 import { RateLimitsPanel } from './RateLimitsPanel';
 import { RedemptionCodesPanel } from './RedemptionCodesPanel';
@@ -25,6 +26,18 @@ const api = {
   users: async () => ({ users: [] }),
   customers: async () => ({ customers: [] }),
   redemptionCodes: async () => ({ codes: [] })
+  ,
+  createChannel: async () => ({}),
+  testChannel: async () => ({}),
+  createGroup: async () => ({}),
+  attachGroupMembership: async () => ({}),
+  upsertPricing: async () => ({}),
+  createRateLimitRule: async () => ({}),
+  createRedemptionCode: async () => ({}),
+  createApiKey: async () => ({}),
+  chatCompletions: async () => ({ id: 'chatcmpl_test' }),
+  responses: async () => ({ id: 'resp_test' }),
+  messages: async () => ({ id: 'msg_test' })
 } as unknown as AiGatewayApi;
 
 describe('AI Gateway panels', () => {
@@ -51,5 +64,36 @@ describe('AI Gateway panels', () => {
     if (heading !== 'Dashboard') {
       expect(await screen.findByText(/No .* yet|No records yet/i)).toBeInTheDocument();
     }
+  });
+
+  it('renders provider management actions', async () => {
+    const apiWithChannel = {
+      ...api,
+      channels: async () => ({ channels: [{ channelId: 'ch_1', name: 'Primary', protocol: 'OPENAI_CHAT', baseUrl: 'mock://provider' }] })
+    } as unknown as AiGatewayApi;
+    render(<ProvidersPanel api={apiWithChannel} />);
+    expect(await screen.findByRole('heading', { name: /Channels/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Add channel/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Test/i })).toBeInTheDocument();
+  });
+
+  it('renders group membership actions', async () => {
+    render(<GroupsPanel api={api} />);
+    expect(await screen.findByRole('heading', { name: /Groups/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /New group/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Attach/i })).toBeInTheDocument();
+  });
+
+  it('renders pricing and risk controls', async () => {
+    render(<PricingPanel api={api} />);
+    expect(await screen.findByRole('button', { name: /Add rate/i })).toBeInTheDocument();
+    render(<RateLimitsPanel api={api} />);
+    expect(await screen.findByRole('button', { name: /New rule/i })).toBeInTheDocument();
+  });
+
+  it('renders playground relay controls', () => {
+    render(<PlaygroundPanel api={api} />);
+    expect(screen.getByRole('heading', { name: /Playground/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Send/i })).toBeInTheDocument();
   });
 });
