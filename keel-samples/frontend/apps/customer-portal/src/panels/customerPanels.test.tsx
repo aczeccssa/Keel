@@ -12,7 +12,9 @@ const api = {
   usage: async () => ({ records: [] }),
   keys: async () => ({ keys: [] }),
   createKey: async () => ({ key: { keyId: 'key_1', name: 'Default' }, rawKey: 'sk-test' }),
+  deleteKey: async () => ({}),
   creditLedger: async () => ({ entries: [] }),
+  redeem: async () => ({ balanceCredits: 1000 }),
   pricing: async () => ({ pricing: [] })
 } as unknown as CustomerPortalApi;
 
@@ -32,12 +34,14 @@ describe('customer portal panels', () => {
   it('renders keys heading', async () => {
     render(<KeysPanel api={api} />);
     expect(await screen.findByRole('heading', { name: /api keys/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Create key/i })).toBeInTheDocument();
     expect(await screen.findByText(/No API keys yet/i)).toBeInTheDocument();
   });
 
   it('renders credits heading', async () => {
     render(<BillingPanel api={api} />);
     expect(await screen.findByRole('heading', { name: /credits/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Redeem/i })).toBeInTheDocument();
     expect(await screen.findByText(/No credit ledger entries yet/i)).toBeInTheDocument();
   });
 
