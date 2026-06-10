@@ -1,5 +1,10 @@
 import type { ButtonHTMLAttributes, PropsWithChildren } from 'react';
 
-export function Button({ children, className = '', ...props }: PropsWithChildren<ButtonHTMLAttributes<HTMLButtonElement>>) {
-  return <button className={`keel-button ${className}`.trim()} {...props}>{children}</button>;
+export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
+  variant?: 'primary' | 'secondary' | 'ghost' | 'danger';
+  size?: 'sm' | 'md' | 'lg';
+}
+
+export function Button({ children, className = '', variant = 'primary', size = 'md', ...props }: PropsWithChildren<ButtonProps>) {
+  return <button className={`keel-button keel-button-${variant} keel-button-${size} ${className}`.trim()} {...props}>{children}</button>;
 }

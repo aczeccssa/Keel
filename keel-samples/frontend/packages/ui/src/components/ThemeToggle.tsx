@@ -14,8 +14,8 @@ export function ThemeToggle() {
 
   return (
     <div role="group" aria-label="Theme" className="keel-theme-toggle">
-      <button type="button" aria-pressed={theme === 'light'} onClick={() => setTheme('light')}>Light</button>
-      <button type="button" aria-pressed={theme === 'dark'} onClick={() => setTheme('dark')}>Dark</button>
+      <button type="button" aria-pressed={theme === 'light'} title="Light mode" onClick={() => setTheme('light')}>Light</button>
+      <button type="button" aria-pressed={theme === 'dark'} title="Dark mode" onClick={() => setTheme('dark')}>Dark</button>
     </div>
   );
 }
