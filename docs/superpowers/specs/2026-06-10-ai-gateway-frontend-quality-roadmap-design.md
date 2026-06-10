@@ -22,7 +22,7 @@ Upgrade Customer Portal and AI Relay Manager Console through a three-step roadma
 
 - **Step 1: Complete.** Corrected implementation preserves the existing backend static UIs by serving the full legacy custom-element apps through Vite. Result recorded in `docs/superpowers/specs-result/2026-06-10-ai-gateway-frontend-quality-roadmap-step1-result.md`.
 - **Step 2: Complete.** Validated 59 frontend API contracts against the running backend OpenAPI document and safe runtime probes, fixed TypeScript client shape mismatches, and verified relay/customer success paths through mock-backed Gradle integration tests. Result recorded in `docs/superpowers/specs-result/2026-06-10-ai-gateway-frontend-quality-roadmap-step2-result.md`.
-- **Step 3: Not started.** Premium Minimal / Soft 3D redesign is now unblocked and remains the next serial step.
+- **Step 3: Complete.** React design-system rewrite implemented the Premium Minimal / Soft 3D UI, added product Landing/Hero pages, replaced the primary logo direction, preserved API contracts and functional page coverage, and recorded verification in `docs/superpowers/specs-result/2026-06-10-ai-gateway-frontend-quality-roadmap-step3-result.md`.
 
 ## Non-Goals
 
