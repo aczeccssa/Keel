@@ -8,6 +8,7 @@ import { CustomersPanel } from './panels/CustomersPanel';
 import { DashboardPanel } from './panels/DashboardPanel';
 import { GroupsPanel } from './panels/GroupsPanel';
 import { KeysPanel } from './panels/KeysPanel';
+import { LandingPage } from './panels/LandingPage';
 import { LoginPanel } from './panels/LoginPanel';
 import { PoolsPanel } from './panels/PoolsPanel';
 import { PricingPanel } from './panels/PricingPanel';
@@ -35,6 +36,7 @@ function renderPanel(activeTab: AiGatewayTabId, api: AiGatewayApi) {
 
 export function App() {
   const [auth, setAuth] = useState(loadAdminAuth);
+  const [authView, setAuthView] = useState<'landing' | 'login' | 'register'>('landing');
   const [activeTab, setActiveTab] = useState<AiGatewayTabId>(tabFromHash());
   const api = useMemo(() => new AiGatewayApi(auth.accessToken), [auth.accessToken]);
 
@@ -47,7 +49,16 @@ export function App() {
   const logout = () => setAuth(clearAdminAuth());
 
   if (!auth.accessToken) {
-    return <LoginPanel onAuthenticated={(response) => setAuth(saveAdminAuth(response))} />;
+    if (authView === 'landing') {
+      return <LandingPage onSignIn={() => setAuthView('login')} onRegister={() => setAuthView('register')} />;
+    }
+    return (
+      <LoginPanel
+        initialMode={authView}
+        onBack={() => setAuthView('landing')}
+        onAuthenticated={(response) => setAuth(saveAdminAuth(response))}
+      />
+    );
   }
 
   return (

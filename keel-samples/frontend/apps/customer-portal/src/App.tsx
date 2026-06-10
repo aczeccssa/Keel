@@ -7,6 +7,7 @@ import { CUSTOMER_TABS, tabFromHash, writeTabHash, type CustomerTabId } from './
 import { BillingPanel } from './panels/BillingPanel';
 import { DashboardPanel } from './panels/DashboardPanel';
 import { KeysPanel } from './panels/KeysPanel';
+import { LandingPage } from './panels/LandingPage';
 import { LoginPanel } from './panels/LoginPanel';
 import { PricingPanel } from './panels/PricingPanel';
 
@@ -22,6 +23,7 @@ function renderPanel(activeTab: CustomerTabId, api: CustomerPortalApi) {
 
 export function App() {
   const [auth, setAuth] = useState(loadCustomerAuth);
+  const [authView, setAuthView] = useState<'landing' | 'login' | 'register'>('landing');
   const [activeTab, setActiveTab] = useState<CustomerTabId>(tabFromHash());
   const api = useMemo(() => new CustomerPortalApi(auth.accessToken), [auth.accessToken]);
 
@@ -34,7 +36,16 @@ export function App() {
   const logout = () => setAuth(clearCustomerAuth());
 
   if (!auth.accessToken) {
-    return <LoginPanel onAuthenticated={(response) => setAuth(saveCustomerAuth(response))} />;
+    if (authView === 'landing') {
+      return <LandingPage onSignIn={() => setAuthView('login')} onRegister={() => setAuthView('register')} />;
+    }
+    return (
+      <LoginPanel
+        initialMode={authView}
+        onBack={() => setAuthView('landing')}
+        onAuthenticated={(response) => setAuth(saveCustomerAuth(response))}
+      />
+    );
   }
 
   return (
