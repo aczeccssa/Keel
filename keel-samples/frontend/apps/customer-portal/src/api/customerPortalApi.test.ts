@@ -48,4 +48,17 @@ describe('CustomerPortalApi', () => {
       headers: expect.objectContaining({ Authorization: 'Bearer abc' })
     }));
   });
+
+  it('supports OAuth stub and customer key detail/update routes from the legacy portal', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ok: true }), { status: 200 })));
+
+    const api = new CustomerPortalApi('customer-token');
+    await api.oauthStub({ provider: 'google', email: 'pilot@example.com', displayName: 'Pilot Customer' });
+    await api.keyDetail('key_1');
+    await api.updateKey('key_1', { name: 'Production', routingGroupId: 'default', monthlyBudgetCredits: 2500 });
+
+    expect(fetch).toHaveBeenCalledWith('/api/plugins/customer-portal/v1/customer/auth/oauth/stub', expect.objectContaining({ method: 'POST' }));
+    expect(fetch).toHaveBeenCalledWith('/api/plugins/customer-portal/v1/customer/keys/key_1', expect.objectContaining({ method: 'GET' }));
+    expect(fetch).toHaveBeenCalledWith('/api/plugins/customer-portal/v1/customer/keys/key_1', expect.objectContaining({ method: 'PUT' }));
+  });
 });

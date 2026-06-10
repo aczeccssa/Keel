@@ -6,7 +6,9 @@ const AIRELAY_BASE = '/api/plugins/airelay';
 export interface CustomerCredentials { email: string; password: string; }
 export interface CustomerRegisterRequest extends CustomerCredentials { displayName: string; }
 export interface CustomerAuthResponse { accessToken: string; refreshToken: string; email?: string; displayName?: string; customerId?: string; }
+export interface CustomerOAuthStubRequest { provider: string; email: string; displayName: string; }
 export interface CustomerKeyCreateRequest { name: string; routingGroupId?: string; monthlyBudgetCredits?: number; }
+export interface CustomerKeyUpdateRequest { name?: string; routingGroupId?: string; monthlyBudgetCredits?: number; }
 export interface CustomerKeyView { keyId: string; name: string; prefix?: string; createdAt?: string; }
 export interface CustomerKeyCreatedResponse { key: CustomerKeyView; rawKey: string; }
 
@@ -27,6 +29,10 @@ export class CustomerPortalApi {
 
   refresh(refreshToken: string) {
     return requestJson<CustomerAuthResponse>(`${CUSTOMER_BASE}/v1/customer/auth/refresh`, { method: 'POST', body: { refreshToken } });
+  }
+
+  oauthStub(body: CustomerOAuthStubRequest) {
+    return requestJson<CustomerAuthResponse>(`${CUSTOMER_BASE}/v1/customer/auth/oauth/stub`, { method: 'POST', body });
   }
 
   profile() {
@@ -59,6 +65,14 @@ export class CustomerPortalApi {
 
   deleteKey(keyId: string) {
     return requestJson(`${CUSTOMER_BASE}/v1/customer/keys/${encodeURIComponent(keyId)}`, { method: 'DELETE', token: this.token });
+  }
+
+  keyDetail(keyId: string) {
+    return requestJson<CustomerKeyView>(`${CUSTOMER_BASE}/v1/customer/keys/${encodeURIComponent(keyId)}`, { token: this.token });
+  }
+
+  updateKey(keyId: string, body: CustomerKeyUpdateRequest) {
+    return requestJson<CustomerKeyView>(`${CUSTOMER_BASE}/v1/customer/keys/${encodeURIComponent(keyId)}`, { method: 'PUT', body, token: this.token });
   }
 
   pricing() {
