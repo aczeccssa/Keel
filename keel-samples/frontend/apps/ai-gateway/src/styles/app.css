@@ -1,4 +1,6 @@
-html, body, #root {
+html,
+body,
+#root {
   min-height: 100%;
   margin: 0;
 }
@@ -7,58 +9,4 @@ body {
   background: var(--keel-bg);
   color: var(--keel-ink);
   font-family: var(--keel-font-body);
-}
-
-.keel-app-shell {
-  min-height: 100vh;
-  display: grid;
-  grid-template-columns: 300px minmax(0, 1fr);
-}
-
-.keel-sidebar {
-  border-right: 1px solid var(--keel-line);
-  background: var(--keel-surface);
-  padding: 22px;
-}
-
-.keel-sidebar nav button {
-  width: 100%;
-  display: block;
-  margin: 8px 0;
-  padding: 12px;
-  text-align: left;
-  border: 1px solid var(--keel-line);
-  border-radius: var(--keel-radius-sm);
-  background: transparent;
-  color: inherit;
-}
-
-.keel-sidebar nav button.is-active {
-  background: var(--keel-ink);
-  color: var(--keel-bg);
-}
-
-.keel-main {
-  padding: 28px;
-}
-
-.keel-card, .admin-login-card {
-  border: 1px solid var(--keel-line);
-  border-radius: var(--keel-radius-lg);
-  background: var(--keel-surface);
-  box-shadow: var(--keel-shadow-soft);
-  padding: 24px;
-}
-
-.keel-logo {
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  font-family: var(--keel-font-display);
-}
-
-.keel-logo img {
-  width: 34px;
-  height: 34px;
-  object-fit: contain;
 }
