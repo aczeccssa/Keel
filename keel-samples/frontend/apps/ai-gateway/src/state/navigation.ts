@@ -3,7 +3,6 @@ export const AI_GATEWAY_TABS = [
   { id: 'usage', label: 'Usage', hint: 'Per-request detail log', section: 'OVERVIEW' },
   { id: 'channels', label: 'Channels', hint: 'Upstream providers', section: 'ROUTING' },
   { id: 'groups', label: 'Groups', hint: 'Routing pools', section: 'ROUTING' },
-  { id: 'playground', label: 'Playground', hint: 'Relay request probe', section: 'ROUTING' },
   { id: 'keys', label: 'API Keys', hint: 'Virtual tokens', section: 'BILLING' },
   { id: 'pricing', label: 'Pricing', hint: 'Model rate cards', section: 'BILLING' },
   { id: 'customers', label: 'Customers', hint: 'End-customer directory', section: 'BILLING' },

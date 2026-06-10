@@ -12,7 +12,6 @@ import { LandingPage } from './panels/LandingPage';
 import { LoginPanel } from './panels/LoginPanel';
 import { PoolsPanel } from './panels/PoolsPanel';
 import { PricingPanel } from './panels/PricingPanel';
-import { PlaygroundPanel } from './panels/PlaygroundPanel';
 import { ProvidersPanel } from './panels/ProvidersPanel';
 import { RateLimitsPanel } from './panels/RateLimitsPanel';
 import { RedemptionCodesPanel } from './panels/RedemptionCodesPanel';
@@ -24,7 +23,6 @@ function renderPanel(activeTab: AiGatewayTabId, api: AiGatewayApi) {
     case 'usage': return <UsagePanel api={api} />;
     case 'channels': return <ProvidersPanel api={api} />;
     case 'groups': return <GroupsPanel api={api} />;
-    case 'playground': return <PlaygroundPanel api={api} />;
     case 'keys': return <KeysPanel api={api} />;
     case 'pricing': return <PricingPanel api={api} />;
     case 'ratelimits': return <RateLimitsPanel api={api} />;
