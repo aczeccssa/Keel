@@ -22,12 +22,13 @@ function listFiles(root: string) {
 }
 
 describe('Customer Portal legacy UI migration entry', () => {
-  it('keeps the Vite entry wired to the full legacy custom element app', () => {
+  it('serves the Step 3 React entry while keeping legacy files as parity references', () => {
     const html = readFileSync(resolve(appRoot, 'index.html'), 'utf8');
 
-    expect(html).toContain('<customer-app></customer-app>');
-    expect(html).toContain('/src/legacy/css/style.css');
-    expect(html).toContain('/src/legacy/js/app.js');
+    expect(html).toContain('<div id="root"></div>');
+    expect(html).toContain('/src/main.tsx');
+    expect(html).not.toContain('<customer-app>');
+    expect(html).not.toContain('/src/legacy/js/app.js');
   });
 
   it('keeps migrated legacy JS and CSS in parity with the existing backend static UI', () => {
