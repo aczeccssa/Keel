@@ -1,6 +1,6 @@
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
-import { AiGatewayApi } from '../api/aiGatewayApi';
+import type { AiGatewayApi } from '../api/aiGatewayApi';
 import { CustomersPanel } from './CustomersPanel';
 import { DashboardPanel } from './DashboardPanel';
 import { GroupsPanel } from './GroupsPanel';
@@ -14,7 +14,18 @@ import { RedemptionCodesPanel } from './RedemptionCodesPanel';
 import { UsagePanel } from './UsagePanel';
 import { UsersPanel } from './UsersPanel';
 
-const api = new AiGatewayApi('test-token');
+const api = {
+  usageRecords: async () => ({ records: [] }),
+  channels: async () => ({ channels: [] }),
+  groups: async () => ({ groups: [] }),
+  keys: async () => ({ keys: [] }),
+  pools: async () => ({ chains: [] }),
+  pricing: async () => ({ pricing: [] }),
+  rateLimitRules: async () => ({ rules: [] }),
+  users: async () => ({ users: [] }),
+  customers: async () => ({ customers: [] }),
+  redemptionCodes: async () => ({ codes: [] })
+} as unknown as AiGatewayApi;
 
 describe('AI Gateway panels', () => {
   it('renders login actions', () => {
@@ -34,8 +45,11 @@ describe('AI Gateway panels', () => {
     [UsersPanel, 'Users'],
     [CustomersPanel, 'Customers'],
     [RedemptionCodesPanel, 'Redemption']
-  ])('renders %s heading', (Panel, heading) => {
+  ])('renders %s heading', async (Panel, heading) => {
     render(<Panel api={api} />);
-    expect(screen.getByRole('heading', { name: heading })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: heading })).toBeInTheDocument();
+    if (heading !== 'Dashboard') {
+      expect(await screen.findByText(/No .* yet|No records yet/i)).toBeInTheDocument();
+    }
   });
 });
