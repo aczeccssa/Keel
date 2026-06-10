@@ -22,13 +22,12 @@ function listFiles(root: string) {
 }
 
 describe('AI Gateway legacy UI migration entry', () => {
-  it('serves the Step 3 React entry while keeping legacy files as parity references', () => {
+  it('keeps the Vite entry wired to the full legacy custom element app', () => {
     const html = readFileSync(resolve(appRoot, 'index.html'), 'utf8');
 
-    expect(html).toContain('<div id="root"></div>');
-    expect(html).toContain('/src/main.tsx');
-    expect(html).not.toContain('<ai-proxy-app>');
-    expect(html).not.toContain('/src/legacy/js/app.js');
+    expect(html).toContain('<ai-proxy-app></ai-proxy-app>');
+    expect(html).toContain('/src/legacy/css/style.css');
+    expect(html).toContain('/src/legacy/js/app.js');
   });
 
   it('keeps migrated legacy JS and CSS in parity with the existing backend static UI', () => {

@@ -1,19 +1,30 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
   <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="color-scheme" content="light dark" />
-    <title>Keel AI Relay</title>
+    <meta charset="utf-8" />
+    <meta content="width=device-width, initial-scale=1.0" name="viewport" />
+    <title>Keel AI Relay - Console</title>
+    <link rel="shortcut icon" href="/favicon.svg" type="image/x-icon" />
+    <link href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Archivo:wght@400;600;700;900&family=JetBrains+Mono:wght@400;500;700;800&display=swap" rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght@400&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/src/legacy/css/style.css" />
+    <script defer src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
     <script>
-      (() => {
-        const pref = localStorage.getItem('keel-theme-pref');
-        document.documentElement.setAttribute('data-theme', pref === 'dark' ? 'dark' : 'light');
+      (function () {
+        var stored = localStorage.getItem('keel-theme-pref');
+        var dark;
+        if (stored === 'dark') dark = true;
+        else if (stored === 'light') dark = false;
+        else dark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+        if (dark) document.documentElement.setAttribute('data-theme', 'dark');
       })();
     </script>
+    <style>
+      ai-proxy-app { display: block; min-height: 100vh; }
+    </style>
   </head>
   <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
+    <ai-proxy-app></ai-proxy-app>
+    <script type="module" src="/src/legacy/js/app.js"></script>
   </body>
 </html>
