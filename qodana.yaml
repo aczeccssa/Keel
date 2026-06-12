@@ -26,7 +26,7 @@ exclude:
   # More Interceptor
   - name: CanBeParameter
 
-projectJDK: "23" #(Applied in CI/CD pipeline)
+projectJDK: "21" #(Applied in CI/CD pipeline)
 
   #Execute shell command before Qodana execution (Applied in CI/CD pipeline)
   #bootstrap: sh ./prepare-qodana.sh
