@@ -1202,6 +1202,7 @@ class BenchmarkHttpClientTest {
                     assertEquals(case.id, result.caseId)
                     assertTrue(result.latencyMs >= 1)
                     assertNotNull(result.providerId)
+                    Unit
                 }
             }
         }
