@@ -27,7 +27,7 @@ tasks.register<JavaExec>("exportH2Data") {
     group = "keel-sample"
 
     classpath = sourceSets["tools"].runtimeClasspath
-    mainClass.set("ExportH2DataKt")
+    mainClass.set("ExportH2DataTaskKt")
 
     findProperty("dbFolder")?.let { systemProperty("dbFolder", it.toString()) }
 }

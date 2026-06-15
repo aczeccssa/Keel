@@ -5,7 +5,19 @@ edition = "2021"
 
 [dependencies]
 anyhow = "1"
+axum = "0.8.9"
 command-group = "5.0.1"
 crossterm = "0.29"
 nix = { version = "0.30", features = ["signal", "process"] }
 ratatui = { version = "0.26", features = ["crossterm"] }
+reqwest = { version = "0.13.2", default-features = false, features = ["json", "rustls"] }
+rmcp = { version = "1.5.0", default-features = false, features = ["server", "client", "transport-streamable-http-server", "transport-streamable-http-client-reqwest"] }
+schemars = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+tokio = { version = "1.52.3", features = ["full"] }
+tokio-util = "0.7"
+
+[patch.crates-io]
+rmcp = { path = "vendor/rmcp" }
