@@ -678,7 +678,7 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.call
 import io.ktor.server.cio.CIO
-import io.ktor.server.engine.ApplicationEngine
+import io.ktor.server.engine.EmbeddedServer
 import io.ktor.server.engine.embeddedServer
 import io.ktor.server.request.header
 import io.ktor.server.request.receiveText
@@ -704,7 +704,7 @@ import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
 
 class SimulatedProviderServer private constructor(
-    private val engine: ApplicationEngine,
+    private val engine: EmbeddedServer<*, *>,
     val port: Int,
     private val state: State,
 ) : Closeable {
@@ -1040,7 +1040,7 @@ import io.ktor.http.contentType
 import io.ktor.serialization.kotlinx.json.json
 import io.ktor.server.application.install
 import io.ktor.server.cio.CIO as ServerCIO
-import io.ktor.server.engine.ApplicationEngine
+import io.ktor.server.engine.EmbeddedServer
 import io.ktor.server.engine.embeddedServer
 import io.ktor.server.plugins.contentnegotiation.ContentNegotiation as ServerContentNegotiation
 import io.ktor.server.routing.routing
@@ -1058,7 +1058,7 @@ import java.nio.file.Files
 import kotlin.io.path.writeText
 
 class BenchmarkKeelServer private constructor(
-    private val engine: ApplicationEngine,
+    private val engine: EmbeddedServer<*, *>,
     private val previousDataDir: String?,
     private val previousConfigPath: String?,
     private val client: HttpClient,
