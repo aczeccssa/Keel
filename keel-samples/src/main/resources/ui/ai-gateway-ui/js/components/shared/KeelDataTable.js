@@ -31,8 +31,8 @@ export class KeelDataTable extends KeelElement {
                     font-weight: 800;
                     letter-spacing: 0.14em;
                     text-transform: uppercase;
-                    color: var(--paper);
-                    background: var(--ink);
+                    color: var(--on-accent);
+                    background: var(--surface-accent);
                     padding: 11px 12px;
                     white-space: nowrap;
                     border-right: 1px solid rgba(244,244,240,0.28);
@@ -51,10 +51,10 @@ export class KeelDataTable extends KeelElement {
                 tbody td:last-child { border-right: 0; }
                 tbody tr:last-child td { border-bottom: 0; }
                 tbody tr:nth-child(even) td { background: var(--color-surface-container-low, #ebe9e3); }
-                tbody tr:hover td { background: var(--ink); color: var(--paper); }
+                tbody tr:hover td { background: var(--surface-accent); color: var(--on-accent); }
                 tbody tr:hover code,
                 tbody tr:hover samp,
-                tbody tr:hover data { background: var(--paper); color: var(--ink); border-color: var(--paper); }
+                tbody tr:hover data { background: var(--surface-strong); color: var(--ink); border-color: var(--surface-strong); }
                 code,
                 samp,
                 data {
@@ -68,9 +68,9 @@ export class KeelDataTable extends KeelElement {
                     font-weight: 800;
                     letter-spacing: 0.04em;
                     text-transform: uppercase;
-                    background: var(--ink);
-                    color: var(--paper);
-                    border: 1px solid var(--ink);
+                    background: var(--surface-accent);
+                    color: var(--on-accent);
+                    border: 1px solid var(--surface-accent);
                     padding: 2px 6px;
                 }
                 .chip {
@@ -91,6 +91,60 @@ export class KeelDataTable extends KeelElement {
                 .chip.is-healthy { background: var(--green-soft); }
                 .chip.is-warn { background: var(--amber-soft); }
                 .chip.is-alert { background: var(--red); color: var(--paper); }
+                tbody td button {
+                    appearance: none;
+                    -webkit-appearance: none;
+                    display: inline-flex;
+                    align-items: center;
+                    justify-content: center;
+                    gap: 6px;
+                    padding: 7px 11px;
+                    border: 2px solid var(--ink);
+                    border-radius: 0;
+                    background: var(--paper);
+                    color: var(--ink);
+                    box-shadow: none;
+                    cursor: pointer;
+                    font-family: var(--font-mono);
+                    font-size: 10px;
+                    font-weight: 800;
+                    letter-spacing: 0.08em;
+                    line-height: 1;
+                    text-transform: uppercase;
+                    white-space: nowrap;
+                    vertical-align: middle;
+                    transition: background 120ms var(--ease-smooth), color 120ms var(--ease-smooth), border-color 120ms var(--ease-smooth), transform 120ms var(--ease-smooth);
+                }
+                tbody td button + button { margin-left: 6px; }
+                tbody td button:hover {
+                    background: var(--surface-accent);
+                    color: var(--on-accent);
+                    transform: translate(-1px, -1px);
+                }
+                tbody td button.btn-danger,
+                tbody td button.btn-danger-ghost,
+                tbody td button.btn-action.danger,
+                tbody td button.btn-sm {
+                    border-color: var(--red);
+                    color: var(--red);
+                }
+                tbody td button.btn-danger:hover,
+                tbody td button.btn-danger-ghost:hover,
+                tbody td button.btn-action.danger:hover,
+                tbody td button.btn-sm:hover {
+                    background: var(--red);
+                    border-color: var(--red);
+                    color: var(--paper);
+                }
+                tbody td button.btn-action.success {
+                    border-color: var(--green);
+                    color: var(--green);
+                }
+                tbody td button.btn-action.success:hover {
+                    background: var(--green);
+                    border-color: var(--green);
+                    color: var(--paper);
+                }
                 .btn-reset {
                     padding: 7px 11px;
                     border: 2px solid var(--ink);
@@ -104,10 +158,11 @@ export class KeelDataTable extends KeelElement {
                     cursor: pointer;
                     transition: background 120ms var(--ease-smooth), color 120ms var(--ease-smooth), transform 120ms var(--ease-smooth);
                 }
-                .btn-reset:hover { background: var(--red); color: var(--paper); transform: translate(-1px, -1px); }
+                .btn-reset:hover { background: var(--red); color: var(--on-accent); transform: translate(-1px, -1px); }
                 tbody tr:hover .chip { border-color: var(--paper); }
                 tbody tr:hover .chip.is-alert,
-                tbody tr:hover .btn-reset { border-color: var(--paper); }
+                tbody tr:hover .btn-reset,
+                tbody tr:hover button { border-color: var(--paper); }
                 .km-empty {
                     text-align: center;
                     color: var(--muted);

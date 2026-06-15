@@ -78,7 +78,7 @@ export class PanelKeys extends KeelElement {
                 .panel-layout { display: grid; gap: 22px; }
                 .section-card {
                     position: relative;
-                    background: var(--paper);
+                    background: var(--panel-strong);
                     border: 2px solid var(--ink);
                     box-shadow: var(--shadow-sm);
                     overflow: hidden;
@@ -86,8 +86,8 @@ export class PanelKeys extends KeelElement {
                 .section-title-row {
                     display: flex; align-items: center; justify-content: space-between; gap: 16px;
                     padding: 16px 18px;
-                    background: var(--ink);
-                    color: var(--paper);
+                    background: var(--surface-accent);
+                    color: var(--on-accent);
                 }
                 .section-kicker {
                     display: block; margin-bottom: 4px;
@@ -109,7 +109,7 @@ export class PanelKeys extends KeelElement {
                 }
                 .field input:focus { outline: none; box-shadow: var(--shadow-sm); }
                 .btn-primary {
-                    padding: 12px 22px; border: 2px solid var(--ink); background: var(--ink); color: var(--paper); cursor: pointer;
+                    padding: 12px 22px; border: 2px solid var(--ink); background: var(--surface-accent); color: var(--on-accent); cursor: pointer;
                     font-family: var(--font-mono); font-size: 11px; font-weight: 800; letter-spacing: 0.14em; text-transform: uppercase;
                     transition: background 120ms, color 120ms;
                 }
@@ -119,13 +119,13 @@ export class PanelKeys extends KeelElement {
                     font-family: var(--font-mono); font-size: 11px; font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase;
                     transition: background 120ms, color 120ms;
                 }
-                .btn-ghost:hover { background: var(--ink); color: var(--paper); }
+                .btn-ghost:hover { background: var(--surface-accent); color: var(--on-accent); }
                 .btn-danger {
                     padding: 7px 12px; border: 2px solid var(--red); background: transparent; color: var(--red); cursor: pointer;
                     font-family: var(--font-mono); font-size: 10px; font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase;
                     transition: background 120ms, color 120ms;
                 }
-                .btn-danger:hover { background: var(--red); color: var(--paper); }
+                .btn-danger:hover { background: var(--red); color: var(--on-accent); }
                 .form-actions { display: flex; gap: 10px; }
                 /* Key reveal (inline) */
                 .key-reveal {
@@ -141,7 +141,7 @@ export class PanelKeys extends KeelElement {
                     word-break: break-all; user-select: all;
                 }
                 .key-reveal .copy-btn {
-                    flex-shrink: 0; padding: 7px 12px; border: 2px solid var(--ink); background: var(--ink); color: var(--paper); cursor: pointer;
+                    flex-shrink: 0; padding: 7px 12px; border: 2px solid var(--ink); background: var(--surface-accent); color: var(--on-accent); cursor: pointer;
                     font-family: var(--font-mono); font-size: 10px; font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase;
                 }
                 .key-reveal .copy-btn:hover { background: var(--red); border-color: var(--red); }
@@ -167,13 +167,13 @@ export class PanelKeys extends KeelElement {
                 .modal-bar {
                     display: flex; align-items: center; justify-content: space-between; gap: 12px;
                     padding: 14px 18px;
-                    background: var(--ink); color: var(--paper);
+                    background: var(--surface-accent); color: var(--on-accent);
                 }
                 .modal-bar-title {
                     font-family: var(--font-headline); font-size: 18px; line-height: 1; letter-spacing: -0.04em; text-transform: uppercase;
                 }
                 .modal-close {
-                    padding: 6px 12px; border: 1px solid var(--paper); background: transparent; color: var(--paper); cursor: pointer;
+                    padding: 6px 12px; border: 1px solid var(--on-accent); background: transparent; color: var(--on-accent); cursor: pointer;
                     font-family: var(--font-mono); font-size: 10px; font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase;
                     transition: background 120ms, color 120ms;
                 }
@@ -193,7 +193,7 @@ export class PanelKeys extends KeelElement {
                     user-select: all;
                 }
                 .modal-key-copy {
-                    flex-shrink: 0; padding: 9px 14px; border: 2px solid var(--ink); background: var(--ink); color: var(--paper); cursor: pointer;
+                    flex-shrink: 0; padding: 9px 14px; border: 2px solid var(--ink); background: var(--surface-accent); color: var(--on-accent); cursor: pointer;
                     font-family: var(--font-mono); font-size: 10px; font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase;
                     transition: background 120ms, color 120ms;
                 }
@@ -203,25 +203,25 @@ export class PanelKeys extends KeelElement {
                     display: grid;
                     grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
                     gap: 1px;
-                    background: var(--ink);
+                    background: var(--surface-accent);
                     border-bottom: 2px solid var(--ink);
                 }
                 .modal-client-tab {
                     display: flex; align-items: center; justify-content: center; gap: 7px;
                     padding: 12px 8px;
-                    background: var(--paper); color: var(--muted); cursor: pointer;
+                    background: var(--surface-soft); color: var(--muted); cursor: pointer;
                     font-family: var(--font-mono); font-size: 9.5px; font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase;
                     border-right: 1px solid var(--ink);
                     transition: background 120ms, color 120ms;
                 }
                 .modal-client-tab:last-child { border-right: 0; }
                 .modal-client-tab svg { width: 15px; height: 15px; flex-shrink: 0; }
-                .modal-client-tab.is-active { background: var(--ink); color: var(--paper); }
+                .modal-client-tab.is-active { background: var(--surface-accent); color: var(--on-accent); }
                 /* Client content */
                 .modal-content {
                     overflow-y: auto;
                     padding: 18px;
-                    background: var(--color-surface-container-low, #ebe9e3);
+                    background: var(--surface-muted);
                 }
                 .client-snippet-wrap { display: none; }
                 .client-snippet-wrap.is-active { display: block; }
@@ -231,8 +231,8 @@ export class PanelKeys extends KeelElement {
                 }
                 .snippet-code {
                     position: relative;
-                    padding: 16px; background: var(--ink);
-                    font-family: var(--font-mono); font-size: 11px; line-height: 1.7; color: var(--paper);
+                    padding: 16px; background: var(--surface-accent);
+                    font-family: var(--font-mono); font-size: 11px; line-height: 1.7; color: var(--on-accent);
                     white-space: pre-wrap; word-break: break-all; letter-spacing: 0.02em;
                     border: 2px solid var(--ink); min-height: 70px;
                 }
@@ -241,7 +241,7 @@ export class PanelKeys extends KeelElement {
                     font-family: var(--font-mono); font-size: 10px; font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase;
                     transition: background 120ms, color 120ms;
                 }
-                .snippet-copy:hover { background: var(--ink); color: var(--paper); }
+                .snippet-copy:hover { background: var(--surface-accent); color: var(--on-accent); }
             </style>
             <div class="panel-layout" data-ref="root">
                 <keel-hero data-ref="hero"></keel-hero>

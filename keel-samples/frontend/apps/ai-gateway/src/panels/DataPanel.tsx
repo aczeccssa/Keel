@@ -1,27 +1,74 @@
-import { useEffect, useState } from 'react';
-import { Card, DataTable, ErrorBanner } from '@keel/sample-ui';
+import { useEffect, useState, type ReactNode } from 'react';
+import { Card, DataTable, type DataTableColumn, EmptyState, ErrorBanner } from '@keel/sample-ui';
 
-export interface DataPanelProps {
+export interface DataPanelProps<Row extends Record<string, unknown> = Record<string, unknown>> {
   title: string;
+  description?: string;
   load: () => Promise<unknown>;
-  columns: string[];
-  rows: (data: unknown) => Array<Array<string | number>>;
+  columns: DataTableColumn<Row>[];
+  rows: (data: unknown) => Row[];
   emptyText: string;
+  emptyIcon?: string;
+  actionsColumn?: (row: Row) => ReactNode;
+  maxHeight?: string;
 }
 
-export function DataPanel({ title, load, columns, rows, emptyText }: DataPanelProps) {
+export function DataPanel<Row extends Record<string, unknown> = Record<string, unknown>>({
+  title,
+  description,
+  load,
+  columns,
+  rows,
+  emptyText,
+  emptyIcon,
+  actionsColumn,
+  maxHeight
+}: DataPanelProps<Row>) {
   const [data, setData] = useState<unknown>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    load().then(setData).catch((err) => setError(err instanceof Error ? err.message : `Unable to load ${title}`));
+    let cancelled = false;
+    setError(null);
+    load()
+      .then((d) => {
+        if (!cancelled) setData(d);
+      })
+      .catch((err) => {
+        if (!cancelled) setError(err instanceof Error ? err.message : `Unable to load ${title}`);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [load, title]);
+
+  if (error) {
+    return (
+      <Card>
+        <h1>{title}</h1>
+        {description ? <p className="keel-muted">{description}</p> : null}
+        <ErrorBanner message={error} />
+      </Card>
+    );
+  }
+
+  const list = data == null ? [] : rows(data);
 
   return (
     <Card>
       <h1>{title}</h1>
-      {error ? <ErrorBanner message={error} /> : null}
-      <DataTable headers={columns} rows={data == null ? [] : rows(data)} emptyText={emptyText} />
+      {description ? <p className="keel-muted">{description}</p> : null}
+      {list.length === 0 ? (
+        <EmptyState title={emptyText} icon={emptyIcon ?? 'inbox'} />
+      ) : (
+        <DataTable
+          columns={columns}
+          rows={list}
+          emptyText={emptyText}
+          actionsColumn={actionsColumn}
+          maxHeight={maxHeight}
+        />
+      )}
     </Card>
   );
 }

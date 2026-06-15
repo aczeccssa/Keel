@@ -7,9 +7,11 @@ import com.keel.samples.aigateway.airelay.AIRelayPlugin
 import com.keel.samples.aigateway.riskcontrol.RiskControlPlugin
 import com.keel.samples.aigateway.token.TokenPlugin
 import io.ktor.client.request.get
+import io.ktor.client.request.prepareGet
 import io.ktor.client.request.header
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
+import io.ktor.client.statement.bodyAsChannel
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
 import io.ktor.http.HttpStatusCode
@@ -20,12 +22,14 @@ import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.server.routing.routing
 import io.ktor.server.sse.SSE
 import io.ktor.server.testing.testApplication
+import io.ktor.utils.io.readUTF8Line
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import java.nio.file.Files
+import kotlinx.coroutines.withTimeout
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -83,7 +87,7 @@ class AiGatewayPluginIntegrationTest {
             val rawKey = json.parseToJsonElement(keyResponse.bodyAsText()).jsonObject["rawKey"]!!.jsonPrimitive.content
             assertTrue(rawKey.startsWith("sk-keel-"))
 
-            with(TestContext(client, accessToken, rawKey)) {
+            with(TestContext(client, accessToken, rawKey, json)) {
                 block()
             }
         } finally {
@@ -104,8 +108,28 @@ class AiGatewayPluginIntegrationTest {
     private class TestContext(
         val client: io.ktor.client.HttpClient,
         val accessToken: String,
-        val rawKey: String
-    )
+        val rawKey: String,
+        private val json: Json
+    ) {
+        suspend fun readUsageSnapshot(path: String): kotlinx.serialization.json.JsonObject {
+            return client.prepareGet(path).execute { response ->
+                assertEquals(HttpStatusCode.OK, response.status)
+                assertTrue(response.headers["Content-Type"]?.startsWith("text/event-stream") == true)
+
+                val channel = response.bodyAsChannel()
+                var payload: String? = null
+                withTimeout(2_000) {
+                    while (payload == null) {
+                        val line = channel.readUTF8Line() ?: break
+                        if (line.startsWith("data: ")) {
+                            payload = line.removePrefix("data: ").trim()
+                        }
+                    }
+                }
+                json.parseToJsonElement(requireNotNull(payload) { "expected one SSE payload" }).jsonObject
+            }
+        }
+    }
 
     @Test
     fun loginCreateKeyAndChatCompletionsRoundTrip() = setupApp {
@@ -221,6 +245,21 @@ class AiGatewayPluginIntegrationTest {
         assertEquals(HttpStatusCode.OK, response.status, response.bodyAsText())
         val body = parseGatewayBody(response.bodyAsText()).jsonObject
         assertEquals("response", body["object"]!!.jsonPrimitive.content)
+    }
+
+    @Test
+    fun usageSseStreamIsMountedOnAirelayPlugin() = setupApp {
+        val relay = client.post("/api/plugins/airelay/v1/chat/completions") {
+            header("Authorization", "Bearer $rawKey")
+            contentType(ContentType.Application.Json)
+            setBody("""{"model":"gpt-4o-mini","messages":[{"role":"user","content":"Hello"}]}""")
+        }
+        assertEquals(HttpStatusCode.OK, relay.status, relay.bodyAsText())
+
+        val snapshot = readUsageSnapshot("/api/plugins/airelay/usage/stream?intervalMs=1000")
+        assertTrue(snapshot["totalRequests"]!!.jsonPrimitive.content.toLong() >= 1L)
+        assertTrue(snapshot["topModels"]!!.jsonArray.isNotEmpty(), "expected model summary in SSE payload")
+        assertTrue(snapshot["recentRequests"]!!.jsonArray.isNotEmpty(), "expected recent requests in SSE payload")
     }
 
     @Test

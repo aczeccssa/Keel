@@ -14,6 +14,25 @@ export class PanelUsage extends KeelElement {
         return `
             <style>
                 .layout { display: flex; flex-direction: column; gap: 24px; height: 100%; }
+                .hero-meta {
+                    display: grid;
+                    justify-items: end;
+                    gap: 8px;
+                    padding: 4px 0;
+                }
+                .hero-chip {
+                    display: inline-flex;
+                    align-items: center;
+                    padding: 7px 10px;
+                    border: 1px solid rgba(235, 231, 223, 0.18);
+                    background: rgba(11, 11, 11, 0.18);
+                    color: var(--on-accent);
+                    font-family: var(--font-mono);
+                    font-size: 10px;
+                    font-weight: 800;
+                    letter-spacing: 0.08em;
+                    text-transform: uppercase;
+                }
                 .toolbar { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
                 .toolbar .field { display: flex; flex-direction: column; gap: 4px; }
                 .toolbar label {
@@ -28,7 +47,7 @@ export class PanelUsage extends KeelElement {
                 .toolbar input:focus, .toolbar select:focus { outline: none; box-shadow: var(--shadow-sm); }
                 .summary {
                     display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px;
-                    background: var(--ink); border: 2px solid var(--ink);
+                    background: var(--surface-accent); border: 2px solid var(--ink);
                 }
                 .summary .cell {
                     background: var(--paper); padding: 14px 12px;
@@ -48,15 +67,13 @@ export class PanelUsage extends KeelElement {
                     overflow: hidden; flex: 1; min-height: 0;
                 }
                 .table-wrap { max-height: 70vh; overflow: auto; }
-                .model-route { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
-                .model-route code { font-size: 10px; }
-                .model-route .arrow { color: var(--muted); font-family: var(--font-mono); font-size: 10px; font-weight: 800; }
                 .empty { text-align: center; color: var(--muted); padding: 30px; font-family: var(--font-mono); font-size: 12px; }
                 @media (max-width: 1100px) {
                     .summary { grid-template-columns: repeat(3, 1fr); }
                 }
             </style>
             <div class="layout" data-ref="root">
+                <keel-hero data-ref="hero"></keel-hero>
                 <div class="toolbar">
                     <div class="field">
                         <label>Filter model</label>
@@ -89,6 +106,7 @@ export class PanelUsage extends KeelElement {
     afterMount() {
         this._records = [];
         this._hasRendered = false;
+        this.refs.hero.render({ label: 'Request Ledger', title: 'Usage', metaHtml: '' });
         this.refs.modelFilter.addEventListener('input', () => this._renderTable(true));
         this.refs.statusFilter.addEventListener('change', () => this._renderTable(true));
         this.refs.limitFilter.addEventListener('change', () => this.refresh());
@@ -133,6 +151,16 @@ export class PanelUsage extends KeelElement {
             return acc;
         }, { input: 0, output: 0, cr: 0, cw: 0, reason: 0, cost: 0, hitN: 0, hitSum: 0 });
         const hit = sums.hitN > 0 ? (sums.hitSum / sums.hitN * 100).toFixed(1) + '%' : '—';
+        this.refs.hero.render({
+            label: 'Request Ledger',
+            title: 'Usage',
+            metaHtml: `
+                <div class="hero-meta">
+                    <span class="hero-chip">${filtered.length} records</span>
+                    <span class="hero-chip">${hit} cache hit</span>
+                </div>
+            `
+        });
         this.refs.summary.innerHTML = [
             this._sumCell('Records', filtered.length.toString()),
             this._sumCell('Input', sums.input.toLocaleString()),
@@ -199,7 +227,16 @@ export class PanelUsage extends KeelElement {
         if (parts.length < 2) return `<code>${escapeHtml(text)}</code>`;
         const alias = parts.shift();
         const real = parts.join(' -> ');
-        return `<span class="model-route"><code>${escapeHtml(alias)}</code><span class="arrow">-></span><code>${escapeHtml(real)}</code></span>`;
+        return `
+            <span style="display:inline-flex;align-items:center;gap:6px;white-space:nowrap;">
+                <code>${escapeHtml(alias)}</code>
+                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.65" aria-hidden="true" style="display:inline-block;vertical-align:middle;width:12px;height:12px;min-width:12px;color:var(--muted);max-width:none;">
+                    <path d="M2 8h9"></path>
+                    <path d="m8 4 4 4-4 4"></path>
+                </svg>
+                <code>${escapeHtml(real)}</code>
+            </span>
+        `;
     }
 }
 

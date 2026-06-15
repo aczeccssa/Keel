@@ -56,11 +56,20 @@ import com.keel.samples.aigateway.airelay.upstream.UpstreamHttpClient
 import com.keel.samples.aigateway.airelay.usage.CostCalculator
 import com.keel.samples.aigateway.airelay.usage.ModelPricingRegistry
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.Json
+import io.ktor.sse.ServerSentEvent
+import io.ktor.util.cio.ChannelWriteException
+import io.ktor.utils.io.ClosedWriteChannelException
+import java.io.IOException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import org.koin.core.Koin
 import org.koin.dsl.module
 
@@ -71,6 +80,8 @@ import org.koin.dsl.module
     version = "1.0.0"
 )
 class AIRelayPlugin : StandardKeelPlugin {
+    private val json = Json { encodeDefaults = true }
+
     override val descriptor: PluginDescriptor = PluginDescriptor(
         pluginId = "airelay",
         version = "1.0.0",
@@ -317,6 +328,25 @@ class AIRelayPlugin : StandardKeelPlugin {
     }
 
     override fun endpoints(): List<PluginRouteDefinition> = pluginEndpoints(descriptor.pluginId) {
+        sse(
+            "/usage/stream",
+            doc = OpenApiDoc(summary = "Subscribe to AI Gateway dashboard usage snapshots", tags = listOf("ai-gateway", "airelay", "usage"))
+        ) {
+            val intervalMs = request.streamIntervalMs()
+            try {
+                while (currentCoroutineContext().isActive) {
+                    send(ServerSentEvent(data = json.encodeToString(buildUsageStreamPayload())))
+                    delay(intervalMs)
+                }
+            } catch (_: ChannelWriteException) {
+                // Client disconnected.
+            } catch (_: ClosedWriteChannelException) {
+                // Client disconnected.
+            } catch (_: IOException) {
+                // Connection reset or broken pipe.
+            }
+        }
+
         route("/v1") {
             post<JsonObject, RelayResponse>(
                 "/chat/completions",
@@ -802,6 +832,21 @@ class AIRelayPlugin : StandardKeelPlugin {
             sample = ping.sample
         )
     }
+
+    private suspend fun buildUsageStreamPayload(): UsageStreamPayload {
+        val snapshot = runCatching { kernelKoin.get<UsageRecorder>().snapshot() }.getOrNull()
+        return UsageStreamPayload(
+            totalRequests = snapshot?.totalRequests ?: 0L,
+            totalCostUsd = snapshot?.totalCostUsd ?: 0.0,
+            totalTokens = snapshot?.totalTokens ?: 0L,
+            recentRequests = snapshot?.recentRequests.orEmpty(),
+            topModels = snapshot?.topModels.orEmpty(),
+            topUsers = snapshot?.topUsers.orEmpty()
+        )
+    }
+
+    private fun com.keel.kernel.plugin.KeelRequestContext.streamIntervalMs(): Long =
+        queryParameters["intervalMs"]?.firstOrNull()?.toLongOrNull()?.coerceIn(1_000L, 60_000L) ?: 5_000L
 }
 
 @Serializable
@@ -904,6 +949,16 @@ data class DiscoverModelsResponse(
 data class ChannelModelTestRequest(
     val publicModelName: String,
     val upstreamModelName: String? = null,
+)
+
+@Serializable
+data class UsageStreamPayload(
+    val totalRequests: Long,
+    val totalCostUsd: Double,
+    val totalTokens: Long,
+    val recentRequests: List<com.keel.contract.ai.UsageRecordView>,
+    val topModels: List<com.keel.contract.ai.ModelUsageSummary>,
+    val topUsers: List<com.keel.contract.ai.UserUsageSummary>
 )
 
 // ---- token counting ----

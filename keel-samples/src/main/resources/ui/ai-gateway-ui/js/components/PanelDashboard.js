@@ -18,6 +18,26 @@ export class PanelDashboard extends KeelElement {
                     box-shadow: var(--shadow-sm);
                     border: 2px solid var(--ink);
                 }
+                .hero-meta {
+                    display: grid;
+                    justify-items: end;
+                    gap: 8px;
+                    padding: 4px 0;
+                }
+                .hero-chip {
+                    display: inline-flex;
+                    align-items: center;
+                    gap: 8px;
+                    padding: 7px 10px;
+                    border: 1px solid rgba(235, 231, 223, 0.18);
+                    background: rgba(11, 11, 11, 0.18);
+                    color: var(--on-accent);
+                    font-family: var(--font-mono);
+                    font-size: 10px;
+                    font-weight: 800;
+                    letter-spacing: 0.08em;
+                    text-transform: uppercase;
+                }
                 .section-title {
                     font-family: var(--font-headline);
                     font-size: 18px;
@@ -28,9 +48,9 @@ export class PanelDashboard extends KeelElement {
                     letter-spacing: -0.02em;
                 }
                 .onboarding-banner {
-                    background: linear-gradient(135deg, rgba(13,148,136,0.08), rgba(99,102,241,0.06));
+                    background: var(--surface-muted);
                     border-radius: var(--radius-lg);
-                    padding: 28px 32px;
+                    padding: 24px 28px;
                     line-height: 1.7;
                     font-size: 13px;
                     color: var(--ink);
@@ -47,8 +67,8 @@ export class PanelDashboard extends KeelElement {
                 }
                 .onboarding-banner li { margin-bottom: 6px; }
                 .onboarding-banner code {
-                    background: var(--ink);
-                    color: var(--paper);
+                    background: var(--surface-accent);
+                    color: var(--on-accent);
                     padding: 2px 6px;
                     border-radius: 0;
                     font-family: var(--font-mono);
@@ -70,6 +90,7 @@ export class PanelDashboard extends KeelElement {
                 }
             </style>
             <div class="dashboard" data-ref="root">
+                <keel-hero data-ref="hero"></keel-hero>
                 <div class="onboarding-banner">
                     <h3>Welcome to AI Proxy</h3>
                     <p>Your unified AI Gateway for routing, rate limiting, and cost tracking.</p>
@@ -125,6 +146,7 @@ export class PanelDashboard extends KeelElement {
         this._liveMode = true;
         this._sse = null;
         this._pollTimer = null;
+        this.refs.hero.render({ label: 'Telemetry Overview', title: 'Dashboard', metaHtml: '' });
     }
 
     connectedCallback() {
@@ -147,12 +169,19 @@ export class PanelDashboard extends KeelElement {
     _startLive() {
         this._stopLive();
         if (!this._liveMode) return;
+        this.refresh();
         // Try SSE first, fall back to polling
         try {
             const base = API.airelay || API.token;
             this._sse = new EventSource(`${base}/usage/stream`);
             this._sse.onmessage = (e) => {
-                try { this._render(JSON.parse(e.data)); } catch {}
+                try {
+                    const payload = JSON.parse(e.data);
+                    if ((!payload._records || payload._records.length === 0) && this._lastDetailedRecords?.length) {
+                        payload._records = this._lastDetailedRecords;
+                    }
+                    this._render(payload);
+                } catch {}
             };
             this._sse.onerror = () => {
                 this._sse.close();
@@ -183,7 +212,8 @@ export class PanelDashboard extends KeelElement {
         try {
             const records = await requestJson(`${API.token}/admin/usage/records?limit=200`);
             const data = await requestJson(`${API.token}/admin/usage/global`);
-            this._render({ ...data, _records: records.records || records });
+            this._lastDetailedRecords = records.records || records;
+            this._render({ ...data, _records: this._lastDetailedRecords });
         } catch (e) {
             this.refs.stats.render({ entries: [['Status', 'Error', e.message]] });
         }
@@ -194,6 +224,7 @@ export class PanelDashboard extends KeelElement {
         this._hasRendered = true;
 
         const records = data._records || data.recentRequests || [];
+        if (data._records?.length) this._lastDetailedRecords = data._records;
         const sums = this._aggregate(records);
 
         this.refs.stats.render({
@@ -208,6 +239,16 @@ export class PanelDashboard extends KeelElement {
                 ['Reasoning', (sums.reasoningTokens || 0).toLocaleString(), 'tokens'],
                 ['Cache Hit', sums.cacheHitRate != null ? `${(sums.cacheHitRate * 100).toFixed(1)}%` : '—', 'rate'],
             ]
+        });
+        this.refs.hero.render({
+            label: 'Telemetry Overview',
+            title: 'Dashboard',
+            metaHtml: `
+                <div class="hero-meta">
+                    <span class="hero-chip">${data.totalRequests || 0} requests</span>
+                    <span class="hero-chip">$${(data.totalCostUsd || 0).toFixed(4)} total cost</span>
+                </div>
+            `
         });
 
         // ── Charts ──

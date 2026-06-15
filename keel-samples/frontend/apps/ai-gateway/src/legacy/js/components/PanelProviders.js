@@ -35,7 +35,7 @@ export class PanelProviders extends KeelElement {
         return `
             <style>
                 .panel-layout { display: flex; flex-direction: column; gap: 28px; }
-                .toolbar { display: flex; justify-content: space-between; align-items: center; }
+                .toolbar { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
                 .section-card {
                     background: var(--panel-strong);
                     border-radius: var(--radius-lg);
@@ -48,11 +48,11 @@ export class PanelProviders extends KeelElement {
                     font-size: 20px; font-weight: 500; margin: 0 0 20px; color: var(--ink);
                 }
                 .btn-primary {
-                    padding: 12px 24px; border: 0; border-radius: 0;
-                    background: var(--navy); color: #f8fafc; font-size: 11px; font-weight: 800;
+                    padding: 12px 24px; border: 2px solid var(--ink); border-radius: 0;
+                    background: var(--surface-accent); color: var(--on-accent); font-size: 11px; font-weight: 800;
                     letter-spacing: 0.14em; text-transform: uppercase; cursor: pointer; transition: background 200ms ease;
                 }
-                .btn-primary:hover { background: var(--navy-2); }
+                .btn-primary:hover { background: var(--teal); border-color: var(--teal); }
                 .btn-ghost {
                     padding: 8px 16px; border: 1px solid var(--line-strong); border-radius: 0;
                     background: transparent; color: var(--ink); font-size: 10px; font-weight: 700;
@@ -125,8 +125,10 @@ export class PanelProviders extends KeelElement {
                 .membership-row .field label { font-size:9px; margin-bottom:6px; }
             </style>
             <div class="panel-layout">
+                <keel-hero data-ref="hero"></keel-hero>
                 <div class="toolbar">
-                    <keel-hero data-ref="hero"></keel-hero>
+                    <span style="font-family:var(--font-mono);font-size:10px;font-weight:800;letter-spacing:0.1em;color:var(--muted);text-transform:uppercase;" data-ref="meta"></span>
+                    <span style="flex:1 1 auto;"></span>
                     <button class="btn-primary" data-ref="addBtn">Add Channel</button>
                 </div>
                 <div data-ref="grid"></div>
@@ -210,8 +212,9 @@ export class PanelProviders extends KeelElement {
         this.refs.hero.render({
             label: 'Channel Management',
             title: 'Channels',
-            metaHtml: `<span style="font-size:11px;font-weight:700;color:var(--muted);">${channels.length} channel${channels.length !== 1 ? 's' : ''}</span>`
+            metaHtml: `<span style="display:inline-flex;align-items:center;padding:7px 10px;border:1px solid rgba(235,231,223,0.18);background:rgba(11,11,11,0.18);color:var(--on-accent);font-family:var(--font-mono);font-size:10px;font-weight:800;letter-spacing:0.08em;text-transform:uppercase;">${channels.length} channel${channels.length !== 1 ? 's' : ''}</span>`
         });
+        this.refs.meta.textContent = `${channels.length} upstream${channels.length !== 1 ? 's' : ''} configured`;
 
         if (channels.length === 0) {
             this.refs.grid.innerHTML = `<div class="section-card"><div class="empty">No channels configured yet.<br>Click <strong>Add Channel</strong> to point the gateway at an upstream (e.g. a local Anthropic endpoint).</div></div>`;

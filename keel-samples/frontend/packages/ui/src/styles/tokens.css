@@ -1,31 +1,102 @@
+@import url('https://fonts.googleapis.com/css2?family=Archivo+Black&family=Archivo:wght@400;600;700;900&family=JetBrains+Mono:wght@400;500;700;800&family=Material+Symbols+Outlined:wght@400&display=swap');
+
+/* ============================================================================
+   KEEL — SWISS INDUSTRIAL BRUTALIST DESIGN TOKENS
+   Matte documentation paper · carbon ink · zero radius · hard offset shadows
+   ============================================================================ */
 :root {
   color-scheme: light;
-  --keel-bg: #f6f3ed;
-  --keel-surface: #fffaf0;
-  --keel-surface-soft: #eee8dc;
-  --keel-ink: #171717;
-  --keel-muted: #6f6a60;
-  --keel-line: rgba(23, 23, 23, 0.16);
-  --keel-accent: #55c7b4;
-  --keel-accent-strong: #239985;
-  --keel-danger: #d84d3f;
-  --keel-success: #3aa66d;
-  --keel-radius-sm: 10px;
-  --keel-radius-md: 18px;
-  --keel-radius-lg: 28px;
-  --keel-shadow-soft: 0 24px 80px rgba(31, 24, 14, 0.14);
-  --keel-font-body: Inter, Archivo, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  --keel-font-display: "Archivo Black", Inter, system-ui, sans-serif;
-  --keel-font-mono: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+
+  /* Substrate — matte unbleached documentation paper */
+  --keel-bg: #eae8e3;
+  --keel-surface: #f4f4f0;          /* card / panel / input */
+  --keel-surface-soft: #ebe9e3;    /* sunken / well */
+  --keel-surface-low: #ffffff;     /* highest lift */
+
+  /* Ink */
+  --keel-ink: #0b0b0b;
+  --keel-ink-inverse: #f4f4f0;
+  --keel-muted: #6b6b66;
+
+  /* Hairlines — solid ink */
+  --keel-line: #0b0b0b;
+  --keel-line-soft: rgba(11, 11, 11, 0.12);
+
+  /* Semantic */
+  --keel-accent: #0d9488;          /* teal — primary interactive */
+  --keel-accent-soft: #e0f5f1;
+  --keel-danger: #e61919;
+  --keel-danger-soft: #fbe0e0;
+  --keel-warn: #b45309;
+  --keel-warn-soft: #f7e6cf;
+  --keel-ok: #1a7a3c;
+  --keel-ok-soft: #d8ecdd;
+  --keel-accent-strong: #0a6e66;
+
+  /* Geometry: absolute 90° corners */
+  --keel-radius-sm: 0;
+  --keel-radius-md: 0;
+  --keel-radius-lg: 0;
+
+  /* Hard offset, NO blur shadows (brutalist drop) */
+  --keel-shadow-sm: 3px 3px 0 0 var(--keel-ink);
+  --keel-shadow-md: 5px 5px 0 0 var(--keel-ink);
+  --keel-shadow-lg: 8px 8px 0 0 var(--keel-ink);
+  --keel-shadow-press: 2px 2px 0 0 var(--keel-ink);
+
+  /* Borders */
+  --keel-border: 2px solid var(--keel-ink);
+  --keel-border-thin: 1px solid var(--keel-ink);
+  --keel-border-thick: 3px solid var(--keel-ink);
+
+  /* Type */
+  --keel-font-body: "Archivo", "Helvetica Neue", Arial, sans-serif;
+  --keel-font-display: "Archivo Black", "Helvetica Neue", Arial, sans-serif;
+  --keel-font-mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+
+  /* Spacing scale (4px base) */
+  --keel-space-1: 4px;
+  --keel-space-2: 8px;
+  --keel-space-3: 12px;
+  --keel-space-4: 16px;
+  --keel-space-5: 20px;
+  --keel-space-6: 24px;
+  --keel-space-8: 32px;
+  --keel-space-10: 40px;
+  --keel-space-12: 48px;
+  --keel-space-16: 64px;
+
+  /* Layout */
+  --keel-sidebar-w: 280px;
+  --keel-sidebar-w-collapsed: 64px;
+  --keel-topbar-h: 56px;
+
+  --keel-ease: cubic-bezier(0.2, 0, 0, 1);
 }
 
+/* ── Dark mode: 4-step depth ladder ─────────────────────────────────────── */
 :root[data-theme='dark'] {
   color-scheme: dark;
-  --keel-bg: #111315;
-  --keel-surface: #191c1f;
-  --keel-surface-soft: #22262a;
-  --keel-ink: #f5f0e7;
-  --keel-muted: #a9a195;
-  --keel-line: rgba(245, 240, 231, 0.16);
-  --keel-shadow-soft: 0 24px 80px rgba(0, 0, 0, 0.36);
+  --keel-bg: #0a0a0b;
+  --keel-surface: #14161a;
+  --keel-surface-soft: #1c2026;
+  --keel-surface-low: #0e1014;
+  --keel-ink: #e8e6e1;
+  --keel-ink-inverse: #0a0a0b;
+  --keel-muted: #8a8580;
+  --keel-line: #2a2f37;
+  --keel-line-soft: rgba(232, 230, 225, 0.10);
+  --keel-accent: #14b8a6;
+  --keel-accent-soft: #0d2e2a;
+  --keel-accent-strong: #2dd4bf;
+  --keel-danger: #ef4444;
+  --keel-danger-soft: #2a1215;
+  --keel-warn: #f59e0b;
+  --keel-warn-soft: #2a1f0d;
+  --keel-ok: #4ade80;
+  --keel-ok-soft: #0d2818;
+  --keel-shadow-sm: 3px 3px 0 0 #000;
+  --keel-shadow-md: 5px 5px 0 0 #000;
+  --keel-shadow-lg: 8px 8px 0 0 #000;
+  --keel-shadow-press: 2px 2px 0 0 #000;
 }

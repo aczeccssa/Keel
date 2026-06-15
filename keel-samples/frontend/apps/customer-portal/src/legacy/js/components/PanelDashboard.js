@@ -4,6 +4,37 @@ import { API } from '../config.js';
 import { formatDate, formatNumber, escapeHtml } from '../utils.js';
 import './shared/KeelChart.js';
 
+function dayKey(iso) {
+    if (!iso) return '';
+    return iso.slice(0, 10);
+}
+
+function build30DayUsage(records) {
+    const buckets = new Map();
+    records.forEach((record) => {
+        const key = dayKey(record.createdAt || record.occurredAt);
+        if (!key) return;
+        const current = buckets.get(key) || { tokens: 0, credits: 0 };
+        current.tokens += (record.inputTokens || 0) + (record.outputTokens || 0);
+        current.credits += record.creditCost || 0;
+        buckets.set(key, current);
+    });
+
+    const days = [];
+    const now = new Date();
+    for (let i = 29; i >= 0; i -= 1) {
+        const date = new Date(now.getTime() - i * 86_400_000);
+        const key = date.toISOString().slice(0, 10);
+        const bucket = buckets.get(key) || { tokens: 0, credits: 0 };
+        days.push({
+            label: key.slice(5, 10),
+            tokens: bucket.tokens,
+            credits: bucket.credits,
+        });
+    }
+    return days;
+}
+
 export class PanelDashboard extends KeelElement {
     hostStyles() { return ''; }
 
@@ -151,12 +182,11 @@ export class PanelDashboard extends KeelElement {
             this._hasRendered = true;
 
             // ── Usage bar chart (last 30 days) ──
-            const usageByDay = records.slice().reverse().slice(-30);
-            const maxT = Math.max(1, ...usageByDay.map(r => r.inputTokens + r.outputTokens));
+            const usageByDay = build30DayUsage(records);
             this.refs.usageChart.render({
                 type: 'bar',
-                data: usageByDay.map(r => r.inputTokens + r.outputTokens),
-                labels: usageByDay.map(r => (r.createdAt || '').slice(5, 10)),
+                data: usageByDay.map(r => r.tokens),
+                labels: usageByDay.map(r => r.label),
                 height: 80,
                 emptyText: 'No usage yet'
             });
@@ -164,7 +194,7 @@ export class PanelDashboard extends KeelElement {
             // ── Credit spend sparkline ──
             this.refs.spendChart.render({
                 type: 'sparkline',
-                data: usageByDay.map(r => r.creditCost),
+                data: usageByDay.map(r => r.credits),
                 emptyText: 'No spend yet'
             });
 
@@ -183,8 +213,8 @@ export class PanelDashboard extends KeelElement {
             });
 
             // ── Stats ──
-            const monthTotal = usageByDay.reduce((s, r) => s + r.inputTokens + r.outputTokens, 0);
-            const monthCredits = usageByDay.reduce((s, r) => s + r.creditCost, 0);
+            const monthTotal = usageByDay.reduce((s, r) => s + r.tokens, 0);
+            const monthCredits = usageByDay.reduce((s, r) => s + r.credits, 0);
             this.refs.monthTokens.textContent = formatNumber(monthTotal);
             this.refs.monthCost.textContent = formatNumber(monthCredits);
 

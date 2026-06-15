@@ -12,10 +12,10 @@
     --font-mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
 
     /* Substrate — matte unbleached documentation paper */
-    --bg: #eae8e3;
-    --paper: #f4f4f0;
-    --panel: #f4f4f0;
-    --panel-strong: #f4f4f0;
+    --bg: #e7e4dd;
+    --paper: #f6f4ee;
+    --panel: #f2efe8;
+    --panel-strong: #ece8df;
     --ink: #0b0b0b;            /* carbon ink */
     --muted: #6b6b66;
     --line: #0b0b0b;          /* structural dividers are SOLID ink, hairline */
@@ -37,6 +37,12 @@
     --color-surface-container-lowest: #ffffff;
     --color-surface-container-low: #ebe9e3;
     --color-surface-container-high: #e2e0d9;
+    --surface-soft: #f6f4ee;
+    --surface-muted: #efebe3;
+    --surface-strong: #e5e1d8;
+    --surface-accent: #111111;
+    --surface-accent-hover: #1a1a1a;
+    --on-accent: #f6f4ee;
 
     /* Hard, offset, NO-BLUR shadows (brutalist drop) */
     --shadow-sm: 3px 3px 0 0 #0b0b0b;
@@ -99,22 +105,28 @@ c-end-playground { display: block; min-height: 100vh; }
 
 /* ── Dark mode ───────────────────────────────────────────────────────────── */
 [data-theme="dark"] {
-    --bg: #111111;
-    --paper: #1a1a1a;
-    --panel: #1a1a1a;
-    --panel-strong: #222222;
-    --ink: #e8e6e1;
-    --muted: #8a8580;
-    --line: #333333;
-    --line-strong: #444444;
+    --bg: #0d0f10;
+    --paper: #141618;
+    --panel: #17191b;
+    --panel-strong: #1b1e22;
+    --ink: #ebe7df;
+    --muted: #918c84;
+    --line: #34373c;
+    --line-strong: #44484e;
     --teal: #14b8a6;
-    --teal-soft: #0d2e2a;
-    --red-soft: #2a1215;
-    --green-soft: #0d2818;
-    --amber-soft: #2a1f0d;
-    --color-surface-container-lowest: #0e0e0e;
-    --color-surface-container-low: #161616;
-    --color-surface-container-high: #242424;
+    --teal-soft: #122926;
+    --red-soft: #2a1518;
+    --green-soft: #11251a;
+    --amber-soft: #2b2111;
+    --color-surface-container-lowest: #101214;
+    --color-surface-container-low: #171a1d;
+    --color-surface-container-high: #20242a;
+    --surface-soft: #141618;
+    --surface-muted: #1a1d20;
+    --surface-strong: #21252a;
+    --surface-accent: #1f2328;
+    --surface-accent-hover: #272c33;
+    --on-accent: #f2eee7;
     --shadow-sm: 3px 3px 0 0 #000;
     --shadow-md: 5px 5px 0 0 #000;
     --shadow-lg: 8px 8px 0 0 #000;

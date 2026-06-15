@@ -28,55 +28,77 @@ export class PanelGroups extends KeelElement {
                 .btn-primary, .btn-ghost, .btn-danger {
                     cursor: pointer; font-family: var(--font-mono); font-weight: 800; text-transform: uppercase; letter-spacing: 0.1em;
                 }
-                .btn-primary { padding: 11px 18px; border: 2px solid var(--ink); background: var(--ink); color: var(--paper); font-size: 11px; }
+                .btn-primary { padding: 11px 18px; border: 2px solid var(--ink); background: var(--surface-accent); color: var(--on-accent); font-size: 11px; }
                 .btn-primary:hover { background: var(--teal); border-color: var(--teal); }
                 .btn-ghost { padding: 8px 12px; border: 2px solid var(--ink); background: var(--paper); color: var(--ink); font-size: 10px; }
-                .btn-ghost:hover { background: var(--ink); color: var(--paper); }
+                .btn-ghost:hover { background: var(--surface-accent); color: var(--on-accent); }
                 .btn-danger { padding: 7px 11px; border: 2px solid var(--red); background: transparent; color: var(--red); font-size: 10px; }
-                .btn-danger:hover { background: var(--red); color: var(--paper); }
+                .btn-danger:hover { background: var(--red); color: var(--on-accent); }
                 .grid { display: grid; gap: 18px; }
-                .group-card { background: var(--paper); border: 2px solid var(--ink); box-shadow: var(--shadow-sm); overflow: hidden; }
-                .group-head { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; padding: 16px 18px; background: var(--ink); color: var(--paper); }
+                .group-card { background: var(--panel-strong); border: 2px solid var(--ink); box-shadow: var(--shadow-sm); overflow: hidden; }
+                .group-head { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; padding: 18px 18px 16px; background: var(--surface-accent); color: var(--on-accent); }
                 .group-title { margin: 0; font-family: var(--font-headline); font-size: 22px; line-height: 1; letter-spacing: -0.04em; text-transform: uppercase; }
                 .group-sub { display: block; margin-top: 6px; font-family: var(--font-mono); font-size: 10px; font-weight: 800; letter-spacing: 0.16em; text-transform: uppercase; opacity: 0.7; }
                 .group-meta { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-                .tag { display: inline-flex; align-items: center; padding: 4px 9px; border: 1px solid var(--paper); font-family: var(--font-mono); font-size: 10px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; }
-                .tag.is-enabled { background: var(--paper); color: var(--ink); }
-                .tag.is-disabled { background: var(--red); color: var(--paper); border-color: var(--red); }
+                .tag { display: inline-flex; align-items: center; padding: 4px 9px; border: 1px solid rgba(235, 231, 223, 0.18); font-family: var(--font-mono); font-size: 10px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; }
+                .tag.is-enabled { background: var(--surface-strong); color: var(--ink); border-color: var(--ink); }
+                .tag.is-disabled { background: var(--red); color: var(--on-accent); border-color: var(--red); }
                 .group-body { padding: 16px 18px; display: grid; gap: 16px; }
+                .group-overview { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(320px, 0.9fr); gap: 16px; }
+                .info-stack { display: grid; gap: 14px; }
+                .detail-card {
+                    border: 1px solid var(--ink);
+                    background: var(--surface-muted);
+                    padding: 12px;
+                }
+                .detail-card.aliases {
+                    background: linear-gradient(180deg, rgba(20, 184, 166, 0.06), transparent 44%), var(--surface-muted);
+                }
+                .section-label {
+                    font-family: var(--font-mono);
+                    font-size: 10px;
+                    font-weight: 800;
+                    letter-spacing: 0.12em;
+                    text-transform: uppercase;
+                    color: var(--muted);
+                    margin-bottom: 8px;
+                }
                 .models { display: flex; flex-wrap: wrap; gap: 7px; }
-                code { font-family: var(--font-mono); font-size: 10px; font-weight: 800; background: var(--ink); color: var(--paper); padding: 2px 6px; text-transform: uppercase; letter-spacing: 0.04em; }
+                code { font-family: var(--font-mono); font-size: 10px; font-weight: 800; background: var(--surface-accent); color: var(--on-accent); padding: 2px 6px; text-transform: uppercase; letter-spacing: 0.04em; }
                 .priority-block { border: 1px solid var(--ink); }
-                .priority-head { display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; background: var(--color-surface-container-low, #ebe9e3); font-family: var(--font-mono); font-size: 10px; font-weight: 800; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink); }
-                .priority-head .badge { background: var(--red); color: var(--paper); padding: 2px 8px; }
+                .priority-head { display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; background: var(--surface-muted); font-family: var(--font-mono); font-size: 10px; font-weight: 800; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink); }
+                .priority-head .badge { background: var(--red); color: var(--on-accent); padding: 2px 8px; }
                 table { width: 100%; border-collapse: collapse; font-family: var(--font-mono); font-size: 11px; }
                 th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--ink); vertical-align: middle; }
-                th { font-size: 9px; font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); background: var(--paper); border-bottom: 1px solid var(--ink); }
+                th { font-size: 9px; font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); background: var(--surface-soft); border-bottom: 1px solid var(--ink); }
                 tr:last-child td { border-bottom: 0; }
                 .status { font-weight: 800; text-transform: uppercase; letter-spacing: 0.06em; }
                 .status.ok { color: var(--green); } .status.warn { color: var(--amber); } .status.bad { color: var(--red); }
                 .empty { padding: 32px 20px; text-align: center; font-family: var(--font-mono); font-size: 12px; font-weight: 800; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; }
                 .membership-tools, .alias-row { display: grid; grid-template-columns: 1.4fr .55fr .55fr auto; gap: 8px; align-items: end; }
-                .membership-tools { padding: 12px; border: 1px dashed var(--ink); background: var(--color-surface-container-low, #ebe9e3); }
+                .membership-tools { padding: 12px; border: 1px dashed var(--ink); background: var(--surface-muted); }
                 .inline-input, .inline-select { width: 100%; padding: 7px 8px; border: 1px solid var(--ink); background: var(--paper); color: var(--ink); font-family: var(--font-mono); font-size: 11px; }
-                .row-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+                .row-actions { display: flex; gap: 6px; }
                 .field-mini { display: grid; gap: 4px; }
                 .field-mini span { font-family: var(--font-mono); font-size: 9px; font-weight: 800; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); }
                 .alias-route-list { display: grid; gap: 8px; }
-                .alias-route { padding: 10px 12px; border: 1px dashed var(--ink); background: var(--color-surface-container-low, #ebe9e3); }
+                .alias-route { padding: 10px 12px; border: 1px dashed var(--ink); background: var(--surface-soft); }
                 .alias-route-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 6px; }
                 .alias-route-body { font-family: var(--font-mono); font-size: 10px; color: var(--muted); line-height: 1.6; }
                 /* Modal */
                 .overlay { position: fixed; inset: 0; background: rgba(11,11,11,0.55); display: none; align-items: center; justify-content: center; z-index: 900; }
                 .overlay.open { display: flex; }
                 .modal { width: min(680px, 94vw); max-height: 88vh; overflow-y: auto; background: var(--paper); border: 2px solid var(--ink); box-shadow: var(--shadow-lg); }
-                .modal-head { display: flex; justify-content: space-between; padding: 14px 18px; background: var(--ink); color: var(--paper); font-family: var(--font-headline); font-size: 18px; letter-spacing: -0.04em; text-transform: uppercase; }
+                .modal-head { display: flex; justify-content: space-between; padding: 14px 18px; background: var(--surface-accent); color: var(--on-accent); font-family: var(--font-headline); font-size: 18px; letter-spacing: -0.04em; text-transform: uppercase; }
                 .modal-body { padding: 18px; display: grid; gap: 14px; }
                 .field label { display: block; margin-bottom: 6px; font-family: var(--font-mono); font-size: 10px; font-weight: 800; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); }
                 .field input, .field textarea, .field select { width: 100%; padding: 10px 12px; border: 2px solid var(--ink); background: var(--paper); font-family: var(--font-mono); font-size: 12px; color: var(--ink); }
                 .modal-actions { display: flex; gap: 10px; justify-content: flex-end; }
-                .error-banner { display: none; padding: 10px 14px; background: var(--red); color: var(--paper); font-family: var(--font-mono); font-size: 11px; font-weight: 800; letter-spacing: 0.06em; }
+                .error-banner { display: none; padding: 10px 14px; background: var(--red); color: var(--on-accent); font-family: var(--font-mono); font-size: 11px; font-weight: 800; letter-spacing: 0.06em; }
                 .error-banner.visible { display: block; }
+                @media (max-width: 1080px) {
+                    .group-overview { grid-template-columns: 1fr; }
+                }
             </style>
             <div class="layout">
                 <keel-hero data-ref="hero"></keel-hero>
@@ -152,7 +174,7 @@ export class PanelGroups extends KeelElement {
         this.refs.hero.render({
             label: 'Routing Pools',
             title: 'Groups',
-            metaHtml: `<div style="padding:16px 22px;font-family:var(--font-headline);font-size:48px;line-height:0.8;letter-spacing:-0.05em;color:var(--paper);">${total}</div>`
+            metaHtml: `<span style="display:inline-flex;align-items:center;padding:7px 10px;border:1px solid rgba(235,231,223,0.18);background:rgba(11,11,11,0.18);color:var(--on-accent);font-family:var(--font-mono);font-size:10px;font-weight:800;letter-spacing:0.08em;text-transform:uppercase;">${total} group${total !== 1 ? 's' : ''}</span>`
         });
         if (!total) { this.refs.grid.innerHTML = '<div class="empty">No routing groups configured.</div>'; return; }
         const channelsByGroup = this._channels.reduce((acc, c) => {
@@ -172,9 +194,12 @@ export class PanelGroups extends KeelElement {
         const levelHealth = chain ? Object.fromEntries(chain.levels.map(l => [l.levelId, l])) : {};
         const aliasRoutes = (group.aliasRoutes || []).filter(a => a.enabled);
         const channelNameById = Object.fromEntries(this._channels.map(c => [c.channelId, c.name]));
-        const exposedModels = chain?.modelAliases?.length
-            ? chain.modelAliases
-            : this._fallbackExposedModels(group.exposureMode, models, aliasRoutes);
+        const savedAliasNames = aliasRoutes.map(route => route.aliasName);
+        const exposedModels = this._fallbackExposedModels(
+            group.exposureMode,
+            models,
+            savedAliasNames.length ? savedAliasNames : (chain?.modelAliases || [])
+        );
         const attachedIds = new Set(channels.map(c => c.channelId));
         const attachOptions = this._channels.filter(c => !attachedIds.has(c.channelId)).map(c => `<option value="${escapeHtml(c.channelId)}">${escapeHtml(c.name)} · ${escapeHtml(c.protocol)}</option>`).join('');
         const priorityBlocks = priorityKeys.length === 0 ? '<div class="empty">No channels assigned to this group.</div>' : priorityKeys.map((priority, idx) => {
@@ -210,9 +235,22 @@ export class PanelGroups extends KeelElement {
                     </div>
                 </header>
                 <div class="group-body">
-                    <div><div style="font-family:var(--font-mono);font-size:10px;font-weight:800;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);margin-bottom:6px;">Exposed To Clients</div><div class="models"><code>${escapeHtml(EXPOSURE_LABELS[group.exposureMode] || group.exposureMode || 'All Models')}</code>${exposedModels.map(m => `<code>${escapeHtml(m)}</code>`).join('') || '<span class="empty">Nothing exposed</span>'}</div></div>
-                    <div><div style="font-family:var(--font-mono);font-size:10px;font-weight:800;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);margin-bottom:6px;">Channel Models</div><div class="models">${models.map(m => `<code>${escapeHtml(m)}</code>`).join('') || '<span class="empty">No channel models</span>'}</div></div>
-                    <div><div style="font-family:var(--font-mono);font-size:10px;font-weight:800;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);margin-bottom:6px;">Alias Routes</div>${this._renderAliasRoutes(aliasRoutes, channelNameById)}</div>
+                    <div class="group-overview">
+                        <div class="info-stack">
+                            <div class="detail-card">
+                                <div class="section-label">Exposed To Clients</div>
+                                <div class="models"><code>${escapeHtml(EXPOSURE_LABELS[group.exposureMode] || group.exposureMode || 'All Models')}</code>${exposedModels.map(m => `<code>${escapeHtml(m)}</code>`).join('') || '<span class="empty">Nothing exposed</span>'}</div>
+                            </div>
+                            <div class="detail-card">
+                                <div class="section-label">Channel Models</div>
+                                <div class="models">${models.map(m => `<code>${escapeHtml(m)}</code>`).join('') || '<span class="empty">No channel models</span>'}</div>
+                            </div>
+                        </div>
+                        <div class="detail-card aliases">
+                            <div class="section-label">Alias Routes</div>
+                            ${this._renderAliasRoutes(aliasRoutes, channelNameById)}
+                        </div>
+                    </div>
                     <div class="membership-tools">
                         <select class="inline-select" data-attach-channel="${escapeHtml(group.groupId)}">${attachOptions || '<option value="">No unattached channels</option>'}</select>
                         <input class="inline-input" data-attach-priority="${escapeHtml(group.groupId)}" value="0" type="number" placeholder="Priority">
@@ -239,8 +277,8 @@ export class PanelGroups extends KeelElement {
         return `<span class="status bad">${escapeHtml(channel.status || 'Unknown')}</span>`;
     }
 
-    _fallbackExposedModels(exposureMode, directModels, aliasRoutes) {
-        const aliases = aliasRoutes.map(a => a.aliasName);
+    _fallbackExposedModels(exposureMode, directModels, aliasNames) {
+        const aliases = [...new Set((aliasNames || []).filter(Boolean))];
         const mode = this._normalizeExposure(exposureMode);
         if (mode === 'ALIASES_ONLY') return aliases;
         if (mode === 'ALIASES_AND_MODELS') return [...new Set([...aliases, ...directModels])];

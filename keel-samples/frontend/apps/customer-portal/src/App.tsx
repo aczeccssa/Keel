@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState, type ReactNode } from 'react';
 import { AppShell } from '@keel/sample-ui';
 import { CustomerPortalApi } from './api/customerPortalApi';
 import { clearCustomerAuth, loadCustomerAuth, saveCustomerAuth } from './state/customerAuth';
@@ -20,9 +20,14 @@ function renderPanel(activeTab: CustomerTabId, api: CustomerPortalApi) {
   }
 }
 
+function RefreshGate({ nonce, children }: { nonce: boolean; children: ReactNode }) {
+  return <div key={String(nonce)}>{children}</div>;
+}
+
 export function App() {
   const [auth, setAuth] = useState(loadCustomerAuth);
   const [activeTab, setActiveTab] = useState<CustomerTabId>(tabFromHash());
+  const [refreshing, setRefreshing] = useState(false);
   const api = useMemo(() => new CustomerPortalApi(auth.accessToken), [auth.accessToken]);
 
   const selectTab = (tab: string) => {
@@ -30,6 +35,12 @@ export function App() {
     setActiveTab(next);
     writeTabHash(next);
   };
+
+  const refresh = useCallback(() => {
+    if (refreshing) return;
+    setRefreshing(true);
+    setTimeout(() => setRefreshing(false), 600);
+  }, [refreshing]);
 
   const logout = () => setAuth(clearCustomerAuth());
 
@@ -44,9 +55,13 @@ export function App() {
       activeTab={activeTab}
       onSelectTab={selectTab}
       userLabel={auth.email ?? 'customer'}
+      userEmail={auth.email ?? 'customer'}
       onLogout={logout}
+      onRefresh={refresh}
+      isRefreshing={refreshing}
+      isLive
     >
-      {renderPanel(activeTab, api)}
+      <RefreshGate nonce={refreshing}>{renderPanel(activeTab, api)}</RefreshGate>
     </AppShell>
   );
 }

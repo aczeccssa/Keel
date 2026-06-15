@@ -50,14 +50,14 @@ class AiProxyApp extends KeelElement {
                     display: grid;
                     grid-template-columns: 318px minmax(0, 1fr);
                     height: 100vh;
-                    background: var(--ink);
+                    background: var(--surface-accent);
                     transition: grid-template-columns 200ms var(--ease-smooth);
                 }
                 .app-shell.collapsed { grid-template-columns: 64px minmax(0, 1fr); }
                 .sidebar {
                     height: 100vh;
                     padding: 22px 16px;
-                    background: var(--paper);
+                    background: var(--surface-soft);
                     border-right: 2px solid var(--ink);
                     display: flex;
                     flex-direction: column;
@@ -76,7 +76,7 @@ class AiProxyApp extends KeelElement {
                     user-select: none;
                     transition: background 120ms;
                 }
-                .brand:hover { background: var(--bg, #eae8e3); }
+                .brand:hover { background: var(--surface-muted); }
                 .collapsed .brand { padding: 0; justify-content: center; }
                 .collapsed .brand:hover { background: transparent; }
                 .brand-copy { min-width: 0; flex: 1; }
@@ -101,14 +101,14 @@ class AiProxyApp extends KeelElement {
                 .sidebar-toggle {
                     width: 30px; height: 30px;
                     border: 2px solid var(--ink);
-                    background: var(--paper);
+                    background: var(--surface-soft);
                     color: var(--ink);
                     cursor: pointer;
                     display: inline-flex; align-items: center; justify-content: center;
                     flex-shrink: 0;
                     transition: background 120ms, color 120ms, transform 200ms;
                 }
-                .sidebar-toggle:hover { background: var(--ink); color: var(--paper); }
+                .sidebar-toggle:hover { background: var(--surface-accent); color: var(--on-accent); }
                 .sidebar-toggle svg { width: 13px; height: 13px; stroke: currentColor; fill: none; stroke-width: 2.5; }
                 .collapsed .sidebar-toggle { transform: rotate(180deg); }
 
@@ -137,23 +137,23 @@ class AiProxyApp extends KeelElement {
                     transition: background 150ms, border-color 150ms, color 150ms;
                     position: relative;
                 }
-                .nav-link:hover { background: var(--bg, #eae8e3); }
+                .nav-link:hover { background: var(--surface-muted); }
                 .nav-link.is-active {
-                    background: var(--ink);
-                    color: var(--paper);
+                    background: var(--surface-accent);
+                    color: var(--on-accent);
                     box-shadow: 4px 4px 0 0 var(--teal);
                 }
                 .nav-icon {
                     width: 30px; height: 30px;
                     border: 2px solid var(--ink);
-                    background: var(--paper);
+                    background: var(--surface-soft);
                     color: var(--ink);
                     display: inline-flex; align-items: center; justify-content: center;
                     flex-shrink: 0;
                     transition: border-color 120ms, color 120ms, background 120ms;
                 }
                 .nav-icon svg { width: 15px; height: 15px; }
-                .nav-link.is-active .nav-icon { background: var(--paper); border-color: var(--ink); color: var(--ink); }
+                .nav-link.is-active .nav-icon { background: var(--surface-strong); border-color: var(--ink); color: var(--ink); }
                 .nav-copy { min-width: 0; flex: 1; overflow: hidden; }
                 .nav-copy strong {
                     display: block;
@@ -170,12 +170,12 @@ class AiProxyApp extends KeelElement {
                 .nav-badge {
                     display: inline-flex; align-items: center; justify-content: center;
                     min-width: 22px; height: 18px; padding: 0 6px;
-                    background: var(--teal); color: var(--paper);
+                    background: var(--surface-strong); color: var(--ink);
                     font-family: var(--font-mono); font-size: 9px; font-weight: 800;
                     letter-spacing: 0.04em;
                     border: 2px solid var(--ink);
                 }
-                .nav-link.is-active .nav-badge { background: var(--paper); color: var(--ink); }
+                .nav-link.is-active .nav-badge { background: var(--teal); color: var(--on-accent); border-color: var(--teal); }
                 .collapsed .nav-badge { display: none; }
 
                 /* Collapsed: 56px square icon-only cells, sidebar is 64px wide with 4px padding */
@@ -184,7 +184,7 @@ class AiProxyApp extends KeelElement {
                 .collapsed .nav-icon { width: 28px; height: 28px; }
                 /* Collapsed toggle: show favicon (per observability pattern) */
                 .collapsed .sidebar-toggle { width: 40px; height: 40px; padding: 0; border: 0; background: transparent; }
-                .collapsed .sidebar-toggle:hover { background: var(--bg, #eae8e3); }
+                .collapsed .sidebar-toggle:hover { background: var(--surface-muted); }
                 .collapsed .sidebar-toggle svg { width: 18px; height: 18px; stroke-width: 2; }
 
                 /* Sidebar footer */
@@ -192,7 +192,7 @@ class AiProxyApp extends KeelElement {
                 .user-pill {
                     display: flex; align-items: center; gap: 10px;
                     padding: 10px 12px;
-                    background: var(--bg, #eae8e3);
+                    background: var(--surface-muted);
                     border: 2px solid var(--ink);
                     font-family: var(--font-mono);
                     font-size: 11px; font-weight: 700; color: var(--ink);
@@ -201,7 +201,7 @@ class AiProxyApp extends KeelElement {
                     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
                     transition: background 120ms, color 120ms;
                 }
-                .user-pill:hover { background: var(--ink); color: var(--paper); }
+                .user-pill:hover { background: var(--surface-accent); color: var(--on-accent); }
                 .user-pill:hover .user-dot { background: var(--teal); }
                 .user-dot { width: 9px; height: 9px; background: var(--green); flex-shrink: 0; transition: background 120ms; }
                 .collapsed .user-pill { width: 40px; height: 40px; padding: 0; justify-content: center; margin: 4px auto; }
@@ -209,7 +209,7 @@ class AiProxyApp extends KeelElement {
                 .collapsed .user-pill .user-dot { width: 14px; height: 14px; }
                 .logout-btn {
                     width: 100%; border: 2px solid var(--ink); padding: 10px 14px;
-                    background: var(--ink); color: var(--paper); cursor: pointer;
+                    background: var(--surface-accent); color: var(--on-accent); cursor: pointer;
                     font-family: var(--font-mono); font-size: 11px; font-weight: 800;
                     letter-spacing: 0.14em; text-transform: uppercase;
                     transition: background 120ms, color 120ms;
@@ -222,7 +222,7 @@ class AiProxyApp extends KeelElement {
                 /* User popover (theme + sign out) */
                 .user-popover {
                     position: fixed;
-                    background: var(--paper);
+                    background: var(--surface-soft);
                     border: 2px solid var(--ink);
                     box-shadow: 6px 6px 0 0 var(--ink);
                     padding: 14px;
@@ -252,7 +252,7 @@ class AiProxyApp extends KeelElement {
                     border: 2px solid var(--ink);
                 }
                 .theme-toggle button {
-                    background: var(--paper);
+                    background: var(--surface-soft);
                     color: var(--ink);
                     border: 0;
                     border-right: 2px solid var(--ink);
@@ -264,31 +264,31 @@ class AiProxyApp extends KeelElement {
                     transition: background 120ms, color 120ms;
                 }
                 .theme-toggle button:last-child { border-right: 0; }
-                .theme-toggle button:hover { background: var(--bg, #eae8e3); }
-                .theme-toggle button.is-active { background: var(--ink); color: var(--paper); }
+                .theme-toggle button:hover { background: var(--surface-muted); }
+                .theme-toggle button.is-active { background: var(--surface-accent); color: var(--on-accent); }
                 .main-shell { min-width: 0; display: flex; flex-direction: column; height: 100vh; overflow: hidden; background: var(--bg); }
                 .topbar {
                     flex-shrink: 0; display: flex; align-items: center; justify-content: space-between; gap: 0;
-                    padding: 0; background: var(--paper); border-bottom: 2px solid var(--ink); z-index: 10;
+                    padding: 0; background: var(--surface-soft); border-bottom: 2px solid var(--ink); z-index: 10;
                 }
                 .topbar-sys {
                     align-self: stretch;
                     display: flex; align-items: center; gap: 10px;
                     padding: 14px 20px;
-                    background: var(--paper);
+                    background: var(--surface-soft);
                     font-family: var(--font-mono); font-size: 12px; font-weight: 800; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink);
                 }
                 .sys-cross { color: var(--teal); font-weight: 800; font-size: 18px; }
                 .topbar-actions {
                     align-self: stretch;
                     display: flex; align-items: center; gap: 0;
-                    background: var(--paper);
+                    background: var(--surface-soft);
                 }
                 .sys-stat {
                     align-self: stretch;
                     display: inline-flex; align-items: center; gap: 7px;
                     padding: 0 16px;
-                    background: var(--paper);
+                    background: var(--surface-muted);
                     font-family: var(--font-mono); font-size: 10px; font-weight: 800; letter-spacing: 0.12em; color: var(--muted);
                     border-left: 2px solid var(--ink);
                 }
@@ -297,7 +297,7 @@ class AiProxyApp extends KeelElement {
                     align-self: stretch;
                     display: inline-flex; align-items: center; gap: 6px;
                     padding: 0 16px;
-                    background: var(--paper);
+                    background: var(--surface-muted);
                     font-family: var(--font-mono); font-size: 10px; font-weight: 800; letter-spacing: 0.12em;
                     color: var(--teal); cursor: pointer; user-select: none;
                     border-left: 2px solid var(--ink);
@@ -314,7 +314,7 @@ class AiProxyApp extends KeelElement {
                     align-self: stretch;
                     border: 0;
                     border-left: 2px solid var(--ink);
-                    background: var(--paper); color: var(--ink); cursor: pointer;
+                    background: var(--surface-soft); color: var(--ink); cursor: pointer;
                     padding: 0 18px; font-family: var(--font-mono); font-size: 10px; font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase;
                     transition: background 120ms, color 120ms;
                 }
@@ -346,7 +346,7 @@ class AiProxyApp extends KeelElement {
                         repeating-linear-gradient(90deg, transparent, transparent 39px, rgba(11,11,11,0.04) 39px, rgba(11,11,11,0.04) 40px);
                     display: flex; align-items: center; justify-content: center; z-index: 1000;
                 }
-                .login-card { background: var(--paper); padding: 44px; width: 440px; border: 2px solid var(--ink); box-shadow: var(--shadow-lg); }
+                .login-card { background: var(--surface-soft); padding: 44px; width: 440px; border: 2px solid var(--ink); box-shadow: var(--shadow-lg); }
                 .login-card h2 {
                     margin: 0 0 6px; font-family: var(--font-headline); font-size: 38px; line-height: 0.9;
                     letter-spacing: -0.04em; text-transform: uppercase;
@@ -359,7 +359,7 @@ class AiProxyApp extends KeelElement {
                     cursor: pointer; color: var(--ink); background: var(--paper); transition: all 120ms ease;
                 }
                 .login-tab + .login-tab { border-left: 2px solid var(--ink); }
-                .login-tab.active { color: var(--paper); background: var(--ink); }
+                .login-tab.active { color: var(--on-accent); background: var(--surface-accent); }
                 .field { margin-bottom: 18px; }
                 .field label { display: block; font-family: var(--font-mono); font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.14em; color: var(--ink); margin-bottom: 8px; }
                 .field input {
@@ -372,11 +372,11 @@ class AiProxyApp extends KeelElement {
                     font-family: var(--font-mono); font-size: 12px; font-weight: 800; letter-spacing: 0.14em; text-transform: uppercase;
                     cursor: pointer; margin-top: 12px; transition: all 120ms ease;
                 }
-                .login-btn:hover { background: var(--ink); }
+                .login-btn:hover { background: var(--surface-accent); }
                 .login-error { color: var(--red); font-family: var(--font-mono); font-size: 12px; margin-top: 12px; display: none; font-weight: 700; }
                 .register-name { display: none; }
                 .onboarding { margin-top: 24px; padding: 16px 18px; background: var(--teal-soft); border: 2px solid var(--ink); font-family: var(--font-mono); font-size: 11px; line-height: 1.7; color: var(--ink); }
-                .onboarding code { background: var(--ink); color: var(--paper); padding: 2px 6px; font-family: var(--font-mono); font-size: 11px; }
+                .onboarding code { background: var(--surface-accent); color: var(--on-accent); padding: 2px 6px; font-family: var(--font-mono); font-size: 11px; }
                 @media (max-width: 980px) {
                     .app-shell { grid-template-columns: 1fr; }
                     .sidebar { height: auto; border-right: 0; border-bottom: 2px solid var(--ink); }
