@@ -1026,6 +1026,7 @@ import com.keel.kernel.plugin.UnifiedPluginManager
 import com.keel.openapi.runtime.OpenApiRegistry
 import com.keel.samples.aigateway.account.AccountPlugin
 import com.keel.samples.aigateway.airelay.AIRelayPlugin
+import com.keel.samples.aigateway.airelay.upstream.RealUpstreamHttpClient
 import com.keel.samples.aigateway.riskcontrol.RiskControlPlugin
 import com.keel.samples.aigateway.token.TokenPlugin
 import io.ktor.client.HttpClient
@@ -1090,10 +1091,11 @@ class BenchmarkKeelServer private constructor(
             runCatching { stopKoin() }
             val koin: Koin = startKoin {}.koin
             val manager = UnifiedPluginManager(koin)
+            val airelayPlugin = AIRelayPlugin()
             manager.registerPlugin(AccountPlugin())
             manager.registerPlugin(TokenPlugin())
             manager.registerPlugin(RiskControlPlugin())
-            manager.registerPlugin(AIRelayPlugin())
+            manager.registerPlugin(airelayPlugin)
             val engine = embeddedServer(ServerCIO, port = resolvedPort, host = "127.0.0.1") {
                 install(ServerContentNegotiation) { json() }
                 install(SSE)
@@ -1103,6 +1105,7 @@ class BenchmarkKeelServer private constructor(
                     manager.startPlugin("token")
                     manager.startPlugin("riskcontrol")
                     manager.startPlugin("airelay")
+                    airelayPlugin.installRealUpstream(RealUpstreamHttpClient.create(), topology.settings.chains)
                 }
             }.start(wait = false)
             val client = HttpClient(ClientCIO) {
