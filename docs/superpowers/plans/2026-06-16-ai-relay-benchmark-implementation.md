@@ -54,7 +54,6 @@ In the `dependencies` block, add these lines if they are not already present:
 ```kotlin
 implementation(libs.ktor.server.netty)
 implementation(libs.ktor.server.cio)
-implementation(libs.ktor.server.routing)
 implementation(libs.ktor.server.content.negotiation)
 implementation(libs.ktor.serialization.kotlinx.json)
 ```
