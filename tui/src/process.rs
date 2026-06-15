@@ -1,9 +1,8 @@
-//! Process lifecycle: spawning, signal handling, and output reading.
+//! Process and filesystem helpers.
 
 use std::env;
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
-use std::sync::mpsc::Sender;
 use std::thread;
 
 use anyhow::Result;
@@ -12,8 +11,6 @@ use nix::{
     sys::signal::{killpg, Signal},
     unistd::Pid,
 };
-
-use crate::app::{AppEvent, LogKind};
 
 /// Walk upward from `cwd` and `exe` parent directories looking for `gradlew`.
 pub fn detect_project_root() -> PathBuf {
@@ -40,23 +37,19 @@ pub fn detect_project_root() -> PathBuf {
     env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
 }
 
-/// Read `reader` line-by-line and forward each line to the main thread.
-pub fn spawn_reader<R>(reader: R, tx: Sender<AppEvent>, kind: LogKind)
+/// Read `reader` line-by-line and forward each line to a callback.
+pub fn spawn_reader<R, F>(reader: R, mut on_line: F)
 where
     R: std::io::Read + Send + 'static,
+    F: FnMut(Result<String>) + Send + 'static,
 {
     thread::spawn(move || {
         let reader = BufReader::new(reader);
         for line in reader.lines() {
             match line {
-                Ok(line) => {
-                    let _ = tx.send(AppEvent::Output { kind, line });
-                }
+                Ok(line) => on_line(Ok(line)),
                 Err(err) => {
-                    let _ = tx.send(AppEvent::Output {
-                        kind: LogKind::System,
-                        line: format!("Read error: {err}"),
-                    });
+                    on_line(Err(anyhow::anyhow!("Read error: {err}")));
                     break;
                 }
             }

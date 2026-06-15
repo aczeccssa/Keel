@@ -1,0 +1,21 @@
+version: 1
+default_profile: sample-dev
+auto_start: true
+mcp:
+  enabled: true
+  host: 127.0.0.1
+  port: 8765
+  path: /mcp
+  auth:
+    enabled: false
+    bearer_token: null
+profiles:
+  sample-dev:
+    program: ./gradlew
+    args:
+    - :keel-samples:run
+    cwd: .
+    env:
+      KEEL_ENV: development
+      KEEL_PORT: '8080'
+    stop_timeout_ms: 3000
