@@ -16,8 +16,8 @@ sourceSets {
 
     create("tools") {
         kotlin.srcDir("src/tools/kotlin")
-        compileClasspath += sourceSets["main"].compileClasspath
-        runtimeClasspath += sourceSets["main"].runtimeClasspath
+        compileClasspath += sourceSets["main"].output + sourceSets["main"].compileClasspath
+        runtimeClasspath += sourceSets["main"].output + sourceSets["main"].runtimeClasspath
     }
 }
 
@@ -160,6 +160,8 @@ dependencies {
     implementation(libs.exposed.jdbc)
     implementation(libs.exposed.kotlin.datetime)
     implementation(libs.h2.database)
+    testImplementation(kotlin("test"))
+    testImplementation(libs.kotlinx.coroutines.test)
 
     ksp(project(":keel-openapi-processor"))
 }
