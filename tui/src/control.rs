@@ -273,6 +273,33 @@ impl ControlCore {
             .active_profile
             .clone()
     }
+
+    fn stop_now(&self, timeout: Duration) -> Result<()> {
+        let writer = SnapshotWriter::new(self.snapshot.clone());
+        writer.update(|snapshot| {
+            snapshot.busy = true;
+            snapshot.last_command = Some("direct:Stop".to_string());
+            snapshot.last_error = None;
+        });
+
+        let result = {
+            let mut state = self.state.lock().expect("control state lock");
+            state.runtime.stop(timeout, &writer)
+        };
+
+        writer.update(|snapshot| {
+            snapshot.busy = false;
+            if let Err(err) = &result {
+                snapshot.last_error = Some(err.to_string());
+                snapshot.last_result = Some(format!("Command failed: {err}"));
+                if snapshot.lifecycle != LifecycleState::Running {
+                    snapshot.lifecycle = LifecycleState::Failed;
+                }
+            }
+        });
+
+        result
+    }
 }
 
 impl ControlHandle {
@@ -373,6 +400,10 @@ impl ControlHandle {
     pub fn should_shutdown(&self) -> bool {
         self.core.should_shutdown()
     }
+
+    pub fn stop_now(&self, timeout: Duration) -> Result<()> {
+        self.core.stop_now(timeout)
+    }
 }
 
 impl ControlState {
@@ -385,6 +416,7 @@ impl ControlState {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
     use std::fs;
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -435,5 +467,40 @@ mod tests {
         core.tick().expect("tick succeeds");
         assert_eq!(handle.snapshot().active_profile, "sample-dev");
         assert!(handle.snapshot().pid.is_none());
+    }
+
+    #[test]
+    fn can_stop_running_process_without_tick_loop() {
+        let repo_root = temp_repo_root();
+        let core = ControlCore::new(repo_root).expect("core");
+        let handle = core.handle();
+
+        core.execute(
+            1,
+            WriteCommand::UpdateProfile {
+                profile: "sample-dev".to_string(),
+                patch: ProfilePatch {
+                    program: Some("/bin/sh".to_string()),
+                    args: Some(vec![
+                        "-c".to_string(),
+                        "trap 'exit 0' TERM INT; while :; do sleep 1; done".to_string(),
+                    ]),
+                    cwd: Some(".".to_string()),
+                    env: Some(BTreeMap::new()),
+                    stop_timeout_ms: Some(1_000),
+                },
+            },
+        )
+        .expect("profile updated");
+        core.execute(2, WriteCommand::Start).expect("process started");
+
+        assert!(handle.snapshot().pid.is_some(), "process should be running");
+
+        handle
+            .stop_now(Duration::from_secs(2))
+            .expect("stop without tick loop");
+
+        assert!(handle.snapshot().pid.is_none(), "process should be stopped");
+        assert_eq!(handle.snapshot().lifecycle, LifecycleState::Idle);
     }
 }

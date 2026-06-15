@@ -60,11 +60,7 @@ fn run_tui() -> Result<()> {
         }
     }
 
-    let _ = handle.execute_write(
-        CommandSource::Tui,
-        WriteCommand::Stop,
-        Duration::from_secs(5),
-    );
+    let _ = handle.stop_now(Duration::from_secs(5));
 
     let mut stdout = std::io::stdout();
     let _ = execute!(stdout, LeaveAlternateScreen, DisableMouseCapture);
