@@ -120,6 +120,31 @@ java -cp "$H2_JAR" org.h2.tools.Server -tcp -tcpPort 9092
 - Account 用户组（free/pro/enterprise）
 - 调用日志和 Token 记录
 
+### AI Relay Benchmark
+
+AI Relay Benchmark 会用真实 HTTP 请求压测 API-key relay 路径，覆盖 Anthropic Messages 和 OpenAI Responses 兼容 API。工具会启动本地 simulated provider、启动本地 Keel SUT、创建真实 API key，然后从鉴权、协议转换、上游发送、响应转换到客户端响应完整记录指标。
+
+Smoke run：
+
+```bash
+./gradlew :keel-samples:aiRelayBenchmarkSmoke -PbenchmarkOutputDir=build/reports/ai-relay-benchmark-smoke
+```
+
+Full heavy run：
+
+```bash
+./gradlew :keel-samples:aiRelayBenchmark -PbenchmarkPhase=full -PbenchmarkOutputDir=build/reports/ai-relay-benchmark-full
+```
+
+报告文件：
+
+- `summary.csv`：每个 measured step 一行。
+- `summary.json`：机器可读 step summary。
+- `requests.jsonl`：每个请求一行，包含 latency、status、streaming 指标和错误归因数据。
+- `timeseries.jsonl`：按窗口记录的时间序列数据。
+
+完整矩阵覆盖 blocking/streaming、direct provider、alias pinned specific provider、alias any attached providers（2/3/5 providers），以及 1s、3s、5s、10s、20s、40s provider generation duration。
+
 ## 项目依赖
 
 - `keel-core` - 框架核心
