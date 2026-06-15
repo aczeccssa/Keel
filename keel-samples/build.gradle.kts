@@ -32,6 +32,28 @@ tasks.register<JavaExec>("exportH2Data") {
     findProperty("dbFolder")?.let { systemProperty("dbFolder", it.toString()) }
 }
 
+tasks.register<JavaExec>("aiRelayBenchmark") {
+    description = "Run the AI relay production-like benchmark harness"
+    group = "keel-sample"
+
+    classpath = sourceSets["tools"].runtimeClasspath
+    mainClass.set("AiRelayBenchmarkTaskKt")
+
+    findProperty("benchmarkConfig")?.let { args("--config=${it}") }
+    findProperty("benchmarkPhase")?.let { args("--phase=${it}") }
+    findProperty("benchmarkOutputDir")?.let { args("--output=${it}") }
+}
+
+tasks.register<JavaExec>("aiRelayBenchmarkSmoke") {
+    description = "Run a short AI relay benchmark smoke validation"
+    group = "keel-sample"
+
+    classpath = sourceSets["tools"].runtimeClasspath
+    mainClass.set("AiRelayBenchmarkTaskKt")
+    args("--phase=smoke")
+    findProperty("benchmarkOutputDir")?.let { args("--output=${it}") }
+}
+
 kotlin {
     jvmToolchain(23)
 }
@@ -123,7 +145,12 @@ dependencies {
     implementation(project(":keel-openapi-runtime"))
     implementation(libs.ktor.server.core)
     implementation(libs.ktor.server.cors)
+    implementation(libs.ktor.server.cio)
+    implementation(libs.ktor.server.netty)
+    implementation(libs.ktor.server.routing)
+    implementation(libs.ktor.server.content.negotiation)
     implementation(libs.ktor.server.sse)
+    implementation(libs.ktor.serialization.kotlinx.json)
     implementation(libs.ktor.client.core)
     implementation(libs.ktor.client.cio)
     implementation(libs.kotlinx.coroutines.core)

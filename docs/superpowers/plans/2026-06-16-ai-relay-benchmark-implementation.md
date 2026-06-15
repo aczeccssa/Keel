@@ -73,9 +73,9 @@ tasks.register<JavaExec>("aiRelayBenchmark") {
     classpath = sourceSets["tools"].runtimeClasspath
     mainClass.set("AiRelayBenchmarkTaskKt")
 
-    findProperty("benchmarkConfig")?.let { arg("--config=${it}") }
-    findProperty("benchmarkPhase")?.let { arg("--phase=${it}") }
-    findProperty("benchmarkOutputDir")?.let { arg("--output=${it}") }
+    findProperty("benchmarkConfig")?.let { args("--config=${it}") }
+    findProperty("benchmarkPhase")?.let { args("--phase=${it}") }
+    findProperty("benchmarkOutputDir")?.let { args("--output=${it}") }
 }
 
 tasks.register<JavaExec>("aiRelayBenchmarkSmoke") {
@@ -85,7 +85,7 @@ tasks.register<JavaExec>("aiRelayBenchmarkSmoke") {
     classpath = sourceSets["tools"].runtimeClasspath
     mainClass.set("AiRelayBenchmarkTaskKt")
     args("--phase=smoke")
-    findProperty("benchmarkOutputDir")?.let { arg("--output=${it}") }
+    findProperty("benchmarkOutputDir")?.let { args("--output=${it}") }
 }
 ```
 
