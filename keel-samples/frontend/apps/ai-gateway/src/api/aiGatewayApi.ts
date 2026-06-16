@@ -38,6 +38,7 @@ export class AiGatewayApi {
   pricing() { return requestJson(`${AIRELAY_BASE}/admin/pricing`, { token: this.token }); }
   pools() { return requestJson(`${AIRELAY_BASE}/admin/pools`, { token: this.token }); }
   rateLimitRules() { return requestJson(`${RISK_BASE}/v1/rules`, { token: this.token }); }
+  rateLimitSnapshot() { return requestJson(`${RISK_BASE}/v1/snapshot`, { token: this.token }); }
   users() { return requestJson(`${ACCOUNT_BASE}/admin/users`, { token: this.token }); }
   customers() { return requestJson(`${CUSTOMER_BASE}/admin/customers`, { token: this.token }); }
   redemptionCodes() { return requestJson(`${CUSTOMER_BASE}/admin/codes`, { token: this.token }); }

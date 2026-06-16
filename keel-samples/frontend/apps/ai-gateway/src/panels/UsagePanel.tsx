@@ -9,13 +9,20 @@ import {
 import type { AiGatewayApi } from '../api/aiGatewayApi';
 
 interface UsageRecord {
+  recordId?: string;
   requestId?: string;
   model?: string;
   createdAt?: string;
   totalCostUsd?: number;
   cost?: { totalCostUsd?: number; inputCostUsd?: number; outputCostUsd?: number };
   usage?: { promptTokens?: number; completionTokens?: number };
-  status?: string;
+  status?: string | number;
+  outcome?: string;
+  errorCode?: string;
+  errorDetail?: string;
+  upstreamKeyId?: string;
+  streamed?: boolean;
+  failoverCount?: number;
 }
 
 function renderModelRoute(model?: string) {
@@ -63,7 +70,7 @@ export function UsagePanel({ api }: { api: AiGatewayApi }) {
   }, [api]);
 
   const columns: DataTableColumn<UsageRecord>[] = [
-    { key: 'requestId', header: 'Request', mono: true, render: (r) => (r.requestId ? r.requestId.slice(0, 16) : '—') },
+    { key: 'requestId', header: 'Request', mono: true, render: (r) => (r.requestId ?? r.recordId ? String(r.requestId ?? r.recordId).slice(0, 16) : '—') },
     {
       key: 'createdAt',
       header: 'Timestamp',
@@ -74,7 +81,41 @@ export function UsagePanel({ api }: { api: AiGatewayApi }) {
       header: 'Model',
       render: (r) => renderModelRoute(r.model)
     },
-    { key: 'status', header: 'Status', render: (r) => r.status ?? 'ok' },
+    {
+      key: 'status',
+      header: 'Status',
+      render: (r) => {
+        const status = r.status ?? '—';
+        const tags = [
+          r.outcome,
+          r.streamed ? 'stream' : null,
+          (r.failoverCount ?? 0) > 0 ? `failover ${r.failoverCount}` : null
+        ].filter(Boolean).join(' · ');
+        return (
+          <div style={{ display: 'grid', gap: 2 }}>
+            <strong>{status}</strong>
+            {tags ? <span style={{ color: 'var(--keel-muted)', fontSize: 12 }}>{tags}</span> : null}
+          </div>
+        );
+      }
+    },
+    {
+      key: 'issue',
+      header: 'Issue',
+      render: (r) => {
+        const parts = [r.errorCode, r.errorDetail, r.upstreamKeyId].filter(Boolean) as string[];
+        if (parts.length === 0) return '—';
+        return (
+          <div style={{ display: 'grid', gap: 2 }}>
+            {parts.map((part, index) => (
+              <span key={`${part}-${index}`} style={{ fontSize: 12, color: index === 0 ? 'var(--keel-ink)' : 'var(--keel-muted)' }}>
+                {part}
+              </span>
+            ))}
+          </div>
+        );
+      }
+    },
     {
       key: 'in',
       header: 'In tok',
@@ -115,7 +156,7 @@ export function UsagePanel({ api }: { api: AiGatewayApi }) {
         <DataTable
           columns={columns}
           rows={rows}
-          getRowKey={(r, i) => r.requestId ?? `row-${i}`}
+          getRowKey={(r, i) => r.requestId ?? r.recordId ?? `row-${i}`}
           maxHeight="calc(100vh - 220px)"
         />
       )}

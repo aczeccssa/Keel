@@ -1,7 +1,5 @@
 import { useEffect, useState } from 'react';
 import {
-  Button,
-  Chip,
   DataTable,
   type DataTableColumn,
   EmptyState,
@@ -12,9 +10,21 @@ import type { AiGatewayApi } from '../api/aiGatewayApi';
 
 interface Pool {
   chainId?: string;
-  levels?: unknown[];
-  status?: string;
-  lastRoutedAt?: string;
+  modelAliases?: string[];
+  levels?: Array<{
+    levelId?: string;
+    protocol?: string;
+    providerId?: string;
+    keys?: Array<{
+      keyId?: string;
+      status?: string;
+      totalRequests?: number;
+      totalFailures?: number;
+      currentConcurrency?: number;
+      maxConcurrency?: number;
+      lastError?: string;
+    }>;
+  }>;
 }
 
 export function PoolsPanel({ api }: { api: AiGatewayApi }) {
@@ -38,16 +48,34 @@ export function PoolsPanel({ api }: { api: AiGatewayApi }) {
 
   const columns: DataTableColumn<Pool>[] = [
     { key: 'chainId', header: 'Chain', mono: true, render: (r) => r.chainId ?? '—' },
-    { key: 'levels', header: 'Levels', align: 'right', mono: true, render: (r) => String(r.levels?.length ?? 0) },
     {
-      key: 'status',
-      header: 'Status',
-      render: (r) => <Chip tone={(r.status ?? 'active') === 'active' ? 'ok' : 'muted'}>{r.status ?? 'active'}</Chip>
+      key: 'models',
+      header: 'Models',
+      render: (r) => (r.modelAliases ?? []).length ? (r.modelAliases ?? []).join(', ') : '—'
     },
     {
-      key: 'lastRoutedAt',
-      header: 'Last routed',
-      render: (r) => (r.lastRoutedAt ? r.lastRoutedAt.replace('T', ' ').slice(0, 19) : '—')
+      key: 'levels',
+      header: 'Levels',
+      render: (r) => (
+        <div style={{ display: 'grid', gap: 6 }}>
+          {(r.levels ?? []).map((level, index) => (
+            <div key={`${level.levelId ?? 'level'}-${index}`} style={{ display: 'grid', gap: 4 }}>
+              <span>
+                <strong>{level.levelId ?? '—'}</strong>
+                {' · '}
+                <span style={{ color: 'var(--keel-muted)' }}>{level.protocol ?? '—'}</span>
+              </span>
+              {(level.keys ?? []).map((key, keyIndex) => (
+                <span key={`${key.keyId ?? 'key'}-${keyIndex}`} style={{ fontSize: 12, color: 'var(--keel-muted)' }}>
+                  {key.keyId ?? '—'} · {key.status ?? '—'} · cc {key.currentConcurrency ?? 0}/{key.maxConcurrency ?? 0}
+                  {(key.totalFailures ?? 0) > 0 ? ` · fail ${key.totalFailures}` : ''}
+                  {key.lastError ? ` · ${key.lastError}` : ''}
+                </span>
+              ))}
+            </div>
+          ))}
+        </div>
+      )
     }
   ];
 
@@ -67,11 +95,6 @@ export function PoolsPanel({ api }: { api: AiGatewayApi }) {
           rows={rows}
           getRowKey={(r, i) => r.chainId ?? `row-${i}`}
           maxHeight="calc(100vh - 220px)"
-          actionsColumn={() => (
-            <Button variant="secondary" size="sm" disabled title="Backend not yet exposed">
-              Inspect
-            </Button>
-          )}
         />
       )}
     </>
