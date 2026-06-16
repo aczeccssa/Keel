@@ -4,8 +4,10 @@ import com.keel.openapi.runtime.OpenApiDoc
 import com.keel.openapi.runtime.OpenApiOperation
 import com.keel.openapi.runtime.OpenApiRegistry
 import io.ktor.http.ContentType
+import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpMethod
 import io.ktor.http.HttpStatusCode
+import io.ktor.http.content.OutgoingContent
 import io.ktor.server.application.ApplicationCall
 import io.ktor.server.request.receiveText
 import io.ktor.server.response.respond
@@ -130,6 +132,8 @@ internal fun decodeRequestBody(body: String?, requestType: KType?): Any? {
 
 internal fun encodeResponseBody(body: Any?, responseType: KType): String? {
     if (body == null) return null
+    if (body is String) return body
+    if (body is OutgoingContent) return null
     return runtimeJson.encodeToString(serializer(responseType), body)
 }
 
@@ -156,8 +160,13 @@ internal suspend fun respondPluginResult(
     errorMessage: String? = null
 ) {
     val status = HttpStatusCode.fromValue(result.status)
+    val contentTypeValues = mutableListOf<String>()
     result.headers.forEach { (key, values) ->
-        values.forEach { call.response.headers.append(key, it, safeOnly = false) }
+        if (key.equals(HttpHeaders.ContentType, ignoreCase = true)) {
+            contentTypeValues += values
+        } else {
+            values.forEach { call.response.headers.append(key, it, safeOnly = false) }
+        }
     }
 
     if (responseEnvelope) {
@@ -180,7 +189,20 @@ internal suspend fun respondPluginResult(
         return
     }
 
-    call.respond(status, result.body)
+    when (val body = result.body) {
+        is OutgoingContent -> {
+            call.response.status(status)
+            call.respond(body)
+        }
+        is String -> {
+            val contentType = contentTypeValues.firstOrNull()?.let(ContentType::parse)
+            call.respondText(body, contentType, status)
+        }
+        else -> {
+            contentTypeValues.forEach { call.response.headers.append(HttpHeaders.ContentType, it, safeOnly = false) }
+            call.respond(status, body)
+        }
+    }
 }
 
 internal suspend fun readRawBody(call: ApplicationCall): ByteArray {

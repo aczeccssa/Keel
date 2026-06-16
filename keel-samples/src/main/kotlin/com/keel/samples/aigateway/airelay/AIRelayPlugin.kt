@@ -348,22 +348,22 @@ class AIRelayPlugin : StandardKeelPlugin {
         }
 
         route("/v1") {
-            post<JsonObject, RelayResponse>(
+            post<JsonObject, Any>(
                 "/chat/completions",
                 doc = OpenApiDoc(summary = "OpenAI Chat Completions compatible relay", tags = listOf("ai-gateway", "airelay"), errorStatuses = setOf(400, 401, 402, 403, 429, 503)),
-                executionPolicy = EndpointExecutionPolicy(timeoutMs = 60_000, maxPayloadBytes = 2_000_000)
+                executionPolicy = EndpointExecutionPolicy(timeoutMs = 120_000, maxPayloadBytes = 200_000_000, allowChunkedTransfer = true)
             ) { request ->
                 val result = buildService().handleBlocking(this, request, WireProtocol.OPENAI_CHAT)
                 PluginResult(
                     status = result.status,
                     headers = result.headers,
-                    body = RelayResponse(result.body)
+                    body = result.body
                 )
             }
-            post<JsonObject, String>(
+            post<JsonObject, Any>(
                 "/responses",
                 doc = OpenApiDoc(summary = "OpenAI Responses compatible relay", tags = listOf("ai-gateway", "airelay", "openai-responses"), errorStatuses = setOf(400, 401, 402, 403, 429, 503)),
-                executionPolicy = EndpointExecutionPolicy(timeoutMs = 60_000, maxPayloadBytes = 2_000_000)
+                executionPolicy = EndpointExecutionPolicy(timeoutMs = 120_000, maxPayloadBytes = 200_000_000, allowChunkedTransfer = true)
             ) { request ->
                 val result = buildService().handleBlocking(this, request, WireProtocol.OPENAI_RESPONSES)
                 PluginResult(
@@ -372,10 +372,10 @@ class AIRelayPlugin : StandardKeelPlugin {
                     body = result.body
                 )
             }
-            post<JsonObject, String>(
+            post<JsonObject, Any>(
                 "/messages",
                 doc = OpenApiDoc(summary = "Anthropic Messages compatible relay", tags = listOf("ai-gateway", "airelay", "anthropic"), errorStatuses = setOf(400, 401, 402, 403, 429, 503)),
-                executionPolicy = EndpointExecutionPolicy(timeoutMs = 60_000, maxPayloadBytes = 2_000_000)
+                executionPolicy = EndpointExecutionPolicy(timeoutMs = 120_000, maxPayloadBytes = 200_000_000, allowChunkedTransfer = true)
             ) { request ->
                 val result = buildService().handleBlocking(this, request, WireProtocol.ANTHROPIC_MESSAGES)
                 PluginResult(
@@ -465,7 +465,7 @@ class AIRelayPlugin : StandardKeelPlugin {
             ) { request ->
                 val service = buildService()
                 val result = service.countTokens(this, request)
-                PluginResult(status = result.status, headers = result.headers, body = result.body)
+                PluginResult(status = result.status, headers = result.headers, body = result.body.toString())
             }
             // ---- Batches ---- (handled by raw proxy routes above)
         }

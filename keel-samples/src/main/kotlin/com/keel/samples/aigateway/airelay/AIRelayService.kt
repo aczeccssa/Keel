@@ -26,12 +26,14 @@ import com.keel.samples.aigateway.airelay.protocol.IrRequest
 import com.keel.samples.aigateway.airelay.protocol.IrStreamEvent
 import com.keel.samples.aigateway.airelay.protocol.ProtocolTranscoder
 import com.keel.samples.aigateway.airelay.protocol.WireProtocol
+import com.keel.samples.aigateway.airelay.protocol.anthropic.AnthropicErrorMapper
 import com.keel.samples.aigateway.airelay.protocol.anthropic.AnthropicStreamObserver
 import com.keel.samples.aigateway.airelay.protocol.anthropic.AnthropicStreamOutcome
 import com.keel.samples.aigateway.airelay.protocol.openai.responses.ResponsesStreamObserver
 import com.keel.samples.aigateway.airelay.protocol.obj
 import com.keel.samples.aigateway.airelay.protocol.string
 import com.keel.samples.aigateway.airelay.protocol.textOf
+import com.keel.samples.aigateway.airelay.upstream.OpenedUpstreamStream
 import com.keel.samples.aigateway.airelay.upstream.UpstreamHttpClient
 import com.keel.samples.aigateway.airelay.upstream.RawProxyRequest
 import com.keel.samples.aigateway.airelay.upstream.RawProxyResponse
@@ -41,7 +43,7 @@ import com.keel.samples.aigateway.airelay.usage.CostCalculator
 import com.keel.samples.aigateway.airelay.usage.TokenEstimator
 import kotlinx.coroutines.flow.asFlow
 import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.toList
+import kotlinx.coroutines.flow.onEach
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -54,7 +56,7 @@ import kotlinx.serialization.json.jsonPrimitive
 data class RelayResult(
     val status: Int = 200,
     val headers: Map<String, List<String>> = emptyMap(),
-    val body: String
+    val body: Any
 )
 
 class AIRelayService(
@@ -297,39 +299,131 @@ class AIRelayService(
         started: kotlinx.datetime.Instant,
         extraHeaders: Map<String, List<String>>
     ): RelayResult {
-        val selection = poolChainManager.selectCandidates(keyContext.verified.routingGroupId, ir.model).firstOrNull()
-            ?: return protocolError(clientProtocol, 503, "api_error", "All upstream pools exhausted")
-        val upstreamHeaders = upstreamHeaderOverrides(context, selection.provider.protocol, ir)
-        val upstreamRequest = buildUpstreamRequest(rawRequest, clientProtocol, selection.provider.protocol, ir.copy(model = selection.upstreamModel, stream = true))
-        selection.keyState.currentConcurrency.incrementAndGet()
-        val upstreamStream = upstreamClient.stream(selection, upstreamRequest, upstreamHeaders)
-        val anthropicObserver = if (selection.provider.protocol == WireProtocol.ANTHROPIC_MESSAGES) AnthropicStreamObserver() else null
-        val responsesObserver = if (selection.provider.protocol == WireProtocol.OPENAI_RESPONSES) ResponsesStreamObserver() else null
-        val rawEvents = upstreamStream.toList()
-        rawEvents.forEach { event ->
-            anthropicObserver?.observe(event)
-            responsesObserver?.observe(event)
+        val candidates = poolChainManager.selectCandidates(keyContext.verified.routingGroupId, ir.model)
+        if (candidates.isEmpty()) {
+            val detail = poolChainManager.explainAvailability(keyContext.verified.routingGroupId, ir.model)
+            System.err.println("airelay_pool_exhausted model=${ir.model} client=$clientProtocol stream=true detail=$detail")
+            usageRecorder.record(
+                rejectionRecord(
+                    key = keyContext.verified,
+                    clientProtocol = clientProtocol,
+                    ir = ir,
+                    status = 503,
+                    errorCode = "pool_exhausted",
+                    errorDetail = detail,
+                    started = started,
+                    streamed = true
+                )
+            )
+            return poolExhaustedError(clientProtocol, ir.model, keyContext.verified.routingGroupId)
         }
-        var lastUsage = TokenUsage()
-        val outputText = StringBuilder()
-        val decodedEvents = transcoder.decodeStream(selection.provider.protocol, rawEvents.asFlow()).map { event ->
-            when (event) {
-                is IrStreamEvent.UsageUpdate -> lastUsage = event.usage
-                is IrStreamEvent.MessageDelta -> lastUsage = event.usage
-                is IrStreamEvent.ResponseDone -> lastUsage = event.finalUsage
-                is IrStreamEvent.ResponseStart -> if (event.usage.totalTokens > 0) lastUsage = event.usage
-                is IrStreamEvent.TextDelta -> outputText.append(event.delta)
-                else -> Unit
+
+        var failoverCount = 0
+        var lastError: Throwable? = null
+        for (selection in candidates) {
+            val upstreamHeaders = upstreamHeaderOverrides(context, selection.provider.protocol, ir)
+            val upstreamRequest = buildUpstreamRequest(
+                rawRequest,
+                clientProtocol,
+                selection.provider.protocol,
+                ir.copy(model = selection.upstreamModel, stream = true)
+            )
+            selection.keyState.currentConcurrency.incrementAndGet()
+            var handedOff = false
+            try {
+                val opened = upstreamClient.openStream(selection, upstreamRequest, upstreamHeaders)
+                val anthropicObserver = if (selection.provider.protocol == WireProtocol.ANTHROPIC_MESSAGES) AnthropicStreamObserver() else null
+                val responsesObserver = if (selection.provider.protocol == WireProtocol.OPENAI_RESPONSES) ResponsesStreamObserver() else null
+                var lastUsage = TokenUsage()
+                val outputText = StringBuilder()
+                val observedRaw = opened.events.onEach { event ->
+                    anthropicObserver?.observe(event)
+                    responsesObserver?.observe(event)
+                }
+                val decodedEvents = transcoder.decodeStream(selection.provider.protocol, observedRaw).onEach { event ->
+                    when (event) {
+                        is IrStreamEvent.UsageUpdate -> lastUsage = event.usage
+                        is IrStreamEvent.MessageDelta -> lastUsage = event.usage
+                        is IrStreamEvent.ResponseDone -> lastUsage = event.finalUsage
+                        is IrStreamEvent.ResponseStart -> if (event.usage.totalTokens > 0) lastUsage = event.usage
+                        is IrStreamEvent.TextDelta -> outputText.append(event.delta)
+                        else -> Unit
+                    }
+                }
+                val clientEvents = transcoder.encodeStream(clientProtocol, decodedEvents)
+                val headers = extraHeaders.toMutableMap()
+                headers["X-Upstream-Protocol"] = listOf(selection.provider.protocol.name)
+                headers["Content-Type"] = listOf("text/event-stream")
+                handedOff = true
+                return RelayResult(
+                    status = 200,
+                    headers = headers,
+                    body = RelaySseContent(clientEvents) { completionError ->
+                        finalizeStreamRelay(
+                            selection = selection,
+                            keyContext = keyContext,
+                            clientProtocol = clientProtocol,
+                            ir = ir,
+                            started = started,
+                            failoverCount = failoverCount,
+                            completionError = completionError,
+                            lastUsage = lastUsage,
+                            outputText = outputText.toString(),
+                            anthropicObserver = anthropicObserver,
+                            responsesObserver = responsesObserver,
+                        )
+                    }
+                )
+            } catch (error: UpstreamHttpException) {
+                System.err.println("airelay_error model=${ir.model} client=${clientProtocol} upstream=${selection.provider.protocol} status=${error.status} error=upstream_${error.status} message=${(error.message ?: "").take(180)}")
+                poolChainManager.markFailure(selection, error.status, error.message, error.retryAfterSeconds)
+                lastError = error
+                failoverCount += 1
+                if (error.status in 400..499 && error.status != 429) break
+            } catch (error: Throwable) {
+                System.err.println("airelay_error model=${ir.model} client=${clientProtocol} upstream=${selection.provider.protocol} status=500 error=${error.javaClass.simpleName?.take(64)} message=${(error.message ?: "").take(180)}")
+                poolChainManager.markFailure(selection, null, error.message)
+                lastError = error
+                failoverCount += 1
+            } finally {
+                if (!handedOff) {
+                    selection.keyState.currentConcurrency.decrementAndGet()
+                }
             }
-            event
-        }.toList()
-        return try {
-            val collected = if (sameProtocolPassThrough(clientProtocol, selection.provider.protocol)) {
-                renderSse(rawEvents)
-            } else {
-                val clientEvents = transcoder.encodeStream(clientProtocol, decodedEvents.asFlow())
-                renderSse(clientEvents.toList())
-            }
+        }
+
+        val detail = poolChainManager.explainAvailability(keyContext.verified.routingGroupId, ir.model)
+        System.err.println("airelay_pool_exhausted model=${ir.model} client=$clientProtocol stream=true detail=$detail")
+        usageRecorder.record(
+            rejectionRecord(
+                key = keyContext.verified,
+                clientProtocol = clientProtocol,
+                ir = ir,
+                status = 503,
+                errorCode = shortErrorCode(lastError),
+                errorDetail = detail,
+                started = started,
+                streamed = true,
+                failoverCount = failoverCount
+            )
+        )
+        return poolExhaustedError(clientProtocol, ir.model, keyContext.verified.routingGroupId)
+    }
+
+    private suspend fun finalizeStreamRelay(
+        selection: com.keel.samples.aigateway.airelay.pool.PoolSelection,
+        keyContext: KeyContext,
+        clientProtocol: WireProtocol,
+        ir: IrRequest,
+        started: kotlinx.datetime.Instant,
+        failoverCount: Int,
+        completionError: Throwable?,
+        lastUsage: TokenUsage,
+        outputText: String,
+        anthropicObserver: AnthropicStreamObserver?,
+        responsesObserver: ResponsesStreamObserver?,
+    ) {
+        try {
             val streamOutcome = anthropicObserver?.outcome(transportStatus = 200)
                 ?: responsesObserver?.outcome(transportStatus = 200)?.let { ro ->
                     AnthropicStreamOutcome(
@@ -344,30 +438,43 @@ class AIRelayService(
                         model = ro.model,
                     )
                 }
+                ?: completionError?.let { error ->
+                    val code = if (isClientDisconnect(error)) "client_disconnect" else "stream_transport_error"
+                    AnthropicStreamOutcome(
+                        transportStatus = 499,
+                        semanticStatus = 499,
+                        outcome = RequestOutcome.ERROR,
+                        errorType = code,
+                        errorMessage = error.message ?: error::class.simpleName,
+                        usage = TokenUsage(),
+                        usageSource = UsageSource.NONE,
+                        requestId = null,
+                        model = null,
+                    )
+                }
+
             val isSemanticError = streamOutcome?.outcome == RequestOutcome.ERROR
             val effectiveUsage = if (streamOutcome != null && isSemanticError) {
-                if (streamOutcome.usageSource != com.keel.contract.ai.UsageSource.NONE) streamOutcome.usage else TokenUsage()
+                if (streamOutcome.usageSource != UsageSource.NONE) streamOutcome.usage else TokenUsage()
             } else {
-                normalizeUsage(ir, lastUsage, outputText.toString())
+                normalizeUsage(ir, lastUsage, outputText)
             }
             val usageSource = when {
-                streamOutcome != null -> if (isSemanticError && streamOutcome.usageSource == com.keel.contract.ai.UsageSource.NONE) com.keel.contract.ai.UsageSource.NONE else streamOutcome.usageSource
-                effectiveUsage.totalTokens > 0 || effectiveUsage.cacheCreationInputTokens > 0 || effectiveUsage.cacheReadInputTokens > 0 -> com.keel.contract.ai.UsageSource.PROVIDER
-                else -> com.keel.contract.ai.UsageSource.NONE
+                streamOutcome != null -> if (isSemanticError && streamOutcome.usageSource == UsageSource.NONE) UsageSource.NONE else streamOutcome.usageSource
+                effectiveUsage.totalTokens > 0 || effectiveUsage.cacheCreationInputTokens > 0 || effectiveUsage.cacheReadInputTokens > 0 -> UsageSource.PROVIDER
+                else -> UsageSource.NONE
             }
             val semanticStatus = streamOutcome?.semanticStatus ?: 200
             val errorCode = streamOutcome?.errorType
-            val effectiveCost = if (isSemanticError && usageSource == com.keel.contract.ai.UsageSource.NONE) {
+            val errorDetail = streamOutcome?.errorMessage ?: completionError?.message
+            val effectiveCost = if (isSemanticError && usageSource == UsageSource.NONE) {
                 CostBreakdown()
             } else {
                 costCalculator.calculate(selection.resolvedModel, effectiveUsage, keyContext.verified.userGroupId, variantKeyFor(ir))
             }
 
-            // Charge customer only for successful streams or streams with real provider usage.
-            val creditHeaders = if (isSemanticError && usageSource == com.keel.contract.ai.UsageSource.NONE) {
-                emptyMap()
-            } else {
-                try {
+            if (!(isSemanticError && usageSource == UsageSource.NONE)) {
+                runCatching {
                     chargeCustomerCredits(
                         keyContext,
                         selection,
@@ -379,15 +486,13 @@ class AIRelayService(
                         streamOutcome?.requestId ?: "stream-${started.epochSeconds}",
                         variantKeyFor(ir)
                     )
-                } catch (error: Throwable) {
+                }.onFailure { error ->
+                    System.err.println("airelay_accounting_error model=${ir.model} client=${clientProtocol} message=${(error.message ?: "").take(180)}")
                     recordLocalAccountingFailure(keyContext.verified, clientProtocol, ir, started, error)
-                    poolChainManager.markSuccess(selection)
-                    return protocolError(clientProtocol, 500, "api_error", localAccountingMessage(error))
                 }
             }
 
-            poolChainManager.markSuccess(selection)
-            try {
+            runCatching {
                 usageRecorder.record(
                     UsageRecordInput(
                         keyId = keyContext.verified.keyId,
@@ -405,32 +510,28 @@ class AIRelayService(
                         status = semanticStatus,
                         errorCode = errorCode,
                         streamed = true,
-                        failoverCount = 0,
+                        failoverCount = failoverCount,
                         transportStatus = streamOutcome?.transportStatus ?: 200,
                         outcome = streamOutcome?.outcome ?: RequestOutcome.SUCCESS,
                         usageSource = usageSource,
+                        errorDetail = errorDetail?.take(4_000),
                     )
                 )
-            } catch (error: Throwable) {
-                return protocolError(clientProtocol, 500, "api_error", localAccountingMessage(error))
             }
 
-            val headers = (extraHeaders + creditHeaders).toMutableMap()
-            headers["X-Upstream-Protocol"] = listOf(selection.provider.protocol.name)
-            headers["X-Cost-USD"] = listOf(effectiveCost.totalCostUsd.toString())
-            headers["Content-Type"] = listOf("text/event-stream")
-            RelayResult(status = semanticStatus, headers = headers, body = collected)
-        } catch (error: UpstreamHttpException) {
-            System.err.println("airelay_error model=${ir.model} client=${clientProtocol} upstream=${selection.provider.protocol} status=${error.status} error=upstream_${error.status} message=${(error.message ?: "").take(180)}")
-            poolChainManager.markFailure(selection, error.status, error.message, error.retryAfterSeconds)
-            throw error
-        } catch (error: Throwable) {
-            System.err.println("airelay_error model=${ir.model} client=${clientProtocol} upstream=${selection.provider.protocol} status=500 error=${error.javaClass.simpleName?.take(64)} message=${(error.message ?: "").take(180)}")
-            poolChainManager.markFailure(selection, null, error.message)
-            throw error
+            if (completionError == null || isClientDisconnect(completionError)) {
+                poolChainManager.markSuccess(selection)
+            } else {
+                poolChainManager.markFailure(selection, null, completionError.message)
+            }
         } finally {
             selection.keyState.currentConcurrency.decrementAndGet()
         }
+    }
+
+    private fun isClientDisconnect(error: Throwable): Boolean {
+        val message = error.message?.lowercase().orEmpty()
+        return message.contains("broken pipe") || message.contains("connection reset") || message.contains("channel was closed")
     }
 
     /** Charge the customer for usage, if this was a customer-authenticated request. */
@@ -755,7 +856,7 @@ class AIRelayService(
                 status = error.status,
                 headers = error.headers,
                 contentType = "application/json",
-                body = error.body.toByteArray()
+                body = error.body.toString().encodeToByteArray()
             )
         }
         val keyContext = verifyKey(context) ?: return com.keel.kernel.plugin.RawPluginResponse(
@@ -846,18 +947,7 @@ class AIRelayService(
 
     private fun renderSse(events: List<io.ktor.sse.ServerSentEvent>): String = buildString {
         events.forEach { event ->
-            event.id?.let { append("id: ").append(it).append('\n') }
-            event.event?.let { append("event: ").append(it).append('\n') }
-            event.retry?.let { append("retry: ").append(it).append('\n') }
-            val data = event.data.orEmpty()
-            if (data.isEmpty()) {
-                append("data:").append('\n')
-            } else {
-                data.lineSequence().forEach { line ->
-                    append("data: ").append(line).append('\n')
-                }
-            }
-            append('\n')
+            append(renderServerSentEvent(event))
         }
     }
 }

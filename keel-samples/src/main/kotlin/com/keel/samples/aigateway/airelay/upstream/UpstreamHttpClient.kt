@@ -19,11 +19,11 @@ interface UpstreamHttpClient {
         request: JsonObject,
         extraHeaders: Map<String, String> = emptyMap()
     ): UpstreamResponse
-    fun stream(
+    suspend fun openStream(
         selection: PoolSelection,
         request: JsonObject,
         extraHeaders: Map<String, String> = emptyMap()
-    ): Flow<ServerSentEvent>
+    ): OpenedUpstreamStream
     suspend fun countTokens(
         selection: PoolSelection,
         request: JsonObject,
@@ -40,6 +40,12 @@ data class UpstreamResponse(
     val status: Int,
     val body: JsonObject,
     val headers: Map<String, List<String>> = emptyMap()
+)
+
+data class OpenedUpstreamStream(
+    val status: Int,
+    val headers: Map<String, List<String>> = emptyMap(),
+    val events: Flow<ServerSentEvent>
 )
 
 /** Result of a channel reachability/auth probe (the admin "Test" action). */
@@ -99,39 +105,47 @@ class MockableUpstreamHttpClient(
         return UpstreamResponse(200, mockResponse(selection, request, usageOverrides[selection.keyState.key.keyId]))
     }
 
-    override fun stream(
+    override suspend fun openStream(
         selection: PoolSelection,
         request: JsonObject,
         extraHeaders: Map<String, String>
-    ): Flow<ServerSentEvent> = flow {
+    ): OpenedUpstreamStream {
         failureOverrides[selection.keyState.key.keyId]?.let { throw it.toException() }
         streamEventOverrides[selection.keyState.key.keyId]?.let { events ->
-            events.forEach { emit(it) }
-            return@flow
+            return OpenedUpstreamStream(
+                status = 200,
+                events = flow {
+                    events.forEach { emit(it) }
+                }
+            )
         }
         if (!selection.provider.baseUrl.startsWith("mock://")) {
             val real = realClient
                 ?: throw UpstreamHttpException(501, "Real upstream HTTP streaming is not configured in this sample run")
-            real.stream(selection, request, extraHeaders).collect { emit(it) }
-            return@flow
+            return real.openStream(selection, request, extraHeaders)
         }
-        when (selection.provider.protocol) {
-            WireProtocol.OPENAI_CHAT -> {
-                emit(ServerSentEvent(data = """{"choices":[{"delta":{"content":"mock "}}]}"""))
-                emit(ServerSentEvent(data = """{"choices":[{"delta":{"content":"response"}}]}"""))
-                emit(ServerSentEvent(data = "[DONE]"))
+        return OpenedUpstreamStream(
+            status = 200,
+            events = flow {
+                when (selection.provider.protocol) {
+                    WireProtocol.OPENAI_CHAT -> {
+                        emit(ServerSentEvent(data = """{"choices":[{"delta":{"content":"mock "}}]}"""))
+                        emit(ServerSentEvent(data = """{"choices":[{"delta":{"content":"response"}}]}"""))
+                        emit(ServerSentEvent(data = "[DONE]"))
+                    }
+                    WireProtocol.OPENAI_RESPONSES -> {
+                        emit(ServerSentEvent(data = """{"type":"response.output_text.delta","delta":"mock "}""", event = "response.output_text.delta"))
+                        emit(ServerSentEvent(data = """{"type":"response.output_text.delta","delta":"response"}""", event = "response.output_text.delta"))
+                        emit(ServerSentEvent(data = """{"type":"response.completed"}""", event = "response.completed"))
+                    }
+                    WireProtocol.ANTHROPIC_MESSAGES -> {
+                        emit(ServerSentEvent(data = """{"type":"content_block_delta","delta":{"type":"text_delta","text":"mock "}}""", event = "content_block_delta"))
+                        emit(ServerSentEvent(data = """{"type":"content_block_delta","delta":{"type":"text_delta","text":"response"}}""", event = "content_block_delta"))
+                        emit(ServerSentEvent(data = """{"type":"message_stop"}""", event = "message_stop"))
+                    }
+                }
             }
-            WireProtocol.OPENAI_RESPONSES -> {
-                emit(ServerSentEvent(data = """{"type":"response.output_text.delta","delta":"mock "}""", event = "response.output_text.delta"))
-                emit(ServerSentEvent(data = """{"type":"response.output_text.delta","delta":"response"}""", event = "response.output_text.delta"))
-                emit(ServerSentEvent(data = """{"type":"response.completed"}""", event = "response.completed"))
-            }
-            WireProtocol.ANTHROPIC_MESSAGES -> {
-                emit(ServerSentEvent(data = """{"type":"content_block_delta","delta":{"type":"text_delta","text":"mock "}}""", event = "content_block_delta"))
-                emit(ServerSentEvent(data = """{"type":"content_block_delta","delta":{"type":"text_delta","text":"response"}}""", event = "content_block_delta"))
-                emit(ServerSentEvent(data = """{"type":"message_stop"}""", event = "message_stop"))
-            }
-        }
+        )
     }
 
     override suspend fun countTokens(

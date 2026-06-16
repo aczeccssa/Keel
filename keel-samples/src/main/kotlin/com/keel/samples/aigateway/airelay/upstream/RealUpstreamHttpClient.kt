@@ -1,5 +1,7 @@
 package com.keel.samples.aigateway.airelay.upstream
 
+import com.keel.samples.aigateway.airelay.SseChunkDecoder
+import com.keel.samples.aigateway.airelay.parseSseBlock
 import com.keel.samples.aigateway.airelay.pool.PoolSelection
 import com.keel.samples.aigateway.airelay.protocol.WireProtocol
 import com.keel.samples.aigateway.airelay.protocol.int
@@ -20,6 +22,8 @@ import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
 import io.ktor.http.contentType
 import io.ktor.sse.ServerSentEvent
+import io.ktor.utils.io.ByteReadChannel
+import io.ktor.utils.io.readUTF8Line
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.serialization.json.Json
@@ -196,11 +200,11 @@ class RealUpstreamHttpClient private constructor(
         return JsonObject(responseFields)
     }
 
-    override fun stream(
+    override suspend fun openStream(
         selection: PoolSelection,
         request: JsonObject,
         extraHeaders: Map<String, String>
-    ): Flow<ServerSentEvent> = flow {
+    ): OpenedUpstreamStream {
         val url = endpointUrl(selection, stream = true)
         val apiKey = resolveApiKey(selection)
         val response = client.post(url) {
@@ -219,32 +223,33 @@ class RealUpstreamHttpClient private constructor(
             contentType(ContentType.Application.Json)
             setBody(json.encodeToString(JsonObject.serializer(), request))
         }
-        val bodyText = response.bodyAsText()
-
-        // Non-2xx: emit a synthetic error event so codecs and observers can detect it
         if (response.status.value >= 400) {
+            val bodyText = response.bodyAsText()
             val errorJson = runCatching { json.parseToJsonElement(bodyText).jsonObject }.getOrNull()
             val errorMessage = errorJson?.obj("error")?.string("message")
                 ?: errorJson?.string("message")
                 ?: "Upstream error: HTTP ${response.status.value}"
-            emit(ServerSentEvent(
-                data = json.encodeToString(buildJsonObject {
-                    put("type", JsonPrimitive("error"))
-                    put("message", JsonPrimitive(errorMessage))
-                    put("code", JsonPrimitive(response.status.value.toString()))
-                }),
-                event = "error"
-            ))
-            return@flow
+            throw UpstreamHttpException(response.status.value, errorMessage)
         }
-
-        // The CIO client returns the full body once the server closes the connection. The
-        // body is a sequence of SSE blocks separated by \n\n; within each block, lines of
-        // the form `event:`, `data:`, `id:`, `retry:`. We parse one event at a time.
-        for (block in bodyText.split("\n\n")) {
-            val event = parseSseBlock(block) ?: continue
-            emit(event)
-        }
+        val headers: Map<String, List<String>> = response.headers.entries()
+            .groupBy({ it.key }, { it.value })
+            .mapValues { it.value.flatten() }
+        return OpenedUpstreamStream(
+            status = response.status.value,
+            headers = headers,
+            events = flow {
+                val decoder = SseChunkDecoder()
+                val channel: ByteReadChannel = response.body()
+                while (true) {
+                    val line = channel.readUTF8Line() ?: break
+                    decoder.appendAll("$line\n").forEach { emit(it) }
+                    if (line.isEmpty()) {
+                        decoder.appendAll("\n").forEach { emit(it) }
+                    }
+                }
+                decoder.flush()?.let { emit(it) }
+            }
+        )
     }
 
     override suspend fun countTokens(
@@ -275,28 +280,6 @@ class RealUpstreamHttpClient private constructor(
                 )
             }
         return UpstreamResponse(status = response.status.value, body = body)
-    }
-
-    private fun parseSseBlock(block: String): ServerSentEvent? {
-        if (block.isBlank()) return null
-        var eventName: String? = null
-        var data: String? = null
-        var id: String? = null
-        var retry: Long? = null
-        for (raw in block.lineSequence()) {
-            val line = raw.trimEnd('\r')
-            if (line.isEmpty()) continue
-            val idx = line.indexOf(':')
-            val (key, value) = if (idx == -1) line to "" else line.substring(0, idx) to line.substring(idx + 1).trimStart()
-            when (key) {
-                "event" -> eventName = value
-                "data" -> data = if (data == null) value else data + "\n" + value
-                "id" -> id = value
-                "retry" -> retry = value.toLongOrNull()
-            }
-        }
-        if (data == null && eventName == null && id == null && retry == null) return null
-        return ServerSentEvent(data = data ?: "", event = eventName, id = id, retry = retry)
     }
 
     private fun resolveApiKey(selection: PoolSelection): String {
