@@ -499,10 +499,13 @@ class AIRelayPlugin : StandardKeelPlugin {
                 "/config",
                 doc = OpenApiDoc(summary = "Get pool chain configuration", tags = listOf("ai-gateway", "airelay", "admin"))
             ) {
-                PluginResult(body = PoolConfigResponse(
-                    chains = settings.chains,
-                    pricings = settings.pricings
-                ))
+                val service = configService
+                PluginResult(
+                    body = PoolConfigResponse(
+                        chains = service?.chains ?: settings.chains,
+                        pricings = service?.pricings ?: settings.pricings
+                    )
+                )
             }
 
             // ---- Routing Group CRUD — NewAPI-style pools ----

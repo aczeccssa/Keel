@@ -2,6 +2,7 @@ package com.keel.kernel.observability
 
 import com.keel.kernel.logging.KeelLoggerService
 import com.keel.kernel.logging.LogLevel
+import com.keel.kernel.logging.ObservabilityExternalLogBuffer
 import com.keel.kernel.plugin.PluginGeneration
 import com.keel.kernel.plugin.PluginHealthState
 import com.keel.kernel.plugin.PluginLifecycleState
@@ -26,12 +27,16 @@ class ObservabilityHubTest {
     fun setUp() {
         logger.clear()
         logger.setLevel(LogLevel.DEBUG)
+        ObservabilityExternalLogBuffer.clear()
+        System.setProperty("keel.observability.readLogFile", "false")
     }
 
     @AfterTest
     fun tearDown() {
         logger.clear()
         logger.setLevel(LogLevel.INFO)
+        ObservabilityExternalLogBuffer.clear()
+        System.clearProperty("keel.observability.readLogFile")
     }
 
     @Test
@@ -271,6 +276,75 @@ class ObservabilityHubTest {
         assertNotNull(item.meta)
         assertTrue(item.payload.jsonObject["traceId"]!!.jsonPrimitive.content.startsWith("trace-"))
         assertEquals("auth-plugin", item.meta.jsonObject["service"]!!.jsonPrimitive.content)
+    }
+
+    @Test
+    fun logExplorerSnapshotSuppressesGeneratedWatchNoiseByDefault() {
+        val hub = ObservabilityHub()
+        hub.setPluginSnapshotProvider {
+            listOf(pluginSnapshot(pluginId = "auth-plugin", displayName = "Auth Gateway"))
+        }
+
+        logger.log(LogLevel.INFO, "Kernel", "Module change detected at /workspace/keel-samples/cache/log/application.log")
+        logger.log(LogLevel.INFO, "ConfigHotReloader", "Module file changed: /workspace/keel-samples/cache/log/application.log (MODIFIED)")
+        logger.log(LogLevel.ERROR, "auth-plugin.http", "Inventory write failed traceId=trace-124 spanId=span-8")
+
+        val defaultSnapshot = hub.logExplorerSnapshot(
+            page = 1,
+            pageSize = 20,
+            windowKey = "1h",
+            sinceEpochMs = System.currentTimeMillis() - 60_000
+        )
+
+        assertEquals(1, defaultSnapshot.page.total)
+        assertEquals(listOf("auth-plugin.http"), defaultSnapshot.page.items.map { it.source })
+
+        val queriedSnapshot = hub.logExplorerSnapshot(
+            query = "module file changed",
+            page = 1,
+            pageSize = 20,
+            windowKey = "1h",
+            sinceEpochMs = System.currentTimeMillis() - 60_000
+        )
+
+        assertEquals(1, queriedSnapshot.page.total)
+        assertEquals("ConfigHotReloader", queriedSnapshot.page.items.single().source)
+    }
+
+    @Test
+    fun logExplorerSnapshotIncludesExternalRuntimeLogsFromLogbackBridge() {
+        val hub = ObservabilityHub()
+        hub.setPluginSnapshotProvider {
+            listOf(pluginSnapshot(pluginId = "airelay", displayName = "AI Relay"))
+        }
+
+        ObservabilityExternalLogBuffer.record(
+            timestamp = System.currentTimeMillis(),
+            level = "DEBUG",
+            loggerName = "com.zaxxer.hikari.pool.PoolBase",
+            message = "HikariPool-2 - Reset (autoCommit) on connection conn2: url=jdbc:h2:file:/Users/a/.keel/keel-data/aigateway_airelay user=SA",
+            threadName = "eventLoopGroupProxy-4-69"
+        )
+        ObservabilityExternalLogBuffer.record(
+            timestamp = System.currentTimeMillis(),
+            level = "DEBUG",
+            loggerName = "Exposed",
+            message = "SELECT AIRELAY_CHANNEL.CREATED_AT FROM AIRELAY_CHANNEL",
+            threadName = "eventLoopGroupProxy-4-69"
+        )
+
+        val snapshot = hub.logExplorerSnapshot(
+            query = "airelay",
+            page = 1,
+            pageSize = 20,
+            windowKey = "1h",
+            sinceEpochMs = System.currentTimeMillis() - 60_000
+        )
+
+        assertEquals(2, snapshot.page.total)
+        assertTrue(snapshot.page.items.any { it.source == "com.zaxxer.hikari.pool.PoolBase" })
+        assertTrue(snapshot.page.items.any { it.source == "Exposed" })
+        assertTrue(snapshot.page.items.any { it.pluginId == "airelay" })
     }
 
     @Test

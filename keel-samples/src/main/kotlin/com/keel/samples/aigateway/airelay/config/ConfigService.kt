@@ -22,9 +22,11 @@ class ConfigService(
     private val repository: ChannelRepository
 ) {
     private val managerRef = AtomicReference<PoolChainManager>(PoolChainManager(emptyList()))
+    private val chainsRef = AtomicReference<List<PoolChainConfig>>(emptyList())
     private val pricingRef = AtomicReference<List<ModelPricing>>(emptyList())
 
     val poolChainManager: PoolChainManager get() = managerRef.get()
+    val chains: List<PoolChainConfig> get() = chainsRef.get()
     val pricings: List<ModelPricing> get() = pricingRef.get()
 
     /** Rebuild the live config from the DB. Call after any channel/model mutation. */
@@ -91,6 +93,7 @@ class ConfigService(
         }.filter { it.model !in standaloneModels }.distinctBy { it.model }
         val pricing = standalone + fromChannels
         managerRef.set(PoolChainManager(chains))
+        chainsRef.set(chains)
         pricingRef.set(pricing)
     }
 

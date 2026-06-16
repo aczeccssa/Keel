@@ -95,6 +95,7 @@ data class UsageRecordInput(
     val transportStatus: Int = status,
     val outcome: RequestOutcome = if (status >= 400) RequestOutcome.ERROR else RequestOutcome.SUCCESS,
     val usageSource: UsageSource = if (usage.totalTokens > 0 || usage.cacheCreationInputTokens > 0 || usage.cacheReadInputTokens > 0) UsageSource.PROVIDER else UsageSource.NONE,
+    val errorDetail: String? = null,
 )
 
 @Serializable
@@ -147,6 +148,14 @@ data class UsageRecordView(
     val model: String,
     val provider: String,
     val status: Int,
+    val transportStatus: Int = status,
+    val outcome: String = if (status >= 400) "ERROR" else "SUCCESS",
+    val errorCode: String? = null,
+    val errorDetail: String? = null,
+    val upstreamKeyId: String? = null,
+    val poolLevelId: String? = null,
+    val streamed: Boolean = false,
+    val failoverCount: Int = 0,
     val totalTokens: Int,
     val totalCostUsd: Double,
     val latencyMs: Long,
@@ -237,6 +246,7 @@ data class PoolKeyHealth(
     val totalRequests: Long,
     val totalFailures: Long,
     val currentConcurrency: Int,
+    val maxConcurrency: Int,
     val cooldownUntilEpochMs: Long?,
     val lastError: String?
 )
@@ -251,7 +261,8 @@ data class RateLimitSnapshot(
     val bucketCount: Int,
     val totalAllowed: Long,
     val totalRejected: Long,
-    val topBuckets: List<RateLimitBucketView>
+    val topBuckets: List<RateLimitBucketView>,
+    val recentRejections: List<RateLimitRejectionView> = emptyList()
 )
 
 @Serializable
@@ -264,4 +275,14 @@ data class RateLimitBucketView(
     val totalAllowed: Long,
     val totalRejected: Long,
     val resetAtEpochMs: Long
+)
+
+@Serializable
+data class RateLimitRejectionView(
+    val ruleId: String,
+    val dimension: String,
+    val value: String,
+    val reason: String,
+    val retryAfterSeconds: Long,
+    val createdAtEpochMs: Long
 )

@@ -4,6 +4,7 @@ import com.keel.kernel.hotreload.DevHotReloadEngine
 import com.keel.kernel.loader.DefaultPluginLoader
 import com.keel.kernel.logging.KeelLoggerService
 import com.keel.kernel.logging.LogLevel
+import com.keel.kernel.logging.ObservabilityLogbackAppenderInstaller
 import com.keel.kernel.logging.ScopeLogger
 import com.keel.kernel.observability.KeelObservability
 import com.keel.kernel.observability.ObservabilityHub
@@ -60,7 +61,6 @@ internal class KernelApplicationInstaller(
         if (ConfigHotReloader.isDevelopmentMode()) {
             loggerService.setLevel(LogLevel.DEBUG)
         }
-
         koin.loadModules(
             listOf(
                 module {
@@ -111,6 +111,7 @@ internal class KernelLifecycleHooks(
 ) {
     fun install(app: Application) {
         app.monitor.subscribe(ApplicationStarted) {
+            ObservabilityLogbackAppenderInstaller.install()
             logger.info("Kernel started")
             BannerPrinter.print(port = serverPort(), enablePluginHotReload = enablePluginHotReload)
             kotlinx.coroutines.runBlocking {

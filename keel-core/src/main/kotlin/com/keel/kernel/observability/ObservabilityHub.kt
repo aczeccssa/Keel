@@ -3,6 +3,9 @@ package com.keel.kernel.observability
 import com.keel.kernel.logging.KeelLoggerService
 import com.keel.kernel.logging.LogEntry
 import com.keel.kernel.logging.LogLevel
+import com.keel.kernel.logging.ObservabilityExternalLogEntry
+import com.keel.kernel.logging.ObservabilityExternalLogBuffer
+import com.keel.kernel.logging.ObservabilityLogFileReader
 import com.keel.kernel.plugin.PluginNodeAssetMetadata
 import com.keel.kernel.plugin.PluginRuntimeSnapshot
 import kotlinx.coroutines.CoroutineScope
@@ -1061,7 +1064,11 @@ class ObservabilityHub(
         val queryLower = query?.trim()?.lowercase()?.takeIf { it.isNotEmpty() }
         val sourceLower = source?.trim()?.lowercase()?.takeIf { it.isNotEmpty() }
         val levelUpper = level?.trim()?.uppercase()?.takeIf { it.isNotEmpty() }
+        val suppressGeneratedWatchNoise = queryLower == null && sourceLower == null
         return recentStructuredLogs().filter { record ->
+            if (suppressGeneratedWatchNoise && isGeneratedWatchNoise(record)) {
+                return@filter false
+            }
             val matchesLevel = levelUpper == null || record.level.uppercase() == levelUpper
             val matchesSource = sourceLower == null || record.source.lowercase().contains(sourceLower)
             val matchesSince = sinceEpochMs == null || record.timestamp >= sinceEpochMs
@@ -1083,6 +1090,22 @@ class ObservabilityHub(
             val matchesQuery = queryLower == null || haystack.contains(queryLower)
             matchesLevel && matchesSource && matchesSince && matchesQuery
         }.asReversed()
+    }
+
+    private fun isGeneratedWatchNoise(record: StructuredLogRecord): Boolean {
+        val source = record.source.lowercase()
+        if (source != "kernel" && source != "confighotreloader") {
+            return false
+        }
+        val message = record.message.lowercase()
+        val isWatchMessage = message.contains("module change detected at") || message.contains("module file changed:")
+        if (!isWatchMessage) {
+            return false
+        }
+        return message.contains("/cache/log/")
+            || message.contains("/cache/logs/")
+            || message.contains("/logs/")
+            || message.contains(".log")
     }
 
     private fun buildLogHistogram(items: List<StructuredLogRecord>, sinceEpochMs: Long?): LogHistogramSnapshot {
@@ -1169,6 +1192,61 @@ class ObservabilityHub(
         )
     }
 
+    private fun enrichExternalLog(entry: ObservabilityExternalLogEntry): StructuredLogRecord {
+        val pluginId = inferPluginId(entry.loggerName, entry.message)
+        val traceId = extractToken(entry.message, "trace")
+        val spanId = extractToken(entry.message, "span")
+        val cluster = extractToken(entry.message, "cluster")
+        val instance = extractToken(entry.message, "instance")
+        val service = pluginId ?: entry.loggerName.substringBefore('.').takeIf { it.isNotBlank() }
+        val attributes = buildMap {
+            pluginId?.let { put("pluginId", it) }
+            traceId?.let { put("traceId", it) }
+            spanId?.let { put("spanId", it) }
+            cluster?.let { put("cluster", it) }
+            instance?.let { put("instance", it) }
+            put("source", entry.loggerName)
+            put("thread", entry.threadName)
+        }
+        val payload = buildJsonObject {
+            traceId?.let { put("traceId", it) }
+            spanId?.let { put("spanId", it) }
+            pluginId?.let { put("pluginId", it) }
+            cluster?.let { put("cluster", it) }
+            instance?.let { put("instance", it) }
+            put("message", entry.message)
+            put("thread", entry.threadName)
+            entry.throwable?.let { put("throwable", it) }
+        }.takeIf { it.isNotEmpty() }
+        val meta = buildJsonObject {
+            service?.let { put("service", it) }
+            cluster?.let { put("cluster", it) }
+            instance?.let { put("instance", it) }
+            put("thread", entry.threadName)
+            put("timestamp", entry.timestamp)
+            put("level", entry.level)
+            putJsonObject("attributes") {
+                attributes.forEach { (key, value) -> put(key, JsonPrimitive(value)) }
+            }
+        }
+        return StructuredLogRecord(
+            timestamp = entry.timestamp,
+            level = entry.level,
+            source = entry.loggerName,
+            message = entry.message,
+            throwable = entry.throwable,
+            traceId = traceId,
+            spanId = spanId,
+            pluginId = pluginId,
+            service = service,
+            cluster = cluster,
+            instance = instance,
+            payload = payload,
+            meta = meta,
+            attributes = attributes
+        )
+    }
+
     private fun inferPluginId(source: String, message: String): String? {
         val sourceLower = source.lowercase()
         val messageLower = message.lowercase()
@@ -1190,6 +1268,18 @@ class ObservabilityHub(
         KeelLoggerService.getInstance()
             .getRecentLogs(limit = 1000)
             .map(::enrichLog)
+            .forEach { record ->
+                merged[record.snapshotKey()] = record
+            }
+
+        ObservabilityExternalLogBuffer.snapshot(limit = 2000)
+            .map(::enrichExternalLog)
+            .forEach { record ->
+                merged[record.snapshotKey()] = record
+            }
+
+        ObservabilityLogFileReader.recentApplicationLogs(limit = 2000)
+            .map(::enrichExternalLog)
             .forEach { record ->
                 merged[record.snapshotKey()] = record
             }

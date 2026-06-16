@@ -111,7 +111,17 @@ class AIRelayService(
 
         val rateDecision = rateLimitGate.tryAcquire(rateLimitContext(context, keyContext.verified, ir))
         if (rateDecision is RateLimitDecision.Rejected) {
-            usageRecorder.record(rejectionRecord(keyContext.verified, clientProtocol, ir, 429, "rate_limited", started))
+            usageRecorder.record(
+                rejectionRecord(
+                    key = keyContext.verified,
+                    clientProtocol = clientProtocol,
+                    ir = ir,
+                    status = 429,
+                    errorCode = "rate_limited",
+                    errorDetail = "ruleId=${rateDecision.ruleId} retryAfterSeconds=${rateDecision.retryAfterSeconds}",
+                    started = started
+                )
+            )
             return rateLimitError(clientProtocol, rateDecision)
         }
         val extraHeaders = mutableMapOf<String, List<String>>()
@@ -146,7 +156,27 @@ class AIRelayService(
     ): RelayResult {
         var failoverCount = 0
         var lastError: Throwable? = null
-        for (selection in poolChainManager.selectCandidates(keyContext.verified.routingGroupId, ir.model)) {
+        val candidates = poolChainManager.selectCandidates(keyContext.verified.routingGroupId, ir.model)
+        if (candidates.isEmpty()) {
+            System.err.println(
+                "airelay_pool_exhausted model=${ir.model} client=$clientProtocol detail=${
+                    poolChainManager.explainAvailability(keyContext.verified.routingGroupId, ir.model)
+                }"
+            )
+            usageRecorder.record(
+                rejectionRecord(
+                    key = keyContext.verified,
+                    clientProtocol = clientProtocol,
+                    ir = ir,
+                    status = 503,
+                    errorCode = "pool_exhausted",
+                    errorDetail = poolChainManager.explainAvailability(keyContext.verified.routingGroupId, ir.model),
+                    started = started
+                )
+            )
+            return poolExhaustedError(clientProtocol, ir.model, keyContext.verified.routingGroupId)
+        }
+        for (selection in candidates) {
             val upstreamHeaders = upstreamHeaderOverrides(context, selection.provider.protocol, ir)
             val upstreamRequest = buildUpstreamRequest(rawRequest, clientProtocol, selection.provider.protocol, ir.copy(model = selection.upstreamModel, stream = false))
             selection.keyState.currentConcurrency.incrementAndGet()
@@ -219,6 +249,7 @@ class AIRelayService(
                 poolChainManager.markSuccess(selection)
 
                 val headers = (extraHeaders + creditHeaders).toMutableMap()
+                headers["Content-Type"] = listOf("application/json")
                 headers["X-Cost-USD"] = listOf(cost.totalCostUsd.toString())
                 headers["X-Upstream-Protocol"] = listOf(selection.provider.protocol.name)
                 headers["X-Request-Id"] = listOf(upstreamIr.id)
@@ -237,8 +268,24 @@ class AIRelayService(
                 selection.keyState.currentConcurrency.decrementAndGet()
             }
         }
-        usageRecorder.record(rejectionRecord(keyContext.verified, clientProtocol, ir, 503, shortErrorCode(lastError), started))
-        return protocolError(clientProtocol, 503, "api_error", "All upstream pools exhausted")
+        System.err.println(
+            "airelay_pool_exhausted model=${ir.model} client=$clientProtocol detail=${
+                poolChainManager.explainAvailability(keyContext.verified.routingGroupId, ir.model)
+            }"
+        )
+        usageRecorder.record(
+            rejectionRecord(
+                key = keyContext.verified,
+                clientProtocol = clientProtocol,
+                ir = ir,
+                status = 503,
+                errorCode = shortErrorCode(lastError),
+                errorDetail = poolChainManager.explainAvailability(keyContext.verified.routingGroupId, ir.model),
+                started = started,
+                failoverCount = failoverCount
+            )
+        )
+        return poolExhaustedError(clientProtocol, ir.model, keyContext.verified.routingGroupId)
     }
 
     private suspend fun handleStream(
@@ -629,13 +676,26 @@ class AIRelayService(
 
     private fun rejectionRecord(
         key: VerifiedApiKey, clientProtocol: WireProtocol, ir: IrRequest,
-        status: Int, errorCode: String?, started: kotlinx.datetime.Instant
+        status: Int,
+        errorCode: String?,
+        started: kotlinx.datetime.Instant,
+        errorDetail: String? = null,
+        streamed: Boolean = false,
+        failoverCount: Int = 0,
+        upstreamProtocol: String = "none",
+        provider: String = "none",
+        poolLevelId: String? = null,
+        upstreamKeyId: String? = null,
     ) = UsageRecordInput(
         keyId = key.keyId, userId = key.userId, userGroupId = key.userGroupId,
-        clientProtocol = clientProtocol.name, upstreamProtocol = "none",
-        model = ir.model, provider = "none", poolLevelId = null, upstreamKeyId = null,
+        clientProtocol = clientProtocol.name, upstreamProtocol = upstreamProtocol,
+        model = ir.model, provider = provider, poolLevelId = poolLevelId, upstreamKeyId = upstreamKeyId,
         usage = TokenUsage(), cost = CostBreakdown(), latencyMs = elapsedMs(started),
-        status = status, errorCode = errorCode?.take(64), streamed = false, failoverCount = 0
+        status = status,
+        errorCode = errorCode?.take(64),
+        streamed = streamed,
+        failoverCount = failoverCount,
+        errorDetail = errorDetail?.take(4_000)
     )
 
     private suspend fun recordLocalAccountingFailure(
@@ -661,6 +721,27 @@ class AIRelayService(
 
     private fun elapsedMs(started: kotlinx.datetime.Instant): Long =
         (kotlinx.datetime.Clock.System.now() - started).inWholeMilliseconds
+
+    private fun poolExhaustedError(
+        clientProtocol: WireProtocol,
+        model: String,
+        groupId: String,
+    ): RelayResult {
+        val detail = poolChainManager.explainAvailability(groupId, model)
+        return protocolError(
+            clientProtocol = clientProtocol,
+            status = 503,
+            errorType = "api_error",
+            message = "All upstream pools exhausted for model $model because the routed upstream capacity is currently saturated.",
+            headers = errorHeaders("pool_exhausted", detail)
+        )
+    }
+
+    private fun errorHeaders(errorCode: String, detail: String? = null): Map<String, List<String>> = buildMap {
+        put("Content-Type", listOf("application/json"))
+        put("X-Keel-Error-Code", listOf(errorCode))
+        detail?.takeIf { it.isNotBlank() }?.let { put("X-Keel-Error-Detail", listOf(it.take(512))) }
+    }
 
     suspend fun proxyAnthropicRaw(
         context: KeelRequestContext,
@@ -729,10 +810,16 @@ class AIRelayService(
         }
     }
 
-    private fun protocolError(clientProtocol: WireProtocol, status: Int, errorType: String, message: String): RelayResult =
+    private fun protocolError(
+        clientProtocol: WireProtocol,
+        status: Int,
+        errorType: String,
+        message: String,
+        headers: Map<String, List<String>> = mapOf("Content-Type" to listOf("application/json"))
+    ): RelayResult =
         RelayResult(
             status = status,
-            headers = mapOf("Content-Type" to listOf("application/json")),
+            headers = headers,
             body = when (clientProtocol) {
                 WireProtocol.ANTHROPIC_MESSAGES -> anthropicErrorBody(errorType, message)
                 else -> openAiErrorBody(errorType, message)

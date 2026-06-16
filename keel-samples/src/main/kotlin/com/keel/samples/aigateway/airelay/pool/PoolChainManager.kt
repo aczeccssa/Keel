@@ -119,6 +119,37 @@ class PoolChainManager(
         }
     }
 
+    fun explainAvailability(groupId: String, model: String): String = runCatching {
+        val chain = resolveChainForModel(groupId, model)
+        val routedModel = resolveRequestedModel(chain, model)
+        val matchedAlias = routedModel?.let { resolveMatchedAlias(chain, model, it) }
+        val targets = routedModel?.let { resolveTargetModels(chain, model, it, matchedAlias) }.orEmpty()
+        val now = System.currentTimeMillis()
+        val levels = states.getValue(chain).entries
+            .sortedBy { it.key.levelIndex }
+            .joinToString("; ") { (level, keyStates) ->
+                keyStates.forEach { maybeRecover(it, now) }
+                val keySummary = keyStates.joinToString(", ") { state ->
+                    val provider = providerFor(level, state.key)
+                    val targetMatch = if (targets.isEmpty()) {
+                        "none"
+                    } else {
+                        targets.joinToString("|") { target ->
+                            val channelOk = target.channelId == null || state.key.keyId == target.channelId
+                            val modelOk = supportsTargetModel(state.key, target.model)
+                            "${target.model}@${target.channelId ?: "*"}(channel=$channelOk,model=$modelOk)"
+                        }
+                    }
+                    "${state.key.keyId}[status=${state.status.get()},cc=${state.currentConcurrency.get()}/${state.key.maxConcurrency},provider=${provider.protocol},target=$targetMatch,lastError=${state.lastError ?: "-"}]"
+                }
+                "${level.levelId}{$keySummary}"
+            }
+        val targetSummary = targets.joinToString(",") { "${it.model}@${it.channelId ?: "*"}" }.ifBlank { "-" }
+        "group=$groupId chain=${chain.chainId} requested=$model routed=${routedModel ?: "-"} alias=${matchedAlias?.aliasName ?: "-"} targets=$targetSummary levels=$levels"
+    }.getOrElse { error ->
+        "group=$groupId requested=$model explain_error=${error.message ?: error::class.simpleName ?: "unknown"}"
+    }
+
     fun selectProtocolCandidates(groupId: String, protocol: WireProtocol): List<PoolSelection> {
         val chain = chainByGroup[groupId]
             ?: throw PluginApiException(404, "No routing group $groupId")
@@ -236,15 +267,16 @@ class PoolChainManager(
                             disabledKeys = keyStates.count { it.status.get() == KeyStatus.DISABLED },
                             keys = keyStates.map { state ->
                                 PoolKeyHealth(
-                                    keyId = state.key.keyId,
-                                    status = state.status.get().name,
-                                    totalRequests = state.totalRequests.get(),
-                                    totalFailures = state.totalFailures.get(),
-                                    currentConcurrency = state.currentConcurrency.get(),
-                                    cooldownUntilEpochMs = state.cooldownUntilEpochMs.takeIf { it > 0L },
-                                    lastError = state.lastError
-                                )
-                            }
+                                keyId = state.key.keyId,
+                                status = state.status.get().name,
+                                totalRequests = state.totalRequests.get(),
+                                totalFailures = state.totalFailures.get(),
+                                currentConcurrency = state.currentConcurrency.get(),
+                                maxConcurrency = state.key.maxConcurrency,
+                                cooldownUntilEpochMs = state.cooldownUntilEpochMs.takeIf { it > 0L },
+                                lastError = state.lastError
+                            )
+                        }
                         )
                     }
                 )

@@ -63,6 +63,7 @@ object UsageRecordsTable : AuditPluginTable("token", "usage_records") {
     val outcome: Column<String> = varchar("outcome", 16).default("SUCCESS")
     val usageSource: Column<String> = varchar("usage_source", 16).default("PROVIDER")
     val errorCode: Column<String?> = varchar("error_code", 128).nullable()
+    val errorDetail: Column<String?> = text("error_detail").nullable()
     val streamed: Column<Boolean> = bool("streamed")
     val failoverCount: Column<Int> = integer("failover_count")
 

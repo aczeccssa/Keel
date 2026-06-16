@@ -169,7 +169,7 @@ class ConfigHotReloader private constructor(
                         processExistingDirectoryContents(fullPath, watchedDirectory.registration)
                     }
 
-                    if (!Files.isDirectory(fullPath) && !shouldWatchFile(fileName)) {
+                    if (!Files.isDirectory(fullPath) && !shouldWatchFile(fullPath, watchedDirectory.registration)) {
                         return@forEach
                     }
 
@@ -269,7 +269,7 @@ class ConfigHotReloader private constructor(
             Files.walk(root)
         }.use { paths ->
             paths.filter(Files::isRegularFile).forEach { file ->
-                if (!shouldWatchFile(file.fileName.toString())) {
+                if (!shouldWatchFile(file, registration)) {
                     return@forEach
                 }
                 scope.launch {
@@ -279,8 +279,23 @@ class ConfigHotReloader private constructor(
         }
     }
 
-    private fun shouldWatchFile(fileName: String): Boolean {
+    private fun shouldWatchFile(fullPath: Path, registration: WatchDirectoryRegistration): Boolean {
+        val relativePath = runCatching {
+            registration.root.relativize(fullPath).toString().replace(File.separatorChar, '/')
+        }.getOrNull() ?: fullPath.fileName?.toString().orEmpty()
+        if (isGeneratedRuntimeLogPath(relativePath)) {
+            return false
+        }
+        val fileName = fullPath.fileName?.toString().orEmpty()
         return fileFilters.isEmpty() || fileFilters.any { it(fileName) }
+    }
+
+    private fun isGeneratedRuntimeLogPath(relativePath: String): Boolean {
+        val normalized = relativePath.lowercase()
+        return normalized.startsWith("cache/log/")
+            || normalized.startsWith("cache/logs/")
+            || normalized.startsWith("logs/")
+            || normalized.endsWith(".log")
     }
 
     companion object {

@@ -50,6 +50,7 @@ class TokenRepository(
             exec("ALTER TABLE token_usage_records ADD COLUMN IF NOT EXISTS outcome VARCHAR(16) NOT NULL DEFAULT 'SUCCESS'")
             exec("ALTER TABLE token_usage_records ADD COLUMN IF NOT EXISTS usage_source VARCHAR(16) NOT NULL DEFAULT 'PROVIDER'")
             exec("ALTER TABLE token_usage_records ALTER COLUMN error_code VARCHAR(128)")
+            exec("ALTER TABLE token_usage_records ADD COLUMN IF NOT EXISTS error_detail CLOB")
         }
     }
 
@@ -289,6 +290,7 @@ class TokenRepository(
                 it[outcome] = record.outcome.name
                 it[usageSource] = record.usageSource.name
                 it[errorCode] = record.errorCode?.take(128)
+                it[errorDetail] = record.errorDetail?.take(4_000)
                 it[streamed] = record.streamed
                 it[failoverCount] = record.failoverCount
                 it[createdAt] = now
@@ -446,7 +448,12 @@ class TokenRepository(
         transportStatus = this[UsageRecordsTable.transportStatus],
         outcome = this[UsageRecordsTable.outcome],
         errorCode = this[UsageRecordsTable.errorCode],
+        errorDetail = this[UsageRecordsTable.errorDetail],
         usageSource = this[UsageRecordsTable.usageSource],
+        upstreamKeyId = this[UsageRecordsTable.upstreamKeyId],
+        poolLevelId = this[UsageRecordsTable.poolLevelId],
+        streamed = this[UsageRecordsTable.streamed],
+        failoverCount = this[UsageRecordsTable.failoverCount],
         usage = usage(),
         cost = cost(),
         latencyMs = this[UsageRecordsTable.latencyMs],
@@ -460,6 +467,14 @@ class TokenRepository(
         model = this[UsageRecordsTable.model],
         provider = this[UsageRecordsTable.provider],
         status = this[UsageRecordsTable.status],
+        transportStatus = this[UsageRecordsTable.transportStatus],
+        outcome = this[UsageRecordsTable.outcome],
+        errorCode = this[UsageRecordsTable.errorCode],
+        errorDetail = this[UsageRecordsTable.errorDetail],
+        upstreamKeyId = this[UsageRecordsTable.upstreamKeyId],
+        poolLevelId = this[UsageRecordsTable.poolLevelId],
+        streamed = this[UsageRecordsTable.streamed],
+        failoverCount = this[UsageRecordsTable.failoverCount],
         totalTokens = this[UsageRecordsTable.promptTokens] + this[UsageRecordsTable.completionTokens],
         totalCostUsd = this[UsageRecordsTable.totalCostUsd],
         latencyMs = this[UsageRecordsTable.latencyMs],

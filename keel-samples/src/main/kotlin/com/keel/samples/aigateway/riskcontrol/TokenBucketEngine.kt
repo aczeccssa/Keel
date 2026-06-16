@@ -4,8 +4,10 @@ import com.keel.contract.ai.RateLimitBucketView
 import com.keel.contract.ai.RateLimitContext
 import com.keel.contract.ai.RateLimitDecision
 import com.keel.contract.ai.RateLimitGate
+import com.keel.contract.ai.RateLimitRejectionView
 import com.keel.contract.ai.RateLimitSnapshot
 import com.keel.contract.ai.RateLimitSnapshotProvider
+import java.util.concurrent.ConcurrentLinkedDeque
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
@@ -18,6 +20,7 @@ class TokenBucketEngine(
     private val buckets = ConcurrentHashMap<String, Bucket>()
     private val totalAllowed = AtomicLong(0)
     private val totalRejected = AtomicLong(0)
+    private val recentRejections = ConcurrentLinkedDeque<RateLimitRejectionView>()
 
     override suspend fun tryAcquire(context: RateLimitContext): RateLimitDecision {
         val matched = rules.get()
@@ -94,7 +97,8 @@ class TokenBucketEngine(
             bucketCount = buckets.size,
             totalAllowed = totalAllowed.get(),
             totalRejected = totalRejected.get(),
-            topBuckets = views
+            topBuckets = views,
+            recentRejections = recentRejections.toList().take(20)
         )
     }
 
@@ -120,8 +124,26 @@ class TokenBucketEngine(
                     limit = rule.capacity,
                     retryAfterSeconds = retryAfter,
                     ruleId = rule.ruleId
-                )
+                ).also {
+                    rememberRejection(
+                        RateLimitRejectionView(
+                            ruleId = rule.ruleId,
+                            dimension = rule.dimension.name,
+                            value = bucket.key.value,
+                            reason = "rate_limited",
+                            retryAfterSeconds = retryAfter,
+                            createdAtEpochMs = now
+                        )
+                    )
+                }
             }
+        }
+    }
+
+    private fun rememberRejection(view: RateLimitRejectionView) {
+        recentRejections.addFirst(view)
+        while (recentRejections.size > 50) {
+            recentRejections.pollLast()
         }
     }
 
