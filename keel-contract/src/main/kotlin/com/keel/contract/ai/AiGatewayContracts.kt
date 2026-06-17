@@ -143,8 +143,12 @@ data class CostSummary(
 @Serializable
 data class UsageRecordView(
     val recordId: String,
+    val requestId: String? = null,
     val userId: String,
     val keyId: String,
+    val groupId: String? = null,
+    val channelId: String? = null,
+    val channelName: String? = null,
     val model: String,
     val provider: String,
     val status: Int,
@@ -156,8 +160,11 @@ data class UsageRecordView(
     val poolLevelId: String? = null,
     val streamed: Boolean = false,
     val failoverCount: Int = 0,
+    val usage: TokenUsage,
+    val cost: CostBreakdown,
     val totalTokens: Int,
     val totalCostUsd: Double,
+    val cacheHitRate: Double? = null,
     val latencyMs: Long,
     val createdAt: String
 )

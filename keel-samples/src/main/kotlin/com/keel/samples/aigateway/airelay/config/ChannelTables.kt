@@ -97,3 +97,18 @@ object ChannelModelTable : AuditPluginTable("airelay", "model") {
 
     override val primaryKey = PrimaryKey(modelId)
 }
+
+/**
+ * Channel test history — stores the result of each channel test (admin "Test" button).
+ * Used to render the "near 60 tests" sparkline and calculate 7-day availability.
+ */
+object ChannelTestHistoryTable : AuditPluginTable("airelay", "channel_test_history") {
+    val testId: Column<String> = varchar("test_id", 32)
+    val channelId: Column<String> = varchar("channel_id", 32).index()
+    val testedAt: Column<Long> = long("tested_at")
+    val success: Column<Boolean> = bool("success")
+    val latencyMs: Column<Long?> = long("latency_ms").nullable()
+    val errorMessage: Column<String?> = varchar("error_message", 500).nullable()
+
+    override val primaryKey = PrimaryKey(testId)
+}

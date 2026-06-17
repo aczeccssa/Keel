@@ -33,6 +33,7 @@ export class AiGatewayApi {
   usageGlobal() { return requestJson(`${TOKEN_BASE}/admin/usage/global`, { token: this.token }); }
   usageRecords(limit = 200) { return requestJson(`${TOKEN_BASE}/admin/usage/records?limit=${limit}`, { token: this.token }); }
   channels() { return requestJson(`${AIRELAY_BASE}/admin/channels`, { token: this.token }); }
+  channelStats(channelId: string, window = '7d') { return requestJson(`${AIRELAY_BASE}/admin/channels/${channelId}/stats?window=${window}`, { token: this.token }); }
   groups() { return requestJson(`${AIRELAY_BASE}/admin/groups`, { token: this.token }); }
   keys() { return requestJson(`${TOKEN_BASE}/admin/keys`, { token: this.token }); }
   pricing() { return requestJson(`${AIRELAY_BASE}/admin/pricing`, { token: this.token }); }

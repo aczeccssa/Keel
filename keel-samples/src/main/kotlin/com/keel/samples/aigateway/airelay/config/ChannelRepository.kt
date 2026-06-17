@@ -190,6 +190,13 @@ data class UpsertModelRequest(
     val enabled: Boolean = true
 )
 
+@Serializable
+data class TestRecord(
+    val timestamp: Long,
+    val ok: Boolean,
+    val latencyMs: Long?
+)
+
 /**
  * CRUD over [ChannelTable] / [ChannelModelTable]. Keys are stored encrypted via [SecretCipher];
  * the plaintext key never leaves this layer except when [decryptedKey] is called by the config
@@ -209,6 +216,7 @@ class ChannelRepository(
             GroupAliasTable,
             ChannelTable,
             ChannelModelTable,
+            ChannelTestHistoryTable,
             ModelPricingTable,
             ModelPricingTierTable
         )
@@ -507,6 +515,42 @@ class ChannelRepository(
             it[lastTestLatencyMs] = latencyMs
             it[lastTestError] = error?.take(500)
         }
+        // Record to test history table
+        val testId = "tst-${randomSuffix()}"
+        ChannelTestHistoryTable.insert {
+            it[ChannelTestHistoryTable.testId] = testId
+            it[ChannelTestHistoryTable.channelId] = channelId
+            it[testedAt] = System.currentTimeMillis()
+            it[success] = error == null
+            it[ChannelTestHistoryTable.latencyMs] = latencyMs
+            it[errorMessage] = error?.take(500)
+        }
+        // Keep only last 100 tests per channel
+        val toKeep = ChannelTestHistoryTable.selectAll()
+            .where { ChannelTestHistoryTable.channelId eq channelId }
+            .orderBy(ChannelTestHistoryTable.testedAt to SortOrder.DESC)
+            .limit(100)
+            .map { it[ChannelTestHistoryTable.testId] }
+            .toSet()
+        if (toKeep.isNotEmpty()) {
+            ChannelTestHistoryTable.deleteWhere {
+                (ChannelTestHistoryTable.channelId eq channelId) and (ChannelTestHistoryTable.testId notInList toKeep)
+            }
+        }
+    }
+
+    fun getRecentTests(channelId: String, limit: Int = 60): List<TestRecord> = database.transaction {
+        ChannelTestHistoryTable.selectAll()
+            .where { ChannelTestHistoryTable.channelId eq channelId }
+            .orderBy(ChannelTestHistoryTable.testedAt to SortOrder.DESC)
+            .limit(limit)
+            .map {
+                TestRecord(
+                    timestamp = it[ChannelTestHistoryTable.testedAt],
+                    ok = it[ChannelTestHistoryTable.success],
+                    latencyMs = it[ChannelTestHistoryTable.latencyMs]
+                )
+            }
     }
 
     fun count(): Long = database.transaction { ChannelTable.selectAll().count() }

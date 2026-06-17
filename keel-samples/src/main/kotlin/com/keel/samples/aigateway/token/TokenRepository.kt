@@ -440,6 +440,7 @@ class TokenRepository(
 
     private fun ResultRow.toUsageRecordView(): TokenUsageRecordView = TokenUsageRecordView(
         recordId = this[UsageRecordsTable.recordId],
+        requestId = this[UsageRecordsTable.recordId],
         keyId = this[UsageRecordsTable.keyId],
         userId = this[UsageRecordsTable.userId],
         model = this[UsageRecordsTable.model],
@@ -462,8 +463,12 @@ class TokenRepository(
 
     private fun ResultRow.toUsageView(): UsageRecordView = UsageRecordView(
         recordId = this[UsageRecordsTable.recordId],
+        requestId = this[UsageRecordsTable.recordId],
         userId = this[UsageRecordsTable.userId],
         keyId = this[UsageRecordsTable.keyId],
+        groupId = this[UsageRecordsTable.poolLevelId],
+        channelId = this[UsageRecordsTable.upstreamKeyId],
+        channelName = null, // Enriched by controller if needed
         model = this[UsageRecordsTable.model],
         provider = this[UsageRecordsTable.provider],
         status = this[UsageRecordsTable.status],
@@ -475,8 +480,11 @@ class TokenRepository(
         poolLevelId = this[UsageRecordsTable.poolLevelId],
         streamed = this[UsageRecordsTable.streamed],
         failoverCount = this[UsageRecordsTable.failoverCount],
+        usage = usage(),
+        cost = cost(),
         totalTokens = this[UsageRecordsTable.promptTokens] + this[UsageRecordsTable.completionTokens],
         totalCostUsd = this[UsageRecordsTable.totalCostUsd],
+        cacheHitRate = this[UsageRecordsTable.cacheHitRate],
         latencyMs = this[UsageRecordsTable.latencyMs],
         createdAt = this[UsageRecordsTable.createdAt].toString()
     )

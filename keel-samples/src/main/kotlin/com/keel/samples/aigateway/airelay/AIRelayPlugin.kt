@@ -736,6 +736,17 @@ class AIRelayPlugin : StandardKeelPlugin {
                     )
                     PluginResult(body = ChannelTestResponse(result.ok, result.latencyMs, result.error, result.sample))
                 }
+                get<ChannelStatsResponse>(
+                    "/{channelId}/stats",
+                    doc = OpenApiDoc(summary = "Get channel statistics", tags = listOf("ai-gateway", "airelay", "admin"), errorStatuses = setOf(404, 503))
+                ) {
+                    val repo = channelRepository ?: throw PluginApiException(503, "Channel store unavailable")
+                    val channelId = pathParameters["channelId"] ?: throw PluginApiException(400, "Missing channelId")
+                    val channel = repo.getChannel(channelId) ?: throw PluginApiException(404, "Channel not found")
+                    val window = queryParameters["window"]?.firstOrNull() ?: "7d"
+                    val stats = calculateChannelStats(channelId, window)
+                    PluginResult(body = stats)
+                }
             }
 
             // ---- Pricing CRUD — standalone per-model rate cards ----
@@ -831,6 +842,35 @@ class AIRelayPlugin : StandardKeelPlugin {
             recentRequests = snapshot?.recentRequests.orEmpty(),
             topModels = snapshot?.topModels.orEmpty(),
             topUsers = snapshot?.topUsers.orEmpty()
+        )
+    }
+
+    private suspend fun calculateChannelStats(channelId: String, window: String): ChannelStatsResponse {
+        val repo = channelRepository ?: throw PluginApiException(503, "Channel store unavailable")
+        val usageRecorder = kernelKoin.get<UsageRecorder>()
+        val snapshot = usageRecorder.snapshot()
+
+        // Filter records for this channel (upstreamKeyId matches channelId)
+        val channelRecords = snapshot.recentRequests.filter { it.upstreamKeyId == channelId || it.channelId == channelId }
+
+        // Get test history
+        val recentTests = repo.getRecentTests(channelId, 60)
+
+        // Calculate stats
+        val successCount = channelRecords.count { it.status < 400 }
+        val successRate = if (channelRecords.isNotEmpty()) successCount.toDouble() / channelRecords.size else 0.0
+        val avgLatency = if (channelRecords.isNotEmpty()) channelRecords.map { it.latencyMs }.average().toLong() else 0L
+        val totalCost = channelRecords.sumOf { it.totalCostUsd }
+        val totalTokens = channelRecords.sumOf { it.totalTokens.toLong() }
+
+        return ChannelStatsResponse(
+            channelId = channelId,
+            successRate7d = successRate,
+            totalRequests7d = channelRecords.size.toLong(),
+            avgLatencyMs = avgLatency,
+            totalCostUsd = totalCost,
+            totalTokens = totalTokens,
+            recentTests = recentTests
         )
     }
 
@@ -1049,6 +1089,17 @@ data class DiscoverModelsResponse(
 data class ChannelModelTestRequest(
     val publicModelName: String,
     val upstreamModelName: String? = null,
+)
+
+@Serializable
+data class ChannelStatsResponse(
+    val channelId: String,
+    val successRate7d: Double,
+    val totalRequests7d: Long,
+    val avgLatencyMs: Long,
+    val totalCostUsd: Double,
+    val totalTokens: Long,
+    val recentTests: List<com.keel.samples.aigateway.airelay.config.TestRecord>
 )
 
 @Serializable

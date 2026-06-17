@@ -14,15 +14,31 @@ interface UsageRecord {
   model?: string;
   createdAt?: string;
   totalCostUsd?: number;
-  cost?: { totalCostUsd?: number; inputCostUsd?: number; outputCostUsd?: number };
-  usage?: { promptTokens?: number; completionTokens?: number };
+  cost?: {
+    totalCostUsd?: number;
+    inputCostUsd?: number;
+    outputCostUsd?: number;
+    cacheHitRate?: number;
+  };
+  usage?: {
+    promptTokens?: number;
+    completionTokens?: number;
+    cacheReadInputTokens?: number;
+    cacheCreationInputTokens?: number;
+  };
   status?: string | number;
   outcome?: string;
   errorCode?: string;
   errorDetail?: string;
   upstreamKeyId?: string;
+  channelId?: string;
+  channelName?: string;
+  poolLevelId?: string;
+  groupId?: string;
   streamed?: boolean;
   failoverCount?: number;
+  cacheHitRate?: number;
+  latencyMs?: number;
 }
 
 function renderModelRoute(model?: string) {
@@ -77,6 +93,19 @@ export function UsagePanel({ api }: { api: AiGatewayApi }) {
       render: (r) => (r.createdAt ? r.createdAt.replace('T', ' ').slice(0, 19) : '—')
     },
     {
+      key: 'group',
+      header: 'Group',
+      render: (r) => r.groupId ?? r.poolLevelId ?? '—'
+    },
+    {
+      key: 'channel',
+      header: 'Channel',
+      render: (r) => {
+        const name = r.channelName || r.channelId || r.upstreamKeyId;
+        return name ? String(name).slice(0, 20) : '—';
+      }
+    },
+    {
       key: 'model',
       header: 'Model',
       render: (r) => renderModelRoute(r.model)
@@ -129,6 +158,17 @@ export function UsagePanel({ api }: { api: AiGatewayApi }) {
       align: 'right',
       mono: true,
       render: (r) => (r.usage?.completionTokens ?? 0).toLocaleString()
+    },
+    {
+      key: 'cache',
+      header: 'Cache',
+      align: 'right',
+      mono: true,
+      render: (r) => {
+        const rate = r.cacheHitRate ?? r.cost?.cacheHitRate;
+        if (rate == null || rate === 0) return '—';
+        return `${(rate * 100).toFixed(1)}%`;
+      }
     },
     {
       key: 'cost',

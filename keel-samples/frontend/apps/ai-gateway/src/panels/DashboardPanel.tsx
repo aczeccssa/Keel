@@ -17,7 +17,21 @@ interface UsageRecord {
   model?: string;
   createdAt?: string;
   totalCostUsd?: number;
-  cost?: { totalCostUsd?: number; inputCostUsd?: number; outputCostUsd?: number };
+  cost?: {
+    totalCostUsd?: number;
+    inputCostUsd?: number;
+    outputCostUsd?: number;
+    cacheHitRate?: number;
+  };
+  usage?: {
+    promptTokens?: number;
+    completionTokens?: number;
+    cacheReadInputTokens?: number;
+    cacheCreationInputTokens?: number;
+  };
+  cacheHitRate?: number;
+  latencyMs?: number;
+  status?: number;
 }
 
 interface UsageGlobal {
@@ -67,6 +81,33 @@ export function DashboardPanel({ api }: { api: AiGatewayApi }) {
   }, [records]);
 
   const modelMix = useMemo(() => topModels.map((m) => ({ label: m.model, value: m.requests })), [topModels]);
+
+  const cacheStats = useMemo(() => {
+    const withCache = records.filter(r => {
+      const rate = r.cacheHitRate ?? r.cost?.cacheHitRate;
+      return rate != null && rate > 0;
+    });
+    const totalCacheHitRate = withCache.length > 0
+      ? withCache.reduce((sum, r) => sum + (r.cacheHitRate ?? r.cost?.cacheHitRate ?? 0), 0) / withCache.length
+      : 0;
+    return {
+      avgCacheHitRate: totalCacheHitRate,
+      recordsWithCache: withCache.length,
+      totalRecords: records.length
+    };
+  }, [records]);
+
+  const latencyStats = useMemo(() => {
+    const latencies = records.map(r => r.latencyMs).filter((l): l is number => l != null && l > 0);
+    if (latencies.length === 0) return { avg: 0, p50: 0, p95: 0, p99: 0 };
+    const sorted = [...latencies].sort((a, b) => a - b);
+    return {
+      avg: Math.round(latencies.reduce((sum, l) => sum + l, 0) / latencies.length),
+      p50: sorted[Math.floor(sorted.length * 0.5)] ?? 0,
+      p95: sorted[Math.floor(sorted.length * 0.95)] ?? 0,
+      p99: sorted[Math.floor(sorted.length * 0.99)] ?? 0
+    };
+  }, [records]);
 
   const volumeByDay = useMemo(() => {
     if (global?.requestsByDay && global.requestsByDay.length > 0) {
@@ -127,12 +168,19 @@ export function DashboardPanel({ api }: { api: AiGatewayApi }) {
             icon: 'payments',
             valueMono: true
           },
-          { label: 'Active Keys', value: (global?.activeKeys ?? 0).toLocaleString(), accent: 'muted', icon: 'vpn_key' },
           {
-            label: 'Active Customers',
-            value: (global?.activeCustomers ?? 0).toLocaleString(),
-            accent: 'accent',
-            icon: 'group'
+            label: 'Cache Hit Rate',
+            value: cacheStats.recordsWithCache > 0 ? `${(cacheStats.avgCacheHitRate * 100).toFixed(1)}%` : '—',
+            accent: 'ok',
+            icon: 'storage',
+            valueMono: true
+          },
+          {
+            label: 'Avg Latency',
+            value: latencyStats.avg > 0 ? `${latencyStats.avg} ms` : '—',
+            accent: 'muted',
+            icon: 'speed',
+            valueMono: true
           }
         ]}
       />
@@ -150,6 +198,39 @@ export function DashboardPanel({ api }: { api: AiGatewayApi }) {
           centerHint="Requests"
         />
       </div>
+      {latencyStats.avg > 0 && (
+        <section className="keel-section">
+          <SectionHeader title="Latency percentiles" description="Response time distribution" />
+          <StatGrid
+            items={[
+              {
+                label: 'P50 (Median)',
+                value: `${latencyStats.p50} ms`,
+                accent: 'muted',
+                valueMono: true
+              },
+              {
+                label: 'P95',
+                value: `${latencyStats.p95} ms`,
+                accent: latencyStats.p95 > 5000 ? 'warn' : 'muted',
+                valueMono: true
+              },
+              {
+                label: 'P99',
+                value: `${latencyStats.p99} ms`,
+                accent: latencyStats.p99 > 10000 ? 'danger' : 'muted',
+                valueMono: true
+              },
+              {
+                label: 'Average',
+                value: `${latencyStats.avg} ms`,
+                accent: 'accent',
+                valueMono: true
+              }
+            ]}
+          />
+        </section>
+      )}
       <section className="keel-section">
         <SectionHeader title="Top models" description="Highest traffic routes by request count." />
         {topModels.length === 0 ? (
