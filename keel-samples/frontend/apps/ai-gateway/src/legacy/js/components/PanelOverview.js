@@ -2,7 +2,7 @@ import { KeelElement } from './base/KeelElement.js';
 import { requestJson } from '../api.js';
 import { API } from '../config.js';
 
-export class PanelDashboard extends KeelElement {
+export class PanelOverview extends KeelElement {
     hostStyles() { return 'height:100%;'; }
 
     template() {
@@ -97,7 +97,7 @@ export class PanelDashboard extends KeelElement {
                     <ol>
                         <li><strong>Create an API Key</strong> in the <em>API Keys</em> panel &mdash; you'll get a <code>sk-keel-*</code> virtual key</li>
                         <li><strong>Send requests</strong> via OpenAI Chat, OpenAI Responses, or Anthropic Messages protocol in <em>Playground</em></li>
-                        <li><strong>Monitor costs</strong> here on this Dashboard, and check <em>Groups</em> for upstream health</li>
+                        <li><strong>Monitor costs</strong> here on this Overview, and check <em>Dashboard</em> for ops metrics</li>
                     </ol>
                 </div>
                 <keel-stat-grid data-ref="stats"></keel-stat-grid>
@@ -146,12 +146,11 @@ export class PanelDashboard extends KeelElement {
         this._liveMode = true;
         this._sse = null;
         this._pollTimer = null;
-        this.refs.hero.render({ label: 'Telemetry Overview', title: 'Dashboard', metaHtml: '' });
+        this.refs.hero.render({ label: 'Telemetry Overview', title: 'Overview', metaHtml: '' });
     }
 
     connectedCallback() {
         super.connectedCallback();
-        // Start live updates after mount
         setTimeout(() => this._startLive(), 500);
     }
 
@@ -159,7 +158,6 @@ export class PanelDashboard extends KeelElement {
         this._stopLive();
     }
 
-    /** Called by app.js live indicator toggle */
     setLiveMode(on) {
         this._liveMode = on;
         if (on) this._startLive();
@@ -170,7 +168,6 @@ export class PanelDashboard extends KeelElement {
         this._stopLive();
         if (!this._liveMode) return;
         this.refresh();
-        // Try SSE first, fall back to polling
         try {
             const base = API.airelay || API.token;
             this._sse = new EventSource(`${base}/usage/stream`);
@@ -208,7 +205,6 @@ export class PanelDashboard extends KeelElement {
     }
 
     async refresh() {
-        // Use the records endpoint which returns the full per-row TokenUsage + CostBreakdown.
         try {
             const records = await requestJson(`${API.token}/admin/usage/records?limit=200`);
             const data = await requestJson(`${API.token}/admin/usage/global`);
@@ -242,7 +238,7 @@ export class PanelDashboard extends KeelElement {
         });
         this.refs.hero.render({
             label: 'Telemetry Overview',
-            title: 'Dashboard',
+            title: 'Overview',
             metaHtml: `
                 <div class="hero-meta">
                     <span class="hero-chip">${data.totalRequests || 0} requests</span>
@@ -251,7 +247,6 @@ export class PanelDashboard extends KeelElement {
             `
         });
 
-        // ── Charts ──
         const recent = data.recentRequests || records.slice(0, 20);
         const dayBuckets = this._bucketByDay(records, 7);
         this.refs.volumeChart.render({
@@ -277,7 +272,6 @@ export class PanelDashboard extends KeelElement {
             emptyText: 'No latency data yet'
         });
 
-        // ── Tables ──
         this.refs.modelsTable.render({
             silent,
             headers: ['Model', 'Requests', 'Tokens', 'Cost'],
@@ -367,4 +361,4 @@ export class PanelDashboard extends KeelElement {
     }
 }
 
-customElements.define('ai-panel-dashboard', PanelDashboard);
+customElements.define('ai-panel-overview', PanelOverview);

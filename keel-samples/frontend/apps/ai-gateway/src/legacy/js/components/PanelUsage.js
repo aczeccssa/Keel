@@ -5,7 +5,7 @@ import { escapeHtml } from '../utils.js';
 
 /**
  * Detail view: per-request records with full token + cost breakdown.
- * Auto-refreshes silently every 15s.
+ * Filters are server-side selects (group / channel / model / status).
  */
 export class PanelUsage extends KeelElement {
     hostStyles() { return 'height:100%;'; }
@@ -14,77 +14,92 @@ export class PanelUsage extends KeelElement {
         return `
             <style>
                 .layout { display: flex; flex-direction: column; gap: 24px; height: 100%; }
-                .hero-meta {
-                    display: grid;
-                    justify-items: end;
-                    gap: 8px;
-                    padding: 4px 0;
-                }
+                .hero-meta { display: grid; justify-items: end; gap: 8px; padding: 4px 0; }
                 .hero-chip {
-                    display: inline-flex;
-                    align-items: center;
-                    padding: 7px 10px;
-                    border: 1px solid rgba(235, 231, 223, 0.18);
-                    background: rgba(11, 11, 11, 0.18);
-                    color: var(--on-accent);
-                    font-family: var(--font-mono);
-                    font-size: 10px;
-                    font-weight: 800;
-                    letter-spacing: 0.08em;
-                    text-transform: uppercase;
+                    display: inline-flex; align-items: center; padding: 7px 10px;
+                    border: 1px solid rgba(235, 231, 223, 0.18); background: rgba(11, 11, 11, 0.18);
+                    color: var(--on-accent); font-family: var(--font-mono); font-size: 10px; font-weight: 800;
+                    letter-spacing: 0.08em; text-transform: uppercase;
                 }
-                .toolbar { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+                .toolbar { display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; }
                 .toolbar .field { display: flex; flex-direction: column; gap: 4px; }
                 .toolbar label {
                     font-family: var(--font-mono); font-size: 9px; font-weight: 800;
                     letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted);
                 }
-                .toolbar input, .toolbar select {
+                .toolbar select {
                     padding: 8px 10px; border: 2px solid var(--ink);
                     background: var(--paper); color: var(--ink);
-                    font-family: var(--font-mono); font-size: 11px; min-width: 160px;
+                    font-family: var(--font-mono); font-size: 11px; min-width: 180px;
                 }
-                .toolbar input:focus, .toolbar select:focus { outline: none; box-shadow: var(--shadow-sm); }
+                .toolbar select:focus { outline: none; box-shadow: var(--shadow-sm); }
+                .clear-btn {
+                    padding: 8px 14px; border: 2px solid var(--red); background: transparent; color: var(--red);
+                    font-family: var(--font-mono); font-size: 10px; font-weight: 800; letter-spacing: .08em;
+                    text-transform: uppercase; cursor: pointer;
+                }
                 .summary {
                     display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px;
                     background: var(--surface-accent); border: 2px solid var(--ink);
                 }
-                .summary .cell {
-                    background: var(--paper); padding: 14px 12px;
-                    font-family: var(--font-mono);
+                .summary .cell { background: var(--paper); padding: 14px 12px; font-family: var(--font-mono); }
+                .summary .label { font-size: 9px; font-weight: 800; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); }
+                .summary .val { margin-top: 4px; font-family: var(--font-headline); font-size: 18px; line-height: 1; letter-spacing: -0.03em; font-feature-settings: 'tnum'; }
+
+                .table-card { background: var(--panel-strong); border: 2px solid var(--ink); flex: 1; min-height: 0; overflow: hidden; }
+                .table-scroll { overflow: auto; max-height: 70vh; }
+                table.usage { border-collapse: collapse; width: max-content; min-width: 100%; font-family: var(--font-mono); font-size: 11px; }
+                table.usage thead th {
+                    position: sticky; top: 0; z-index: 1; text-align: left; white-space: nowrap;
+                    font-size: 10px; font-weight: 800; letter-spacing: .14em; text-transform: uppercase;
+                    color: var(--on-accent); background: var(--surface-accent); padding: 11px 12px;
+                    border-right: 1px solid rgba(244,244,240,0.28);
                 }
-                .summary .label {
-                    font-size: 9px; font-weight: 800; letter-spacing: 0.12em; text-transform: uppercase;
-                    color: var(--muted);
+                table.usage tbody td {
+                    padding: 10px 12px; white-space: nowrap; border-right: 1px solid var(--ink);
+                    border-bottom: 1px solid var(--ink); color: var(--ink); vertical-align: middle;
                 }
-                .summary .val {
-                    margin-top: 4px; font-family: var(--font-headline);
-                    font-size: 18px; line-height: 1; letter-spacing: -0.03em;
-                    font-feature-settings: 'tnum';
+                table.usage tbody td:last-child, table.usage thead th:last-child { border-right: 0; }
+                table.usage tbody tr:nth-child(even) td { background: var(--color-surface-container-low, #ebe9e3); }
+                table.usage code {
+                    font-family: var(--font-mono); font-size: 10.5px; font-weight: 800; letter-spacing: .04em;
+                    background: var(--surface-accent); color: var(--on-accent); border: 1px solid var(--surface-accent); padding: 2px 6px;
                 }
-                .table-card {
-                    background: var(--panel-strong); border: 2px solid var(--ink);
-                    overflow: hidden; flex: 1; min-height: 0;
-                }
-                .table-wrap { max-height: 70vh; overflow: auto; }
+                .detail-btn { border:1px solid var(--teal); color:var(--teal); background:transparent; padding:6px 10px; font-family:var(--font-mono); font-size:10px; font-weight:800; cursor:pointer; text-transform:uppercase; }
+                .drawer-backdrop { position:fixed; inset:0; background:rgba(15,23,42,.34); z-index:950; display:none; justify-content:flex-end; }
+                .drawer-backdrop.open { display:flex; }
+                .drawer { width:min(560px, 96vw); height:100%; overflow:auto; background:var(--panel-strong); border-left:2px solid var(--ink); box-shadow:-18px 0 40px rgba(15,23,42,.2); padding:26px; }
+                .drawer-head { display:flex; justify-content:space-between; align-items:start; gap:16px; margin-bottom:20px; }
+                .drawer h3 { font-family:var(--font-headline); font-size:26px; margin:0; }
+                .drawer section { margin:20px 0; display:grid; gap:8px; }
+                .drawer section h4 { margin:0 0 4px; font-family:var(--font-mono); font-size:11px; letter-spacing:.12em; text-transform:uppercase; color:var(--muted); }
+                .kv { display:grid; grid-template-columns:140px 1fr; gap:10px; font-family:var(--font-mono); font-size:12px; }
+                .kv .k { color:var(--muted); text-transform:uppercase; font-weight:800; font-size:10px; }
+                .kv .v { word-break:break-word; }
                 .empty { text-align: center; color: var(--muted); padding: 30px; font-family: var(--font-mono); font-size: 12px; }
-                @media (max-width: 1100px) {
-                    .summary { grid-template-columns: repeat(3, 1fr); }
-                }
+                @media (max-width: 1100px) { .summary { grid-template-columns: repeat(3, 1fr); } }
             </style>
             <div class="layout" data-ref="root">
                 <keel-hero data-ref="hero"></keel-hero>
                 <div class="toolbar">
                     <div class="field">
-                        <label>Filter model</label>
-                        <input data-ref="modelFilter" placeholder="e.g. claude-sonnet-4" />
+                        <label>Group</label>
+                        <select data-ref="groupFilter"><option value="">All groups</option></select>
+                    </div>
+                    <div class="field">
+                        <label>Channel</label>
+                        <select data-ref="channelFilter"><option value="">All channels</option></select>
+                    </div>
+                    <div class="field">
+                        <label>Model</label>
+                        <select data-ref="modelFilter"><option value="">All models</option></select>
                     </div>
                     <div class="field">
                         <label>Status</label>
                         <select data-ref="statusFilter">
-                            <option value="">All</option>
-                            <option value="ok">OK (2xx/3xx)</option>
-                            <option value="err">Errors (4xx/5xx)</option>
+                            <option value="">All status</option>
+                            <option value="success">Success</option>
+                            <option value="error">Error</option>
                         </select>
                     </div>
                     <div class="field">
@@ -94,10 +109,14 @@ export class PanelUsage extends KeelElement {
                             <option selected>200</option>
                         </select>
                     </div>
+                    <button class="clear-btn" data-ref="clearBtn">Clear</button>
                 </div>
                 <div class="summary" data-ref="summary"></div>
                 <div class="table-card">
-                    <div class="table-wrap" data-ref="tableWrap"></div>
+                    <div class="table-scroll" data-ref="tableWrap"></div>
+                </div>
+                <div class="drawer-backdrop" data-ref="drawerBackdrop">
+                    <aside class="drawer" data-ref="drawer"></aside>
                 </div>
             </div>
         `;
@@ -105,39 +124,100 @@ export class PanelUsage extends KeelElement {
 
     afterMount() {
         this._records = [];
+        this._channelNameById = {};
         this._hasRendered = false;
+        this._optionsLoaded = false;
         this.refs.hero.render({ label: 'Request Ledger', title: 'Usage', metaHtml: '' });
-        this.refs.modelFilter.addEventListener('input', () => this._renderTable(true));
-        this.refs.statusFilter.addEventListener('change', () => this._renderTable(true));
+        this.refs.groupFilter.addEventListener('change', () => this.refresh());
+        this.refs.channelFilter.addEventListener('change', () => this.refresh());
+        this.refs.modelFilter.addEventListener('change', () => this.refresh());
+        this.refs.statusFilter.addEventListener('change', () => this.refresh());
         this.refs.limitFilter.addEventListener('change', () => this.refresh());
+        this.refs.clearBtn.addEventListener('click', () => {
+            this.refs.groupFilter.value = '';
+            this.refs.channelFilter.value = '';
+            this.refs.modelFilter.value = '';
+            this.refs.statusFilter.value = '';
+            this.refresh();
+        });
+        this.refs.tableWrap.addEventListener('click', (event) => {
+            const btn = event.target.closest('[data-detail]');
+            if (!btn) return;
+            const record = this._records.find(r => (r.requestId || r.recordId) === btn.dataset.detail);
+            if (record) this._showDetail(record);
+        });
+        this.refs.drawerBackdrop.addEventListener('click', (event) => {
+            if (event.target === this.refs.drawerBackdrop) this._closeDetail();
+        });
+    }
+
+    async _loadFilterOptions() {
+        if (this._optionsLoaded) return;
+        try {
+            const [groups, channels] = await Promise.all([
+                requestJson(`${API.airelay}/admin/groups`).catch(() => ({ groups: [] })),
+                requestJson(`${API.airelay}/admin/channels`).catch(() => ({ channels: [] })),
+            ]);
+            const groupList = groups.groups || [];
+            const channelList = channels.channels || [];
+            this._channelNameById = {};
+            channelList.forEach(c => { if (c.channelId) this._channelNameById[c.channelId] = c.name || c.channelId; });
+            const models = Array.from(new Set(channelList.flatMap(c => (c.models || []).map(m => m.publicModelName)).filter(Boolean))).sort();
+
+            this._fillSelect(this.refs.groupFilter, groupList.map(g => [g.groupId, g.name || g.groupId]));
+            this._fillSelect(this.refs.channelFilter, channelList.map(c => [c.channelId, c.name || c.channelId]));
+            this._fillSelect(this.refs.modelFilter, models.map(m => [m, m]));
+            this._optionsLoaded = true;
+        } catch {
+            // options are best-effort
+        }
+    }
+
+    _fillSelect(select, pairs) {
+        const current = select.value;
+        const first = select.querySelector('option');
+        select.innerHTML = '';
+        if (first) select.appendChild(first);
+        pairs.forEach(([value, label]) => {
+            const opt = document.createElement('option');
+            opt.value = value;
+            opt.textContent = label;
+            select.appendChild(opt);
+        });
+        if (current) select.value = current;
     }
 
     async refresh() {
+        await this._loadFilterOptions();
         try {
             const limit = parseInt(this.refs.limitFilter.value) || 200;
-            const data = await requestJson(`${API.token}/admin/usage/records?limit=${limit}`);
+            const params = new URLSearchParams({ limit: String(limit) });
+            const group = this.refs.groupFilter.value;
+            const channel = this.refs.channelFilter.value;
+            const model = this.refs.modelFilter.value;
+            const status = this.refs.statusFilter.value;
+            if (group) params.set('groupId', group);
+            if (channel) params.set('channelId', channel);
+            if (model) params.set('model', model);
+            if (status) params.set('statusFilter', status);
+            const data = await requestJson(`${API.token}/admin/usage/records?${params}`);
             this._records = data.records || [];
             this._renderTable(this._hasRendered);
             this._hasRendered = true;
         } catch (e) {
-            this.refs.tableWrap.innerHTML = `<div class="empty">Error: ${e.message}</div>`;
+            this.refs.tableWrap.innerHTML = `<div class="empty">Error: ${escapeHtml(e.message)}</div>`;
         }
     }
 
-    _filtered() {
-        const modelQ = (this.refs.modelFilter.value || '').toLowerCase();
-        const status = this.refs.statusFilter.value;
-        return this._records.filter(r => {
-            if (modelQ && !(r.model || '').toLowerCase().includes(modelQ)) return false;
-            if (status === 'ok' && r.status >= 400) return false;
-            if (status === 'err' && r.status < 400) return false;
-            return true;
-        });
+    _channelLabel(r) {
+        if (r.channelName) return r.channelName;
+        const id = r.channelId || r.upstreamKeyId;
+        if (!id) return '—';
+        return this._channelNameById[id] || id;
     }
 
     _renderTable(silent) {
-        const filtered = this._filtered();
-        // Summary
+        const filtered = this._records;
         const sums = filtered.reduce((acc, r) => {
             const u = r.usage || {};
             const c = r.cost || {};
@@ -154,12 +234,7 @@ export class PanelUsage extends KeelElement {
         this.refs.hero.render({
             label: 'Request Ledger',
             title: 'Usage',
-            metaHtml: `
-                <div class="hero-meta">
-                    <span class="hero-chip">${filtered.length} records</span>
-                    <span class="hero-chip">${hit} cache hit</span>
-                </div>
-            `
+            metaHtml: `<div class="hero-meta"><span class="hero-chip">${filtered.length} records</span><span class="hero-chip">${hit} cache hit</span></div>`
         });
         this.refs.summary.innerHTML = [
             this._sumCell('Records', filtered.length.toString()),
@@ -171,44 +246,95 @@ export class PanelUsage extends KeelElement {
             this._sumCell('Total Cost', '$' + sums.cost.toFixed(4)),
         ].join('');
 
-        // Table
         if (filtered.length === 0) {
             this.refs.tableWrap.innerHTML = '<div class="empty">// NO RECORDS MATCH FILTERS</div>';
             return;
         }
-        const headers = ['Time', 'Model', 'In', 'Out', 'CR', 'CW', 'CP', 'Reason', 'In$', 'Out$', 'CW$', 'CR$', 'Total$', 'Hit', 'Status', 'Latency'];
+
+        const headers = ['Model', 'Time', 'Group', 'Channel', 'In', 'Out', 'CR', 'CW', 'CP', 'Reason', 'In$', 'Out$', 'CW$', 'CR$', 'Total$', 'Hit', 'Status', 'Latency', 'Detail'];
         const rows = filtered.slice(0, 200).map(r => {
             const u = r.usage || {};
             const c = r.cost || {};
-            return [
-                `<span style="font-size:10px;">${(r.createdAt || '').slice(0, 19)}</span>`,
-                this._modelCell(r.model),
-                this._fmt(u.promptTokens),
-                this._fmt(u.completionTokens),
-                this._fmt(u.cacheReadInputTokens),
-                this._fmt(u.cacheCreationInputTokens),
-                this._fmt(u.cachedPromptTokens),
-                this._fmt(u.reasoningTokens),
-                `$${(c.inputCostUsd || 0).toFixed(5)}`,
-                `$${(c.outputCostUsd || 0).toFixed(5)}`,
-                `$${(c.cacheWriteCostUsd || 0).toFixed(5)}`,
-                `$${(c.cacheReadCostUsd || 0).toFixed(5)}`,
-                `$${(c.totalCostUsd || 0).toFixed(5)}`,
-                c.cacheHitRate != null ? `${(c.cacheHitRate * 100).toFixed(0)}%` : '—',
-                r.status >= 400
-                    ? `<span style="color:var(--red);font-weight:800;">${r.status}</span>`
-                    : `<span style="color:var(--green);font-weight:800;">${r.status || 200}</span>`,
-                `${r.latencyMs || 0}ms`
-            ];
-        });
-        // Reuse keel-data-table for in-place updates
-        let table = this.refs.tableWrap.querySelector('keel-data-table');
-        if (!table) {
-            table = document.createElement('keel-data-table');
-            this.refs.tableWrap.innerHTML = '';
-            this.refs.tableWrap.appendChild(table);
-        }
-        table.render({ silent, headers, rows, emptyHtml: '<div class="empty">// NO DATA</div>' });
+            const id = r.requestId || r.recordId || '';
+            return `<tr>
+                <td>${this._modelCell(r.model)}</td>
+                <td>${escapeHtml((r.createdAt || '').replace('T', ' ').slice(0, 19))}</td>
+                <td><code>${escapeHtml(r.groupId || r.poolLevelId || '—')}</code></td>
+                <td><code>${escapeHtml(this._channelLabel(r))}</code></td>
+                <td>${this._fmt(u.promptTokens)}</td>
+                <td>${this._fmt(u.completionTokens)}</td>
+                <td>${this._fmt(u.cacheReadInputTokens)}</td>
+                <td>${this._fmt(u.cacheCreationInputTokens)}</td>
+                <td>${this._fmt(u.cachedPromptTokens)}</td>
+                <td>${this._fmt(u.reasoningTokens)}</td>
+                <td>$${(c.inputCostUsd || 0).toFixed(5)}</td>
+                <td>$${(c.outputCostUsd || 0).toFixed(5)}</td>
+                <td>$${(c.cacheWriteCostUsd || 0).toFixed(5)}</td>
+                <td>$${(c.cacheReadCostUsd || 0).toFixed(5)}</td>
+                <td>$${(c.totalCostUsd || 0).toFixed(5)}</td>
+                <td>${c.cacheHitRate != null ? `${(c.cacheHitRate * 100).toFixed(0)}%` : '—'}</td>
+                <td>${r.status >= 400 ? `<span style="color:var(--red);font-weight:800;">${r.status}</span>` : `<span style="color:var(--green);font-weight:800;">${r.status || 200}</span>`}</td>
+                <td>${r.latencyMs || 0}ms</td>
+                <td><button class="detail-btn" data-detail="${escapeHtml(id)}">View</button></td>
+            </tr>`;
+        }).join('');
+
+        this.refs.tableWrap.innerHTML = `<table class="usage"><thead><tr>${headers.map(h => `<th>${h}</th>`).join('')}</tr></thead><tbody>${rows}</tbody></table>`;
+    }
+
+    _showDetail(record) {
+        const u = record.usage || {};
+        const c = record.cost || {};
+        const hit = (record.cacheHitRate != null ? record.cacheHitRate : c.cacheHitRate);
+        const kv = (k, v) => `<div class="kv"><span class="k">${k}</span><span class="v">${v == null || v === '' ? '—' : escapeHtml(String(v))}</span></div>`;
+        this.refs.drawer.innerHTML = `
+            <div class="drawer-head">
+                <div>
+                    <h3>Request detail</h3>
+                    <div style="color:var(--muted);font-family:var(--font-mono);font-size:11px;">Full token, cost, routing and error context.</div>
+                </div>
+                <button class="detail-btn" data-ref="drawerClose">Close</button>
+            </div>
+            <section>
+                <h4>Basic</h4>
+                ${kv('Request ID', record.requestId || record.recordId)}
+                ${kv('Timestamp', record.createdAt)}
+                ${kv('Model', record.model)}
+                ${kv('Group', record.groupId || record.poolLevelId)}
+                ${kv('Channel', this._channelLabel(record))}
+                ${kv('Status', `${record.status ?? '—'} (${record.outcome || '—'})`)}
+            </section>
+            <section>
+                <h4>Tokens</h4>
+                ${kv('Input', (u.promptTokens || 0).toLocaleString())}
+                ${kv('Output', (u.completionTokens || 0).toLocaleString())}
+                ${kv('Cache Write', (u.cacheCreationInputTokens || 0).toLocaleString())}
+                ${kv('Cache Read', (u.cacheReadInputTokens || 0).toLocaleString())}
+                ${kv('Cache Hit Rate', hit != null ? `${(hit * 100).toFixed(1)}%` : '—')}
+            </section>
+            <section>
+                <h4>Cost</h4>
+                ${kv('Input Cost', `$${(c.inputCostUsd || 0).toFixed(5)}`)}
+                ${kv('Output Cost', `$${(c.outputCostUsd || 0).toFixed(5)}`)}
+                ${kv('Cache Write Cost', `$${(c.cacheWriteCostUsd || 0).toFixed(5)}`)}
+                ${kv('Cache Read Cost', `$${(c.cacheReadCostUsd || 0).toFixed(5)}`)}
+                ${kv('Total Cost', `$${(c.totalCostUsd || record.totalCostUsd || 0).toFixed(5)}`)}
+            </section>
+            <section>
+                <h4>Performance & Errors</h4>
+                ${kv('Latency', `${record.latencyMs || 0}ms`)}
+                ${kv('Failover', record.failoverCount ?? 0)}
+                ${kv('Streamed', record.streamed ? 'yes' : 'no')}
+                ${kv('Error Code', record.errorCode)}
+                ${kv('Error Detail', record.errorDetail)}
+            </section>
+        `;
+        this.refs.drawer.querySelector('[data-ref="drawerClose"]').addEventListener('click', () => this._closeDetail());
+        this.refs.drawerBackdrop.classList.add('open');
+    }
+
+    _closeDetail() {
+        this.refs.drawerBackdrop.classList.remove('open');
     }
 
     _sumCell(label, val) {

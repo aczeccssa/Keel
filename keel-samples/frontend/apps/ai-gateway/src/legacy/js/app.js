@@ -10,8 +10,10 @@ import './components/shared/KeelHero.js';
 import './components/shared/KeelDetailList.js';
 import './components/shared/KeelChart.js';
 
+import './components/PanelOverview.js';
 import './components/PanelDashboard.js';
 import './components/PanelUsage.js';
+import './components/PanelAvailability.js';
 import './components/PanelProviders.js';
 import './components/PanelGroups.js';
 import './components/PanelKeys.js';
@@ -443,8 +445,10 @@ class AiProxyApp extends KeelElement {
                         </div>
                     </header>
                     <main class="content" data-ref="content">
+                        <ai-panel-overview class="panel" data-ref="panelOverview"></ai-panel-overview>
                         <ai-panel-dashboard class="panel" data-ref="panelDashboard"></ai-panel-dashboard>
                         <ai-panel-usage class="panel" data-ref="panelUsage"></ai-panel-usage>
+                        <ai-panel-availability class="panel" data-ref="panelAvailability"></ai-panel-availability>
                         <ai-panel-providers class="panel" data-ref="panelChannels"></ai-panel-providers>
                         <ai-panel-groups class="panel" data-ref="panelGroups"></ai-panel-groups>
                         <ai-panel-keys class="panel" data-ref="panelKeys"></ai-panel-keys>
@@ -619,11 +623,13 @@ class AiProxyApp extends KeelElement {
         const tab = TABS.find(t => t.id === state.activeTab);
         // Topbar shows a system breadcrumb (NOT the page title — the panel hero owns the title,
         // so it isn't duplicated). Uppercase telemetry style.
-        if (this.refs.sysCrumb) this.refs.sysCrumb.textContent = `SECTOR / ${(tab?.label || 'Dashboard').toUpperCase()}`;
+        if (this.refs.sysCrumb) this.refs.sysCrumb.textContent = `SECTOR / ${(tab?.label || 'Overview').toUpperCase()}`;
 
         const panels = {
+            overview: this.refs.panelOverview,
             dashboard: this.refs.panelDashboard,
             usage: this.refs.panelUsage,
+            availability: this.refs.panelAvailability,
             channels: this.refs.panelChannels,
             groups: this.refs.panelGroups,
             keys: this.refs.panelKeys,
@@ -680,8 +686,10 @@ class AiProxyApp extends KeelElement {
 
     _refreshActive() {
         const panels = {
+            overview: this.refs.panelOverview,
             dashboard: this.refs.panelDashboard,
             usage: this.refs.panelUsage,
+            availability: this.refs.panelAvailability,
             channels: this.refs.panelChannels,
             groups: this.refs.panelGroups,
             keys: this.refs.panelKeys,

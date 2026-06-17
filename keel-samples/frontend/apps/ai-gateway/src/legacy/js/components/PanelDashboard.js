@@ -1,369 +1,198 @@
 import { KeelElement } from './base/KeelElement.js';
 import { requestJson } from '../api.js';
 import { API } from '../config.js';
+import { escapeHtml } from '../utils.js';
 
+/**
+ * Ops dashboard: window-scoped overview, latency percentiles, trends, distributions,
+ * channel health and a live request stream. Distinct from the lightweight Overview tab.
+ */
 export class PanelDashboard extends KeelElement {
     hostStyles() { return 'height:100%;'; }
 
     template() {
         return `
             <style>
-                .dashboard { display: flex; flex-direction: column; gap: 32px; }
-                .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
-                .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 24px; }
-                .section-card {
-                    background: var(--panel-strong);
-                    border-radius: var(--radius-lg);
-                    padding: 28px;
-                    box-shadow: var(--shadow-sm);
-                    border: 2px solid var(--ink);
-                }
-                .hero-meta {
-                    display: grid;
-                    justify-items: end;
-                    gap: 8px;
-                    padding: 4px 0;
-                }
-                .hero-chip {
-                    display: inline-flex;
-                    align-items: center;
-                    gap: 8px;
-                    padding: 7px 10px;
-                    border: 1px solid rgba(235, 231, 223, 0.18);
-                    background: rgba(11, 11, 11, 0.18);
-                    color: var(--on-accent);
-                    font-family: var(--font-mono);
-                    font-size: 10px;
-                    font-weight: 800;
-                    letter-spacing: 0.08em;
-                    text-transform: uppercase;
-                }
-                .section-title {
-                    font-family: var(--font-headline);
-                    font-size: 18px;
-                    font-weight: 500;
-                    margin: 0 0 16px;
-                    color: var(--ink);
-                    text-transform: uppercase;
-                    letter-spacing: -0.02em;
-                }
-                .onboarding-banner {
-                    background: var(--surface-muted);
-                    border-radius: var(--radius-lg);
-                    padding: 24px 28px;
-                    line-height: 1.7;
-                    font-size: 13px;
-                    color: var(--ink);
-                    border: 2px solid var(--ink);
-                }
-                .onboarding-banner h3 {
-                    font-family: var(--font-headline);
-                    font-size: 22px;
-                    margin: 0 0 12px;
-                }
-                .onboarding-banner ol {
-                    margin: 12px 0 0;
-                    padding-left: 20px;
-                }
-                .onboarding-banner li { margin-bottom: 6px; }
-                .onboarding-banner code {
-                    background: var(--surface-accent);
-                    color: var(--on-accent);
-                    padding: 2px 6px;
-                    border-radius: 0;
-                    font-family: var(--font-mono);
-                    font-size: 11px;
-                }
-                .empty { text-align: center; color: var(--muted); padding: 40px; font-size: 13px; }
-                .chart-header {
-                    display: flex; align-items: center; justify-content: space-between;
-                    margin-bottom: 12px;
-                }
-                .chart-header .section-title { margin: 0; }
-                .chart-hint {
-                    font-family: var(--font-mono); font-size: 10px; font-weight: 700;
-                    color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em;
-                }
-                @media (max-width: 900px) {
-                    .grid-2 { grid-template-columns: 1fr; }
-                    .grid-3 { grid-template-columns: 1fr; }
-                }
+                .ops { display: flex; flex-direction: column; gap: 24px; }
+                .toolbar { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+                .toolbar-label { font-family: var(--font-mono); font-size: 10px; font-weight: 800; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); }
+                .window-btn { padding: 8px 16px; border: 2px solid var(--ink); background: var(--paper); color: var(--ink); cursor: pointer; font-family: var(--font-mono); font-size: 10px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+                .window-btn.active { background: var(--surface-accent); color: var(--on-accent); box-shadow: 3px 3px 0 var(--teal); }
+                .auto-refresh { margin-left:auto; display:inline-flex; align-items:center; gap:8px; font-family:var(--font-mono); font-size:10px; font-weight:800; color:var(--muted); text-transform:uppercase; }
+                .section-card { background: var(--panel-strong); border-radius: var(--radius-lg); padding: 24px; box-shadow: var(--shadow-sm); border: 2px solid var(--ink); min-width: 0; }
+                .section-title { font-family: var(--font-headline); font-size: 16px; font-weight: 500; margin: 0 0 16px; color: var(--ink); text-transform: uppercase; letter-spacing: -0.02em; }
+                .chart-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; }
+                .chart-header .section-title { margin:0; }
+                .chart-hint { font-family: var(--font-mono); font-size: 10px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; }
+                .auto-grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; }
+                .health-grid { display:grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+                .health-tile { padding:16px; border:2px solid var(--ink); background:var(--paper); }
+                .health-tile.ok { background: var(--green-soft); }
+                .health-tile.warn { background: var(--amber-soft); }
+                .health-tile.danger { background: var(--red-soft); }
+                .health-label { font-family:var(--font-mono); font-size:10px; font-weight:800; color:var(--muted); text-transform:uppercase; letter-spacing:.1em; }
+                .health-value { margin-top:6px; font-family:var(--font-headline); font-size:30px; line-height:1; }
+                .empty { text-align:center; color:var(--muted); padding:32px; font-size:13px; }
             </style>
-            <div class="dashboard" data-ref="root">
+            <div class="ops" data-ref="root">
                 <keel-hero data-ref="hero"></keel-hero>
-                <div class="onboarding-banner">
-                    <h3>Welcome to AI Proxy</h3>
-                    <p>Your unified AI Gateway for routing, rate limiting, and cost tracking.</p>
-                    <ol>
-                        <li><strong>Create an API Key</strong> in the <em>API Keys</em> panel &mdash; you'll get a <code>sk-keel-*</code> virtual key</li>
-                        <li><strong>Send requests</strong> via OpenAI Chat, OpenAI Responses, or Anthropic Messages protocol in <em>Playground</em></li>
-                        <li><strong>Monitor costs</strong> here on this Dashboard, and check <em>Groups</em> for upstream health</li>
-                    </ol>
+
+                <div class="toolbar">
+                    <span class="toolbar-label">Window</span>
+                    ${['1h', '24h', '7d', '30d'].map(w => `<button class="window-btn" data-window="${w}">${w}</button>`).join('')}
+                    <label class="auto-refresh"><input type="checkbox" data-ref="autoRefresh"> Auto refresh 30s</label>
                 </div>
-                <keel-stat-grid data-ref="stats"></keel-stat-grid>
-                <div class="grid-3">
-                    <div class="section-card">
-                        <div class="chart-header">
-                            <h3 class="section-title">Request Volume</h3>
-                            <span class="chart-hint">7 Days</span>
-                        </div>
-                        <keel-chart data-ref="volumeChart"></keel-chart>
-                    </div>
-                    <div class="section-card">
-                        <div class="chart-header">
-                            <h3 class="section-title">Model Split</h3>
-                            <span class="chart-hint">By Requests</span>
-                        </div>
-                        <keel-chart data-ref="modelChart"></keel-chart>
-                    </div>
-                    <div class="section-card">
-                        <div class="chart-header">
-                            <h3 class="section-title">Latency</h3>
-                            <span class="chart-hint">Recent P50</span>
-                        </div>
-                        <keel-chart data-ref="latencyChart"></keel-chart>
-                    </div>
+
+                <keel-stat-grid data-ref="overviewStats"></keel-stat-grid>
+                <keel-stat-grid data-ref="latencyStats"></keel-stat-grid>
+
+                <div class="auto-grid">
+                    <div class="section-card"><div class="chart-header"><h3 class="section-title">Requests</h3><span class="chart-hint" data-ref="reqHint"></span></div><keel-chart data-ref="requestChart"></keel-chart></div>
+                    <div class="section-card"><div class="chart-header"><h3 class="section-title">Tokens</h3><span class="chart-hint">in + out + cache</span></div><keel-chart data-ref="tokenChart"></keel-chart></div>
+                    <div class="section-card"><div class="chart-header"><h3 class="section-title">Latency P95</h3><span class="chart-hint">trend</span></div><keel-chart data-ref="latencyChart"></keel-chart></div>
                 </div>
-                <div class="grid-2">
-                    <div class="section-card">
-                        <h3 class="section-title">Top Models</h3>
-                        <keel-data-table data-ref="modelsTable"></keel-data-table>
-                    </div>
-                    <div class="section-card">
-                        <h3 class="section-title">Top Users</h3>
-                        <keel-data-table data-ref="usersTable"></keel-data-table>
-                    </div>
+
+                <div class="auto-grid">
+                    <div class="section-card"><h3 class="section-title">Model Distribution</h3><keel-chart data-ref="modelChart"></keel-chart></div>
+                    <div class="section-card"><h3 class="section-title">Channel Distribution</h3><keel-chart data-ref="channelChart"></keel-chart></div>
+                    <div class="section-card"><h3 class="section-title">Group Distribution</h3><keel-chart data-ref="groupChart"></keel-chart></div>
+                    <div class="section-card"><h3 class="section-title">Error Distribution</h3><keel-chart data-ref="errorChart"></keel-chart></div>
                 </div>
-                <div class="section-card">
-                    <h3 class="section-title">Recent Requests</h3>
-                    <keel-data-table data-ref="recentTable"></keel-data-table>
+
+                <div class="auto-grid">
+                    <div class="section-card"><h3 class="section-title">Channel Health</h3><div class="health-grid" data-ref="healthGrid"></div></div>
+                    <div class="section-card"><h3 class="section-title">Recent Request Stream</h3><keel-data-table data-ref="recentTable"></keel-data-table></div>
                 </div>
             </div>
         `;
     }
 
     afterMount() {
-        this._liveMode = true;
-        this._sse = null;
+        this._window = '24h';
         this._pollTimer = null;
-        this.refs.hero.render({ label: 'Telemetry Overview', title: 'Dashboard', metaHtml: '' });
-    }
-
-    connectedCallback() {
-        super.connectedCallback();
-        // Start live updates after mount
-        setTimeout(() => this._startLive(), 500);
+        this._hasRendered = false;
+        this.refs.hero.render({ label: 'Operations', title: 'Dashboard', metaHtml: '' });
+        this.refs.root.addEventListener('click', (event) => {
+            const btn = event.target.closest('[data-window]');
+            if (!btn) return;
+            this._window = btn.dataset.window;
+            this._paintWindowButtons();
+            this.refresh();
+        });
+        this.refs.autoRefresh.addEventListener('change', () => this._configurePolling());
+        this._paintWindowButtons();
     }
 
     disconnectedCallback() {
-        this._stopLive();
-    }
-
-    /** Called by app.js live indicator toggle */
-    setLiveMode(on) {
-        this._liveMode = on;
-        if (on) this._startLive();
-        else this._stopLive();
-    }
-
-    _startLive() {
-        this._stopLive();
-        if (!this._liveMode) return;
-        this.refresh();
-        // Try SSE first, fall back to polling
-        try {
-            const base = API.airelay || API.token;
-            this._sse = new EventSource(`${base}/usage/stream`);
-            this._sse.onmessage = (e) => {
-                try {
-                    const payload = JSON.parse(e.data);
-                    if ((!payload._records || payload._records.length === 0) && this._lastDetailedRecords?.length) {
-                        payload._records = this._lastDetailedRecords;
-                    }
-                    this._render(payload);
-                } catch {}
-            };
-            this._sse.onerror = () => {
-                this._sse.close();
-                this._sse = null;
-                this._startPolling();
-            };
-        } catch {
-            this._startPolling();
-        }
-    }
-
-    _startPolling() {
+        super.disconnectedCallback?.();
         this._stopPolling();
-        this._pollTimer = setInterval(() => this.refresh(), 15000);
+    }
+
+    _configurePolling() {
+        this._stopPolling();
+        if (this.refs.autoRefresh.checked) {
+            this._pollTimer = setInterval(() => this.refresh(), 30000);
+        }
     }
 
     _stopPolling() {
-        if (this._pollTimer) { clearInterval(this._pollTimer); this._pollTimer = null; }
+        if (this._pollTimer) clearInterval(this._pollTimer);
+        this._pollTimer = null;
     }
 
-    _stopLive() {
-        if (this._sse) { this._sse.close(); this._sse = null; }
-        this._stopPolling();
+    _paintWindowButtons() {
+        this.shadowRoot.querySelectorAll('[data-window]').forEach(btn => {
+            btn.classList.toggle('active', btn.dataset.window === this._window);
+        });
     }
 
     async refresh() {
-        // Use the records endpoint which returns the full per-row TokenUsage + CostBreakdown.
         try {
-            const records = await requestJson(`${API.token}/admin/usage/records?limit=200`);
-            const data = await requestJson(`${API.token}/admin/usage/global`);
-            this._lastDetailedRecords = records.records || records;
-            this._render({ ...data, _records: this._lastDetailedRecords });
+            const [stats, records] = await Promise.all([
+                requestJson(`${API.airelay}/admin/stats/dashboard?window=${encodeURIComponent(this._window)}`),
+                requestJson(`${API.token}/admin/usage/records?limit=200`).catch(() => ({ records: [] })),
+            ]);
+            this._render(stats || {}, records.records || []);
         } catch (e) {
-            this.refs.stats.render({ entries: [['Status', 'Error', e.message]] });
+            this.refs.overviewStats.render({ entries: [['Status', 'Error', e.message]] });
         }
     }
 
-    _render(data) {
-        const silent = !!this._hasRendered;
+    _render(stats, records) {
+        const silent = this._hasRendered;
         this._hasRendered = true;
+        const o = stats.overview || {};
+        const d = stats.distributions || {};
+        const t = stats.trends || {};
 
-        const records = data._records || data.recentRequests || [];
-        if (data._records?.length) this._lastDetailedRecords = data._records;
-        const sums = this._aggregate(records);
-
-        this.refs.stats.render({
-            silent,
-            entries: [
-                ['Total Requests', String(data.totalRequests || 0), 'all-time'],
-                ['Total Cost', `$${(data.totalCostUsd || 0).toFixed(4)}`, 'USD'],
-                ['Input', (sums.inputTokens || 0).toLocaleString(), 'tokens'],
-                ['Output', (sums.outputTokens || 0).toLocaleString(), 'tokens'],
-                ['Cache Read', (sums.cacheReadInputTokens || 0).toLocaleString(), 'tokens'],
-                ['Cache Write', (sums.cacheCreationInputTokens || 0).toLocaleString(), 'tokens'],
-                ['Reasoning', (sums.reasoningTokens || 0).toLocaleString(), 'tokens'],
-                ['Cache Hit', sums.cacheHitRate != null ? `${(sums.cacheHitRate * 100).toFixed(1)}%` : '—', 'rate'],
-            ]
-        });
         this.refs.hero.render({
-            label: 'Telemetry Overview',
+            label: 'Operations',
             title: 'Dashboard',
-            metaHtml: `
-                <div class="hero-meta">
-                    <span class="hero-chip">${data.totalRequests || 0} requests</span>
-                    <span class="hero-chip">$${(data.totalCostUsd || 0).toFixed(4)} total cost</span>
-                </div>
-            `
+            metaHtml: `<div style="display:grid;justify-items:end;gap:8px;"><span style="display:inline-flex;padding:7px 10px;border:1px solid rgba(235,231,223,0.18);background:rgba(11,11,11,0.18);color:var(--on-accent);font-family:var(--font-mono);font-size:10px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;">${(o.totalRequests || 0).toLocaleString()} requests · ${this._window}</span></div>`
         });
+        this.refs.overviewStats.render({ silent, entries: [
+            ['Requests', (o.totalRequests || 0).toLocaleString(), this._window],
+            ['Success', o.successRate != null ? `${(o.successRate * 100).toFixed(1)}%` : '—', 'rate'],
+            ['Cost', `$${(o.totalCostUsd || 0).toFixed(4)}`, 'USD'],
+            ['Tokens', this._fmt(o.totalTokens || 0), 'total'],
+            ['Cache Hit', o.cacheHitRate != null ? `${(o.cacheHitRate * 100).toFixed(1)}%` : '—', 'rate'],
+        ]});
+        this.refs.latencyStats.render({ silent, entries: [
+            ['Avg Latency', `${o.avgLatencyMs || 0}ms`, 'mean'],
+            ['P50', `${o.p50LatencyMs || 0}ms`, 'latency'],
+            ['P95', `${o.p95LatencyMs || 0}ms`, 'latency'],
+            ['P99', `${o.p99LatencyMs || 0}ms`, 'latency'],
+        ]});
 
-        // ── Charts ──
-        const recent = data.recentRequests || records.slice(0, 20);
-        const dayBuckets = this._bucketByDay(records, 7);
-        this.refs.volumeChart.render({
-            type: 'bar',
-            data: dayBuckets.map(d => d.count),
-            labels: dayBuckets.map(d => d.label),
-            height: 100,
-            emptyText: 'No request data yet'
-        });
+        this.refs.healthGrid.innerHTML = [
+            this._healthTile('Healthy', o.healthyChannels || 0, 'ok'),
+            this._healthTile('Cooldown', o.cooldownChannels || 0, 'warn'),
+            this._healthTile('Disabled', o.disabledChannels || 0, 'danger'),
+        ].join('');
 
-        const models = data.topModels || [];
-        this.refs.modelChart.render({
-            type: 'donut',
-            data: models.slice(0, 6).map(m => m.requests),
-            labels: models.slice(0, 6).map(m => m.model),
-            emptyText: 'No model data yet'
-        });
+        const reqTrend = t.requestsByHour || [];
+        this.refs.reqHint.textContent = this._window;
+        this.refs.requestChart.render({ type: 'bar', data: reqTrend.map(p => p.requests), labels: reqTrend.map(p => this._bucketLabel(p.timestamp)), height: 110, emptyText: 'No request data yet' });
+        const tokenTrend = t.tokensByHour || [];
+        this.refs.tokenChart.render({ type: 'bar', data: tokenTrend.map(p => (p.promptTokens || 0) + (p.completionTokens || 0) + (p.cacheWriteTokens || 0) + (p.cacheReadTokens || 0)), labels: tokenTrend.map(p => this._bucketLabel(p.timestamp)), height: 110, emptyText: 'No token data yet' });
+        const latencyTrend = t.latencyByHour || [];
+        this.refs.latencyChart.render({ type: 'sparkline', data: latencyTrend.map(p => p.p95 || 0), emptyText: 'No latency data yet' });
 
-        const latencies = recent.slice(0, 30).map(r => r.latencyMs || 0).reverse();
-        this.refs.latencyChart.render({
-            type: 'sparkline',
-            data: latencies,
-            emptyText: 'No latency data yet'
-        });
+        this.refs.modelChart.render({ type: 'donut', data: (d.modelDistribution || []).map(x => x.requests), labels: (d.modelDistribution || []).map(x => x.model), emptyText: 'No model data yet' });
+        this.refs.channelChart.render({ type: 'bar', data: (d.channelDistribution || []).map(x => x.requests), labels: (d.channelDistribution || []).map(x => x.channelName || x.channelId), height: 110, emptyText: 'No channel data yet' });
+        this.refs.groupChart.render({ type: 'bar', data: (d.groupDistribution || []).map(x => x.requests), labels: (d.groupDistribution || []).map(x => x.groupName || x.groupId), height: 110, emptyText: 'No group data yet' });
+        this.refs.errorChart.render({ type: 'donut', data: (d.errorDistribution || []).map(x => x.count), labels: (d.errorDistribution || []).map(x => x.errorType), emptyText: 'No errors in this window' });
 
-        // ── Tables ──
-        this.refs.modelsTable.render({
-            silent,
-            headers: ['Model', 'Requests', 'Tokens', 'Cost'],
-            rows: models.map(m => [
-                `<code>${m.model}</code>`,
-                String(m.requests),
-                m.totalTokens.toLocaleString(),
-                `$${m.totalCostUsd.toFixed(4)}`
-            ]),
-            emptyHtml: '<div class="empty">No model data yet.</div>'
-        });
-
-        const users = data.topUsers || [];
-        this.refs.usersTable.render({
-            silent,
-            headers: ['User ID', 'Requests', 'Tokens', 'Cost'],
-            rows: users.map(u => [
-                `<code>${u.userId}</code>`,
-                String(u.requests),
-                u.totalTokens.toLocaleString(),
-                `$${u.totalCostUsd.toFixed(4)}`
-            ]),
-            emptyHtml: '<div class="empty">No user data yet.</div>'
-        });
-
-        this.refs.recentTable.render({
-            silent,
-            headers: ['Time', 'Model', 'In', 'Out', 'CR', 'CW', 'Reason', 'In$', 'Out$', 'CW$', 'CR$', 'Total$', 'Hit', 'Latency'],
-            rows: recent.slice(0, 20).map(r => {
-                const u = r.usage || {};
-                const c = r.cost || {};
-                return [
-                    `<span style="font-size:11px;">${(r.createdAt || '').slice(0, 19)}</span>`,
-                    `<code>${r.model || ''}</code>`,
-                    this._num(u.promptTokens),
-                    this._num(u.completionTokens),
-                    this._num(u.cacheReadInputTokens),
-                    this._num(u.cacheCreationInputTokens),
-                    this._num(u.reasoningTokens),
-                    `$${(c.inputCostUsd || 0).toFixed(5)}`,
-                    `$${(c.outputCostUsd || 0).toFixed(5)}`,
-                    `$${(c.cacheWriteCostUsd || 0).toFixed(5)}`,
-                    `$${(c.cacheReadCostUsd || 0).toFixed(5)}`,
-                    `$${(c.totalCostUsd || 0).toFixed(5)}`,
-                    c.cacheHitRate != null ? `${(c.cacheHitRate * 100).toFixed(0)}%` : '—',
-                    `${r.latencyMs || 0}ms`
-                ];
-            }),
-            emptyHtml: '<div class="empty">No requests recorded yet. Create an API key and send a request in Playground.</div>'
-        });
-    }
-
-    _num(n) {
-        if (n == null) return '0';
-        if (n >= 1000) return `${(n / 1000).toFixed(1)}K`;
-        return String(n);
-    }
-
-    _aggregate(records) {
-        return records.reduce((acc, r) => {
+        this.refs.recentTable.render({ silent, headers: ['Time', 'Model', 'Channel', 'Status', 'Latency', 'Tokens', 'Cost'], rows: records.slice(0, 20).map(r => {
             const u = r.usage || {};
-            acc.inputTokens += u.promptTokens || 0;
-            acc.outputTokens += u.completionTokens || 0;
-            acc.cacheReadInputTokens += u.cacheReadInputTokens || 0;
-            acc.cacheCreationInputTokens += u.cacheCreationInputTokens || 0;
-            acc.reasoningTokens += u.reasoningTokens || 0;
-            if (r.cost?.cacheHitRate != null) {
-                acc._hitSamples += 1;
-                acc._hitSum += r.cost.cacheHitRate;
-            }
-            return acc;
-        }, { inputTokens: 0, outputTokens: 0, cacheReadInputTokens: 0, cacheCreationInputTokens: 0, reasoningTokens: 0, _hitSamples: 0, _hitSum: 0, get cacheHitRate() { return this._hitSamples > 0 ? this._hitSum / this._hitSamples : null; } });
+            const tokenTotal = (u.promptTokens || 0) + (u.completionTokens || 0) + (u.cacheReadInputTokens || 0) + (u.cacheCreationInputTokens || 0);
+            return [
+                `<span style="font-size:11px;">${escapeHtml((r.createdAt || '').replace('T', ' ').slice(0, 19))}</span>`,
+                `<code>${escapeHtml(r.model || '')}</code>`,
+                `<code>${escapeHtml(r.channelName || r.channelId || r.upstreamKeyId || '—')}</code>`,
+                r.status >= 400 ? `<span style="color:var(--red);font-weight:800;">${r.status}</span>` : `<span style="color:var(--green);font-weight:800;">${r.status || 200}</span>`,
+                `${r.latencyMs || 0}ms`,
+                this._fmt(tokenTotal),
+                `$${((r.cost || {}).totalCostUsd || r.totalCostUsd || 0).toFixed(4)}`,
+            ];
+        }), emptyHtml: '<div class="empty">No requests recorded yet.</div>' });
     }
 
-    _bucketByDay(requests, days) {
-        const now = new Date();
-        const buckets = [];
-        for (let i = days - 1; i >= 0; i--) {
-            const d = new Date(now);
-            d.setDate(d.getDate() - i);
-            const key = d.toISOString().slice(0, 10);
-            const label = d.toLocaleDateString('en', { weekday: 'short' });
-            const count = requests.filter(r => (r.createdAt || '').startsWith(key)).length;
-            buckets.push({ key, label, count });
-        }
-        return buckets;
+    _healthTile(label, value, tone) {
+        return `<div class="health-tile ${tone}"><div class="health-label">${label}</div><div class="health-value">${value}</div></div>`;
+    }
+
+    _bucketLabel(timestamp) {
+        const d = new Date(timestamp);
+        if (this._window === '1h' || this._window === '24h') return d.toLocaleTimeString('en', { hour: '2-digit', minute: '2-digit' });
+        return d.toLocaleDateString('en', { month: 'short', day: 'numeric' });
+    }
+
+    _fmt(n) {
+        const value = Number(n || 0);
+        if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
+        if (value >= 1_000) return `${(value / 1_000).toFixed(1)}K`;
+        return value.toLocaleString();
     }
 }
 

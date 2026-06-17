@@ -1,5 +1,5 @@
 export const state = {
-    activeTab: 'dashboard',
+    activeTab: 'overview',
     loggedIn: false,
     user: null,
     accessToken: null,
