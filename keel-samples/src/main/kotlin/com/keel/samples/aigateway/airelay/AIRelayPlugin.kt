@@ -938,7 +938,7 @@ class AIRelayPlugin : StandardKeelPlugin {
             disabledChannels = disabledChannels
         )
 
-        // Trends - simplified hourly bucketing
+        // Trends - hourly bucketing with complete metrics
         val now = System.currentTimeMillis()
         val hourlyBuckets = (0..23).map { hour ->
             val bucketStart = now - (hour + 1) * 3600_000
@@ -954,10 +954,43 @@ class AIRelayPlugin : StandardKeelPlugin {
             )
         }.reversed()
 
+        val tokensByHour = (0..23).map { hour ->
+            val bucketStart = now - (hour + 1) * 3600_000
+            val bucketEnd = now - hour * 3600_000
+            val bucketRecords = records.filter { record ->
+                val timestamp = record.createdAt.toLongOrNull() ?: 0L
+                timestamp in bucketStart..bucketEnd
+            }
+            TokenTimeSeriesPoint(
+                timestamp = bucketEnd,
+                promptTokens = bucketRecords.sumOf { it.usage?.promptTokens?.toLong() ?: 0L },
+                completionTokens = bucketRecords.sumOf { it.usage?.completionTokens?.toLong() ?: 0L },
+                cacheWriteTokens = bucketRecords.sumOf { it.usage?.cacheCreationInputTokens?.toLong() ?: 0L },
+                cacheReadTokens = bucketRecords.sumOf { it.usage?.cacheReadInputTokens?.toLong() ?: 0L },
+                costUsd = bucketRecords.sumOf { it.cost?.totalCostUsd ?: 0.0 }
+            )
+        }.reversed()
+
+        val latencyByHour = (0..23).map { hour ->
+            val bucketStart = now - (hour + 1) * 3600_000
+            val bucketEnd = now - hour * 3600_000
+            val bucketRecords = records.filter { record ->
+                val timestamp = record.createdAt.toLongOrNull() ?: 0L
+                timestamp in bucketStart..bucketEnd
+            }
+            val latencies = bucketRecords.map { it.latencyMs }.sorted()
+            LatencyTimeSeriesPoint(
+                timestamp = bucketEnd,
+                p50 = if (latencies.isNotEmpty()) latencies[latencies.size / 2] else 0L,
+                p95 = if (latencies.isNotEmpty()) latencies[(latencies.size * 0.95).toInt().coerceAtMost(latencies.size - 1)] else 0L,
+                p99 = if (latencies.isNotEmpty()) latencies[(latencies.size * 0.99).toInt().coerceAtMost(latencies.size - 1)] else 0L
+            )
+        }.reversed()
+
         val trends = DashboardTrends(
             requestsByHour = hourlyBuckets,
-            tokensByHour = emptyList(), // TODO: implement
-            latencyByHour = emptyList() // TODO: implement
+            tokensByHour = tokensByHour,
+            latencyByHour = latencyByHour
         )
 
         // Distribution calculations

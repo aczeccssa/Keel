@@ -69,10 +69,16 @@ function renderModelRoute(model?: string) {
 export function UsagePanel({ api }: { api: AiGatewayApi }) {
   const [rows, setRows] = useState<UsageRecord[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [filters, setFilters] = useState<{
+    groupId?: string;
+    channelId?: string;
+    model?: string;
+    statusFilter?: string;
+  }>({});
 
   useEffect(() => {
     let cancelled = false;
-    api.usageRecords(200)
+    api.usageRecords(200, filters)
       .then((data) => {
         if (cancelled) return;
         setRows(((data as { records?: UsageRecord[] }).records ?? []) as UsageRecord[]);
@@ -83,7 +89,7 @@ export function UsagePanel({ api }: { api: AiGatewayApi }) {
     return () => {
       cancelled = true;
     };
-  }, [api]);
+  }, [api, filters]);
 
   const columns: DataTableColumn<UsageRecord>[] = [
     { key: 'requestId', header: 'Request', mono: true, render: (r) => (r.requestId ?? r.recordId ? String(r.requestId ?? r.recordId).slice(0, 16) : '—') },
@@ -186,6 +192,126 @@ export function UsagePanel({ api }: { api: AiGatewayApi }) {
         description="Per-request cost and routing detail."
       />
       {error ? <ErrorBanner message={error} /> : null}
+
+      {/* Filters Section */}
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+        gap: '12px',
+        marginBottom: '24px',
+        padding: '16px',
+        background: 'var(--keel-surface, #fff)',
+        border: '1px solid var(--keel-border, #e5e7eb)',
+        borderRadius: '8px'
+      }}>
+        <div>
+          <label style={{ display: 'block', fontSize: '12px', fontWeight: '500', marginBottom: '4px', color: 'var(--keel-ink)' }}>
+            Group
+          </label>
+          <select
+            value={filters.groupId ?? ''}
+            onChange={(e) => setFilters(prev => ({ ...prev, groupId: e.target.value || undefined }))}
+            style={{
+              width: '100%',
+              padding: '6px 8px',
+              fontSize: '14px',
+              border: '1px solid var(--keel-border, #e5e7eb)',
+              borderRadius: '4px'
+            }}
+          >
+            <option value="">All groups</option>
+            {Array.from(new Set(rows.map(r => r.groupId ?? r.poolLevelId).filter(Boolean))).map(g => (
+              <option key={g} value={g}>{g}</option>
+            ))}
+          </select>
+        </div>
+
+        <div>
+          <label style={{ display: 'block', fontSize: '12px', fontWeight: '500', marginBottom: '4px', color: 'var(--keel-ink)' }}>
+            Channel
+          </label>
+          <select
+            value={filters.channelId ?? ''}
+            onChange={(e) => setFilters(prev => ({ ...prev, channelId: e.target.value || undefined }))}
+            style={{
+              width: '100%',
+              padding: '6px 8px',
+              fontSize: '14px',
+              border: '1px solid var(--keel-border, #e5e7eb)',
+              borderRadius: '4px'
+            }}
+          >
+            <option value="">All channels</option>
+            {Array.from(new Set(rows.map(r => r.channelId ?? r.upstreamKeyId).filter(Boolean))).map(c => (
+              <option key={c} value={c}>{c}</option>
+            ))}
+          </select>
+        </div>
+
+        <div>
+          <label style={{ display: 'block', fontSize: '12px', fontWeight: '500', marginBottom: '4px', color: 'var(--keel-ink)' }}>
+            Model
+          </label>
+          <select
+            value={filters.model ?? ''}
+            onChange={(e) => setFilters(prev => ({ ...prev, model: e.target.value || undefined }))}
+            style={{
+              width: '100%',
+              padding: '6px 8px',
+              fontSize: '14px',
+              border: '1px solid var(--keel-border, #e5e7eb)',
+              borderRadius: '4px'
+            }}
+          >
+            <option value="">All models</option>
+            {Array.from(new Set(rows.map(r => r.model).filter(Boolean))).map(m => (
+              <option key={m} value={m}>{m}</option>
+            ))}
+          </select>
+        </div>
+
+        <div>
+          <label style={{ display: 'block', fontSize: '12px', fontWeight: '500', marginBottom: '4px', color: 'var(--keel-ink)' }}>
+            Status
+          </label>
+          <select
+            value={filters.statusFilter ?? ''}
+            onChange={(e) => setFilters(prev => ({ ...prev, statusFilter: e.target.value || undefined }))}
+            style={{
+              width: '100%',
+              padding: '6px 8px',
+              fontSize: '14px',
+              border: '1px solid var(--keel-border, #e5e7eb)',
+              borderRadius: '4px'
+            }}
+          >
+            <option value="">All status</option>
+            <option value="success">Success only</option>
+            <option value="error">Error only</option>
+          </select>
+        </div>
+
+        {(filters.groupId || filters.channelId || filters.model || filters.statusFilter) && (
+          <div style={{ display: 'flex', alignItems: 'flex-end' }}>
+            <button
+              onClick={() => setFilters({})}
+              style={{
+                width: '100%',
+                padding: '6px 8px',
+                fontSize: '14px',
+                background: 'var(--keel-danger, #ef4444)',
+                color: 'white',
+                border: 'none',
+                borderRadius: '4px',
+                cursor: 'pointer'
+              }}
+            >
+              Clear filters
+            </button>
+          </div>
+        )}
+      </div>
+
       {rows.length === 0 ? (
         <EmptyState
           title="No usage records"

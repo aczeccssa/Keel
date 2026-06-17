@@ -74,12 +74,13 @@ export function DashboardPanel({ api }: { api: AiGatewayApi }) {
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [records, setRecords] = useState<UsageRecord[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [timeWindow, setTimeWindow] = useState<string>('24h');
 
   useEffect(() => {
     let cancelled = false;
     Promise.all([
       api.usageGlobal() as Promise<UsageGlobal>,
-      api.dashboardStats('24h') as Promise<DashboardStats>,
+      api.dashboardStats(timeWindow) as Promise<DashboardStats>,
       api.usageRecords(200) as Promise<{ records?: UsageRecord[] }>
     ])
       .then(([g, s, r]) => {
@@ -94,7 +95,7 @@ export function DashboardPanel({ api }: { api: AiGatewayApi }) {
     return () => {
       cancelled = true;
     };
-  }, [api]);
+  }, [api, timeWindow]);
 
   const topModels = useMemo(() => {
     const map = new Map<string, { requests: number; cost: number }>();
@@ -184,6 +185,40 @@ export function DashboardPanel({ api }: { api: AiGatewayApi }) {
     <>
       <PageHeader title="Dashboard" description="Cost, usage, and routing across the AI Relay." />
       {error ? <ErrorBanner message={error} /> : null}
+
+      {/* Time Window Selector */}
+      <div style={{
+        display: 'flex',
+        gap: '8px',
+        marginBottom: '24px',
+        padding: '12px',
+        background: 'var(--keel-surface, #fff)',
+        border: '1px solid var(--keel-border, #e5e7eb)',
+        borderRadius: '8px'
+      }}>
+        <span style={{ fontSize: '14px', fontWeight: '500', color: 'var(--keel-ink)', lineHeight: '32px' }}>
+          Time window:
+        </span>
+        {['1h', '24h', '7d', '30d'].map(window => (
+          <button
+            key={window}
+            onClick={() => setTimeWindow(window)}
+            style={{
+              padding: '6px 16px',
+              fontSize: '14px',
+              fontWeight: timeWindow === window ? '600' : '400',
+              background: timeWindow === window ? 'var(--keel-accent, #3b82f6)' : 'var(--keel-surface, #fff)',
+              color: timeWindow === window ? 'white' : 'var(--keel-ink)',
+              border: `1px solid ${timeWindow === window ? 'var(--keel-accent, #3b82f6)' : 'var(--keel-border, #e5e7eb)'}`,
+              borderRadius: '4px',
+              cursor: 'pointer'
+            }}
+          >
+            {window}
+          </button>
+        ))}
+      </div>
+
       <StatGrid
         items={[
           {
@@ -299,6 +334,54 @@ export function DashboardPanel({ api }: { api: AiGatewayApi }) {
           />
         </section>
       )}
+
+      {/* Distribution Charts Section */}
+      {stats?.distributions && (
+        <>
+          <section className="keel-section">
+            <SectionHeader title="Distribution analysis" description="Traffic patterns and error breakdown" />
+          </section>
+          <div className="keel-grid-2">
+            {stats.distributions.modelDistribution && stats.distributions.modelDistribution.length > 0 && (
+              <DonutChart
+                title="Model distribution"
+                hint="Top 10 by requests"
+                slices={stats.distributions.modelDistribution.slice(0, 10).map(m => ({
+                  label: m.model,
+                  value: m.requests
+                }))}
+                centerLabel={stats.distributions.modelDistribution.reduce((sum, m) => sum + m.requests, 0).toLocaleString()}
+                centerHint="Total requests"
+              />
+            )}
+            {stats.distributions.channelDistribution && stats.distributions.channelDistribution.length > 0 && (
+              <BarChart
+                title="Channel distribution"
+                hint="Top 10 by requests"
+                data={stats.distributions.channelDistribution.slice(0, 10).map(c => ({
+                  label: c.channelName.slice(0, 20),
+                  value: c.requests
+                }))}
+              />
+            )}
+          </div>
+          {stats.distributions.errorDistribution && stats.distributions.errorDistribution.length > 0 && (
+            <div style={{ marginTop: '24px' }}>
+              <DonutChart
+                title="Error distribution"
+                hint="By error type"
+                slices={stats.distributions.errorDistribution.slice(0, 10).map(e => ({
+                  label: e.errorType,
+                  value: e.count
+                }))}
+                centerLabel={stats.distributions.errorDistribution.reduce((sum, e) => sum + e.count, 0).toLocaleString()}
+                centerHint="Total errors"
+              />
+            </div>
+          )}
+        </>
+      )}
+
       <section className="keel-section">
         <SectionHeader title="Top models" description="Highest traffic routes by request count." />
         {topModels.length === 0 ? (
