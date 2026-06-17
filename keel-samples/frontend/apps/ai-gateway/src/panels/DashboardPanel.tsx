@@ -34,6 +34,31 @@ interface UsageRecord {
   status?: number;
 }
 
+interface DashboardStats {
+  overview?: {
+    totalRequests?: number;
+    successRate?: number;
+    totalCostUsd?: number;
+    totalTokens?: number;
+    avgLatencyMs?: number;
+    p50LatencyMs?: number;
+    p95LatencyMs?: number;
+    p99LatencyMs?: number;
+    cacheHitRate?: number;
+    healthyChannels?: number;
+    cooldownChannels?: number;
+    disabledChannels?: number;
+  };
+  trends?: {
+    requestsByHour?: Array<{ timestamp: number; requests: number; successRate: number }>;
+  };
+  distributions?: {
+    modelDistribution?: Array<{ model: string; requests: number; percentage: number; totalCostUsd: number }>;
+    channelDistribution?: Array<{ channelId: string; channelName: string; requests: number; successRate: number; avgLatencyMs: number }>;
+    errorDistribution?: Array<{ errorType: string; count: number; percentage: number }>;
+  };
+}
+
 interface UsageGlobal {
   totalRequests?: number;
   totalCostUsd?: number;
@@ -46,15 +71,21 @@ interface UsageGlobal {
 
 export function DashboardPanel({ api }: { api: AiGatewayApi }) {
   const [global, setGlobal] = useState<UsageGlobal | null>(null);
+  const [stats, setStats] = useState<DashboardStats | null>(null);
   const [records, setRecords] = useState<UsageRecord[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    Promise.all([api.usageGlobal() as Promise<UsageGlobal>, api.usageRecords(200) as Promise<{ records?: UsageRecord[] }>])
-      .then(([g, r]) => {
+    Promise.all([
+      api.usageGlobal() as Promise<UsageGlobal>,
+      api.dashboardStats('24h') as Promise<DashboardStats>,
+      api.usageRecords(200) as Promise<{ records?: UsageRecord[] }>
+    ])
+      .then(([g, s, r]) => {
         if (cancelled) return;
         setGlobal(g);
+        setStats(s);
         setRecords(r.records ?? []);
       })
       .catch((err) => {
@@ -157,27 +188,27 @@ export function DashboardPanel({ api }: { api: AiGatewayApi }) {
         items={[
           {
             label: 'Requests 24h',
-            value: (global?.requestsLast24h ?? records.length).toLocaleString(),
+            value: (stats?.overview?.totalRequests ?? global?.requestsLast24h ?? records.length).toLocaleString(),
             accent: 'accent',
             icon: 'bolt'
           },
           {
+            label: 'Success Rate',
+            value: stats?.overview?.successRate != null ? `${(stats.overview.successRate * 100).toFixed(1)}%` : '—',
+            accent: 'ok',
+            icon: 'check_circle',
+            valueMono: true
+          },
+          {
             label: 'Cost 24h (USD)',
-            value: `$${(global?.costLast24hUsd ?? 0).toFixed(2)}`,
+            value: `$${(stats?.overview?.totalCostUsd ?? global?.costLast24hUsd ?? 0).toFixed(2)}`,
             accent: 'ok',
             icon: 'payments',
             valueMono: true
           },
           {
-            label: 'Cache Hit Rate',
-            value: cacheStats.recordsWithCache > 0 ? `${(cacheStats.avgCacheHitRate * 100).toFixed(1)}%` : '—',
-            accent: 'ok',
-            icon: 'storage',
-            valueMono: true
-          },
-          {
             label: 'Avg Latency',
-            value: latencyStats.avg > 0 ? `${latencyStats.avg} ms` : '—',
+            value: stats?.overview?.avgLatencyMs ? `${stats.overview.avgLatencyMs} ms` : (latencyStats.avg > 0 ? `${latencyStats.avg} ms` : '—'),
             accent: 'muted',
             icon: 'speed',
             valueMono: true
@@ -194,36 +225,73 @@ export function DashboardPanel({ api }: { api: AiGatewayApi }) {
           title="Model mix"
           hint="Top models"
           slices={modelMix.length > 0 ? modelMix : [{ label: 'No data', value: 1 }]}
-          centerLabel={(global?.totalRequests ?? records.length).toLocaleString()}
+          centerLabel={(stats?.overview?.totalRequests ?? global?.totalRequests ?? records.length).toLocaleString()}
           centerHint="Requests"
         />
       </div>
-      {latencyStats.avg > 0 && (
+      {stats?.overview && (
+        <section className="keel-section">
+          <SectionHeader title="Additional metrics" description="Cache efficiency and channel health" />
+          <StatGrid
+            items={[
+              {
+                label: 'Cache Hit Rate',
+                value: stats.overview.cacheHitRate != null ? `${(stats.overview.cacheHitRate * 100).toFixed(1)}%` : (cacheStats.recordsWithCache > 0 ? `${(cacheStats.avgCacheHitRate * 100).toFixed(1)}%` : '—'),
+                accent: 'ok',
+                icon: 'storage',
+                valueMono: true
+              },
+              {
+                label: 'Healthy Channels',
+                value: (stats.overview.healthyChannels ?? 0).toLocaleString(),
+                accent: 'ok',
+                icon: 'check_circle',
+                valueMono: true
+              },
+              {
+                label: 'Cooldown Channels',
+                value: (stats.overview.cooldownChannels ?? 0).toLocaleString(),
+                accent: 'warn',
+                icon: 'schedule',
+                valueMono: true
+              },
+              {
+                label: 'Disabled Channels',
+                value: (stats.overview.disabledChannels ?? 0).toLocaleString(),
+                accent: 'danger',
+                icon: 'block',
+                valueMono: true
+              }
+            ]}
+          />
+        </section>
+      )}
+      {(stats?.overview?.p50LatencyMs || latencyStats.avg > 0) && (
         <section className="keel-section">
           <SectionHeader title="Latency percentiles" description="Response time distribution" />
           <StatGrid
             items={[
               {
                 label: 'P50 (Median)',
-                value: `${latencyStats.p50} ms`,
+                value: `${stats?.overview?.p50LatencyMs ?? latencyStats.p50} ms`,
                 accent: 'muted',
                 valueMono: true
               },
               {
                 label: 'P95',
-                value: `${latencyStats.p95} ms`,
-                accent: latencyStats.p95 > 5000 ? 'warn' : 'muted',
+                value: `${stats?.overview?.p95LatencyMs ?? latencyStats.p95} ms`,
+                accent: (stats?.overview?.p95LatencyMs ?? latencyStats.p95) > 5000 ? 'warn' : 'muted',
                 valueMono: true
               },
               {
                 label: 'P99',
-                value: `${latencyStats.p99} ms`,
-                accent: latencyStats.p99 > 10000 ? 'danger' : 'muted',
+                value: `${stats?.overview?.p99LatencyMs ?? latencyStats.p99} ms`,
+                accent: (stats?.overview?.p99LatencyMs ?? latencyStats.p99) > 10000 ? 'danger' : 'muted',
                 valueMono: true
               },
               {
                 label: 'Average',
-                value: `${latencyStats.avg} ms`,
+                value: `${stats?.overview?.avgLatencyMs ?? latencyStats.avg} ms`,
                 accent: 'accent',
                 valueMono: true
               }
