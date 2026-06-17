@@ -55,6 +55,7 @@ import com.keel.samples.aigateway.airelay.upstream.RealUpstreamHttpClient
 import com.keel.samples.aigateway.airelay.upstream.UpstreamHttpClient
 import com.keel.samples.aigateway.airelay.usage.CostCalculator
 import com.keel.samples.aigateway.airelay.usage.ModelPricingRegistry
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.JsonElement
@@ -348,41 +349,26 @@ class AIRelayPlugin : StandardKeelPlugin {
         }
 
         route("/v1") {
-            post<JsonObject, Any>(
+            post<JsonObject, OpenAiChatCompletionResponse>(
                 "/chat/completions",
                 doc = OpenApiDoc(summary = "OpenAI Chat Completions compatible relay", tags = listOf("ai-gateway", "airelay"), errorStatuses = setOf(400, 401, 402, 403, 429, 503)),
                 executionPolicy = EndpointExecutionPolicy(timeoutMs = 120_000, maxPayloadBytes = 200_000_000, allowChunkedTransfer = true)
             ) { request ->
-                val result = buildService().handleBlocking(this, request, WireProtocol.OPENAI_CHAT)
-                PluginResult(
-                    status = result.status,
-                    headers = result.headers,
-                    body = result.body
-                )
+                buildService().handleBlocking(this, request, WireProtocol.OPENAI_CHAT).toOpenAiChatCompletionResult()
             }
-            post<JsonObject, Any>(
+            post<JsonObject, OpenAiResponseObject>(
                 "/responses",
                 doc = OpenApiDoc(summary = "OpenAI Responses compatible relay", tags = listOf("ai-gateway", "airelay", "openai-responses"), errorStatuses = setOf(400, 401, 402, 403, 429, 503)),
                 executionPolicy = EndpointExecutionPolicy(timeoutMs = 120_000, maxPayloadBytes = 200_000_000, allowChunkedTransfer = true)
             ) { request ->
-                val result = buildService().handleBlocking(this, request, WireProtocol.OPENAI_RESPONSES)
-                PluginResult(
-                    status = result.status,
-                    headers = result.headers,
-                    body = result.body
-                )
+                buildService().handleBlocking(this, request, WireProtocol.OPENAI_RESPONSES).toOpenAiResponseResult()
             }
-            post<JsonObject, Any>(
+            post<JsonObject, AnthropicMessageResponse>(
                 "/messages",
                 doc = OpenApiDoc(summary = "Anthropic Messages compatible relay", tags = listOf("ai-gateway", "airelay", "anthropic"), errorStatuses = setOf(400, 401, 402, 403, 429, 503)),
                 executionPolicy = EndpointExecutionPolicy(timeoutMs = 120_000, maxPayloadBytes = 200_000_000, allowChunkedTransfer = true)
             ) { request ->
-                val result = buildService().handleBlocking(this, request, WireProtocol.ANTHROPIC_MESSAGES)
-                PluginResult(
-                    status = result.status,
-                    headers = result.headers,
-                    body = result.body
-                )
+                buildService().handleBlocking(this, request, WireProtocol.ANTHROPIC_MESSAGES).toAnthropicMessageResult()
             }
             // ---- Anthropic Files API (raw proxy) ----
             rawPost("/files",
@@ -852,6 +838,21 @@ class AIRelayPlugin : StandardKeelPlugin {
         queryParameters["intervalMs"]?.firstOrNull()?.toLongOrNull()?.coerceIn(1_000L, 60_000L) ?: 5_000L
 }
 
+private fun RelayResult.toOpenAiChatCompletionResult(): PluginResult<OpenAiChatCompletionResponse> {
+    @Suppress("UNCHECKED_CAST")
+    return PluginResult(status = status, headers = headers, body = body) as PluginResult<OpenAiChatCompletionResponse>
+}
+
+private fun RelayResult.toOpenAiResponseResult(): PluginResult<OpenAiResponseObject> {
+    @Suppress("UNCHECKED_CAST")
+    return PluginResult(status = status, headers = headers, body = body) as PluginResult<OpenAiResponseObject>
+}
+
+private fun RelayResult.toAnthropicMessageResult(): PluginResult<AnthropicMessageResponse> {
+    @Suppress("UNCHECKED_CAST")
+    return PluginResult(status = status, headers = headers, body = body) as PluginResult<AnthropicMessageResponse>
+}
+
 @Serializable
 data class RelayRequest(
     val model: String,
@@ -879,8 +880,104 @@ data class RelayMessage(
 )
 
 @Serializable
-data class RelayResponse(
-    val response: String
+data class OpenAiChatCompletionResponse(
+    val id: String,
+    @SerialName("object") val objectType: String = "chat.completion",
+    val created: Long,
+    val model: String,
+    val choices: List<OpenAiChatCompletionChoice>,
+    val usage: OpenAiTokenUsage
+)
+
+@Serializable
+data class OpenAiChatCompletionChoice(
+    val index: Int,
+    val message: OpenAiChatCompletionMessage,
+    @SerialName("finish_reason") val finishReason: String? = null
+)
+
+@Serializable
+data class OpenAiChatCompletionMessage(
+    val role: String,
+    val content: String? = null
+)
+
+@Serializable
+data class OpenAiResponseObject(
+    val id: String,
+    @SerialName("object") val objectType: String = "response",
+    @SerialName("created_at") val createdAt: Long,
+    val status: String,
+    val model: String,
+    val output: List<OpenAiResponseOutputItem>,
+    @SerialName("output_text") val outputText: String,
+    val usage: OpenAiTokenUsage
+)
+
+@Serializable
+data class OpenAiResponseOutputItem(
+    val id: String,
+    val type: String,
+    val role: String,
+    val content: List<OpenAiResponseContent>
+)
+
+@Serializable
+data class OpenAiResponseContent(
+    val type: String,
+    val text: String
+)
+
+@Serializable
+data class OpenAiTokenUsage(
+    @SerialName("prompt_tokens") val promptTokens: Int,
+    @SerialName("completion_tokens") val completionTokens: Int,
+    @SerialName("total_tokens") val totalTokens: Int,
+    @SerialName("prompt_tokens_details") val promptTokensDetails: OpenAiPromptTokenDetails? = null,
+    @SerialName("completion_tokens_details") val completionTokensDetails: OpenAiCompletionTokenDetails? = null
+)
+
+@Serializable
+data class OpenAiPromptTokenDetails(
+    @SerialName("cached_tokens") val cachedTokens: Int = 0
+)
+
+@Serializable
+data class OpenAiCompletionTokenDetails(
+    @SerialName("reasoning_tokens") val reasoningTokens: Int = 0
+)
+
+@Serializable
+data class AnthropicMessageResponse(
+    val id: String,
+    val type: String = "message",
+    val role: String = "assistant",
+    val model: String,
+    val content: List<AnthropicContentBlock>,
+    @SerialName("stop_reason") val stopReason: String? = null,
+    val usage: AnthropicUsage
+)
+
+@Serializable
+data class AnthropicContentBlock(
+    val type: String,
+    val text: String? = null,
+    val id: String? = null,
+    val name: String? = null,
+    val input: Map<String, String>? = null,
+    @SerialName("tool_use_id") val toolUseId: String? = null,
+    val content: String? = null,
+    @SerialName("is_error") val isError: Boolean? = null,
+    val thinking: String? = null,
+    val data: String? = null
+)
+
+@Serializable
+data class AnthropicUsage(
+    @SerialName("input_tokens") val inputTokens: Int,
+    @SerialName("output_tokens") val outputTokens: Int,
+    @SerialName("cache_creation_input_tokens") val cacheCreationInputTokens: Int = 0,
+    @SerialName("cache_read_input_tokens") val cacheReadInputTokens: Int = 0
 )
 
 @Serializable
