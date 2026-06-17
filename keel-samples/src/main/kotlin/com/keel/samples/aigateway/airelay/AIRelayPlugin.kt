@@ -783,6 +783,16 @@ class AIRelayPlugin : StandardKeelPlugin {
                 }
             }
 
+            // ---- Dashboard Stats ----
+            get<DashboardStatsResponse>(
+                "/stats/dashboard",
+                doc = OpenApiDoc(summary = "Get dashboard statistics for monitoring", tags = listOf("ai-gateway", "airelay", "admin"))
+            ) {
+                val window = queryParameters["window"]?.firstOrNull() ?: "24h"
+                val stats = calculateDashboardStats(window)
+                PluginResult(body = stats)
+            }
+
             // ---- Nav badge counts (customers / codes / keys) ----
             get<NavCountsResponse>(
                 "/nav-counts",
@@ -871,6 +881,152 @@ class AIRelayPlugin : StandardKeelPlugin {
             totalCostUsd = totalCost,
             totalTokens = totalTokens,
             recentTests = recentTests
+        )
+    }
+
+    private suspend fun calculateDashboardStats(window: String): DashboardStatsResponse {
+        val usageRecorder = kernelKoin.get<UsageRecorder>()
+        val snapshot = usageRecorder.snapshot()
+        val records = snapshot.recentRequests
+
+        // Overview calculations
+        val totalRequests = records.size.toLong()
+        val successCount = records.count { it.status < 400 }
+        val successRate = if (records.isNotEmpty()) successCount.toDouble() / records.size else 0.0
+        val totalCost = records.sumOf { it.totalCostUsd }
+        val totalTokens = records.sumOf { it.totalTokens.toLong() }
+        val avgLatency = if (records.isNotEmpty()) records.map { it.latencyMs }.average().toLong() else 0L
+
+        // Percentile latency calculations
+        val sortedLatencies = records.map { it.latencyMs }.sorted()
+        val p50 = if (sortedLatencies.isNotEmpty()) sortedLatencies[sortedLatencies.size / 2] else 0L
+        val p95 = if (sortedLatencies.isNotEmpty()) sortedLatencies[(sortedLatencies.size * 0.95).toInt().coerceAtMost(sortedLatencies.size - 1)] else 0L
+        val p99 = if (sortedLatencies.isNotEmpty()) sortedLatencies[(sortedLatencies.size * 0.99).toInt().coerceAtMost(sortedLatencies.size - 1)] else 0L
+
+        // Cache hit rate (placeholder - needs proper implementation)
+        val cacheHitRate = 0.0
+
+        // Channel health
+        val poolSnapshot = activeManager().snapshot()
+        var healthyChannels = 0
+        var cooldownChannels = 0
+        var disabledChannels = 0
+        poolSnapshot.chains.forEach { chain ->
+            chain.levels.forEach { level ->
+                level.keys.forEach { key ->
+                    when (key.status) {
+                        "HEALTHY" -> healthyChannels++
+                        "COOLDOWN" -> cooldownChannels++
+                        "DISABLED" -> disabledChannels++
+                    }
+                }
+            }
+        }
+
+        val overview = DashboardOverview(
+            totalRequests = totalRequests,
+            successRate = successRate,
+            totalCostUsd = totalCost,
+            totalTokens = totalTokens,
+            avgLatencyMs = avgLatency,
+            p50LatencyMs = p50,
+            p95LatencyMs = p95,
+            p99LatencyMs = p99,
+            cacheHitRate = cacheHitRate,
+            healthyChannels = healthyChannels,
+            cooldownChannels = cooldownChannels,
+            disabledChannels = disabledChannels
+        )
+
+        // Trends - simplified hourly bucketing
+        val now = System.currentTimeMillis()
+        val hourlyBuckets = (0..23).map { hour ->
+            val bucketStart = now - (hour + 1) * 3600_000
+            val bucketEnd = now - hour * 3600_000
+            val bucketRecords = records.filter { record ->
+                val timestamp = record.createdAt.toLongOrNull() ?: 0L
+                timestamp in bucketStart..bucketEnd
+            }
+            TimeSeriesPoint(
+                timestamp = bucketEnd,
+                requests = bucketRecords.size.toLong(),
+                successRate = if (bucketRecords.isNotEmpty()) bucketRecords.count { it.status < 400 }.toDouble() / bucketRecords.size else 0.0
+            )
+        }.reversed()
+
+        val trends = DashboardTrends(
+            requestsByHour = hourlyBuckets,
+            tokensByHour = emptyList(), // TODO: implement
+            latencyByHour = emptyList() // TODO: implement
+        )
+
+        // Distribution calculations
+        val modelDistribution = records.groupBy { it.model }
+            .map { (model, modelRecords) ->
+                ModelDistribution(
+                    model = model,
+                    requests = modelRecords.size.toLong(),
+                    percentage = modelRecords.size.toDouble() / records.size * 100,
+                    totalCostUsd = modelRecords.sumOf { it.totalCostUsd }
+                )
+            }
+            .sortedByDescending { it.requests }
+            .take(10)
+
+        val channelDistribution = records.groupBy { it.upstreamKeyId ?: "unknown" }
+            .map { (channelId, channelRecords) ->
+                val successCount = channelRecords.count { it.status < 400 }
+                ChannelDistribution(
+                    channelId = channelId,
+                    channelName = channelId, // TODO: map to actual name
+                    requests = channelRecords.size.toLong(),
+                    successRate = if (channelRecords.isNotEmpty()) successCount.toDouble() / channelRecords.size else 0.0,
+                    avgLatencyMs = if (channelRecords.isNotEmpty()) channelRecords.map { it.latencyMs }.average().toLong() else 0L
+                )
+            }
+            .sortedByDescending { it.requests }
+            .take(10)
+
+        val groupDistribution = records.groupBy { it.poolLevelId ?: "unknown" }
+            .map { (groupId, groupRecords) ->
+                val topModels = groupRecords.groupBy { it.model }
+                    .entries.sortedByDescending { it.value.size }
+                    .take(3)
+                    .map { it.key }
+                GroupDistribution(
+                    groupId = groupId,
+                    groupName = groupId, // TODO: map to actual name
+                    requests = groupRecords.size.toLong(),
+                    totalCostUsd = groupRecords.sumOf { it.totalCostUsd },
+                    topModels = topModels
+                )
+            }
+            .sortedByDescending { it.requests }
+            .take(10)
+
+        val errorRecords = records.filter { it.status >= 400 }
+        val errorDistribution = errorRecords.groupBy { it.errorCode ?: "Unknown" }
+            .map { (errorType, errorRecords) ->
+                ErrorDistribution(
+                    errorType = errorType,
+                    count = errorRecords.size.toLong(),
+                    percentage = if (records.isNotEmpty()) errorRecords.size.toDouble() / records.size * 100 else 0.0
+                )
+            }
+            .sortedByDescending { it.count }
+            .take(10)
+
+        val distributions = DashboardDistributions(
+            modelDistribution = modelDistribution,
+            channelDistribution = channelDistribution,
+            groupDistribution = groupDistribution,
+            errorDistribution = errorDistribution
+        )
+
+        return DashboardStatsResponse(
+            overview = overview,
+            trends = trends,
+            distributions = distributions
         )
     }
 
@@ -1100,6 +1256,102 @@ data class ChannelStatsResponse(
     val totalCostUsd: Double,
     val totalTokens: Long,
     val recentTests: List<com.keel.samples.aigateway.airelay.config.TestRecord>
+)
+
+@Serializable
+data class DashboardStatsResponse(
+    val overview: DashboardOverview,
+    val trends: DashboardTrends,
+    val distributions: DashboardDistributions
+)
+
+@Serializable
+data class DashboardOverview(
+    val totalRequests: Long,
+    val successRate: Double,
+    val totalCostUsd: Double,
+    val totalTokens: Long,
+    val avgLatencyMs: Long,
+    val p50LatencyMs: Long,
+    val p95LatencyMs: Long,
+    val p99LatencyMs: Long,
+    val cacheHitRate: Double,
+    val healthyChannels: Int,
+    val cooldownChannels: Int,
+    val disabledChannels: Int
+)
+
+@Serializable
+data class DashboardTrends(
+    val requestsByHour: List<TimeSeriesPoint>,
+    val tokensByHour: List<TokenTimeSeriesPoint>,
+    val latencyByHour: List<LatencyTimeSeriesPoint>
+)
+
+@Serializable
+data class TimeSeriesPoint(
+    val timestamp: Long,
+    val requests: Long,
+    val successRate: Double
+)
+
+@Serializable
+data class TokenTimeSeriesPoint(
+    val timestamp: Long,
+    val promptTokens: Long,
+    val completionTokens: Long,
+    val cacheWriteTokens: Long,
+    val cacheReadTokens: Long,
+    val costUsd: Double
+)
+
+@Serializable
+data class LatencyTimeSeriesPoint(
+    val timestamp: Long,
+    val p50: Long,
+    val p95: Long,
+    val p99: Long
+)
+
+@Serializable
+data class DashboardDistributions(
+    val modelDistribution: List<ModelDistribution>,
+    val channelDistribution: List<ChannelDistribution>,
+    val groupDistribution: List<GroupDistribution>,
+    val errorDistribution: List<ErrorDistribution>
+)
+
+@Serializable
+data class ModelDistribution(
+    val model: String,
+    val requests: Long,
+    val percentage: Double,
+    val totalCostUsd: Double
+)
+
+@Serializable
+data class ChannelDistribution(
+    val channelId: String,
+    val channelName: String,
+    val requests: Long,
+    val successRate: Double,
+    val avgLatencyMs: Long
+)
+
+@Serializable
+data class GroupDistribution(
+    val groupId: String,
+    val groupName: String,
+    val requests: Long,
+    val totalCostUsd: Double,
+    val topModels: List<String>
+)
+
+@Serializable
+data class ErrorDistribution(
+    val errorType: String,
+    val count: Long,
+    val percentage: Double
 )
 
 @Serializable

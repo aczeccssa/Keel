@@ -31,7 +31,15 @@ export class AiGatewayApi {
 
   navCounts() { return requestJson(`${AIRELAY_BASE}/admin/nav-counts`, { token: this.token }); }
   usageGlobal() { return requestJson(`${TOKEN_BASE}/admin/usage/global`, { token: this.token }); }
-  usageRecords(limit = 200) { return requestJson(`${TOKEN_BASE}/admin/usage/records?limit=${limit}`, { token: this.token }); }
+  usageRecords(limit = 200, filters?: { groupId?: string; channelId?: string; model?: string; statusFilter?: string }) {
+    const params = new URLSearchParams({ limit: String(limit) });
+    if (filters?.groupId) params.append('groupId', filters.groupId);
+    if (filters?.channelId) params.append('channelId', filters.channelId);
+    if (filters?.model) params.append('model', filters.model);
+    if (filters?.statusFilter) params.append('statusFilter', filters.statusFilter);
+    return requestJson(`${TOKEN_BASE}/admin/usage/records?${params}`, { token: this.token });
+  }
+  dashboardStats(window = '24h') { return requestJson(`${AIRELAY_BASE}/admin/stats/dashboard?window=${window}`, { token: this.token }); }
   channels() { return requestJson(`${AIRELAY_BASE}/admin/channels`, { token: this.token }); }
   channelStats(channelId: string, window = '7d') { return requestJson(`${AIRELAY_BASE}/admin/channels/${channelId}/stats?window=${window}`, { token: this.token }); }
   groups() { return requestJson(`${AIRELAY_BASE}/admin/groups`, { token: this.token }); }

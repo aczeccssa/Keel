@@ -134,7 +134,11 @@ class TokenPlugin : StandardKeelPlugin {
             ) {
                 val limit = queryParameters["limit"]?.firstOrNull()?.toIntOrNull() ?: 50
                 val status = queryParameters["status"]?.firstOrNull()?.toIntOrNull()
-                PluginResult(body = repository.recentRecords(limit, status))
+                val groupId = queryParameters["groupId"]?.firstOrNull()
+                val channelId = queryParameters["channelId"]?.firstOrNull()
+                val model = queryParameters["model"]?.firstOrNull()
+                val statusFilter = queryParameters["statusFilter"]?.firstOrNull()
+                PluginResult(body = repository.recentRecords(limit, status, groupId, channelId, model, statusFilter))
             }
         }
     }

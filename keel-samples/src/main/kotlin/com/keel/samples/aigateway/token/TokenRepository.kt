@@ -342,15 +342,38 @@ class TokenRepository(
         )
     }
 
-    fun recentRecords(limit: Int, status: Int? = null): UsageListResponse = database.transaction {
+    fun recentRecords(
+        limit: Int,
+        status: Int? = null,
+        groupId: String? = null,
+        channelId: String? = null,
+        model: String? = null,
+        statusFilter: String? = null
+    ): UsageListResponse = database.transaction {
         val n = limit.coerceIn(1, 200)
+
         val rows = UsageRecordsTable.selectAll()
             .where {
+                var condition = UsageRecordsTable.deletedAt.isNull()
                 if (status != null) {
-                    UsageRecordsTable.deletedAt.isNull() and (UsageRecordsTable.status eq status)
-                } else {
-                    UsageRecordsTable.deletedAt.isNull()
+                    condition = condition and (UsageRecordsTable.status eq status)
                 }
+                if (groupId != null) {
+                    condition = condition and (UsageRecordsTable.poolLevelId eq groupId)
+                }
+                if (channelId != null) {
+                    condition = condition and (UsageRecordsTable.upstreamKeyId eq channelId)
+                }
+                if (model != null) {
+                    condition = condition and (UsageRecordsTable.model eq model)
+                }
+                if (statusFilter != null) {
+                    when (statusFilter.lowercase()) {
+                        "success" -> condition = condition and ((UsageRecordsTable.status greaterEq 200) and (UsageRecordsTable.status less 300))
+                        "error" -> condition = condition and (UsageRecordsTable.status greaterEq 400)
+                    }
+                }
+                condition
             }
             .orderBy(UsageRecordsTable.createdAt to SortOrder.DESC)
             .limit(n)
