@@ -440,7 +440,6 @@ class TokenRepository(
 
     private fun ResultRow.toUsageRecordView(): TokenUsageRecordView = TokenUsageRecordView(
         recordId = this[UsageRecordsTable.recordId],
-        requestId = this[UsageRecordsTable.recordId],
         keyId = this[UsageRecordsTable.keyId],
         userId = this[UsageRecordsTable.userId],
         model = this[UsageRecordsTable.model],

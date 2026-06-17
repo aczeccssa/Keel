@@ -525,16 +525,15 @@ class ChannelRepository(
             it[ChannelTestHistoryTable.latencyMs] = latencyMs
             it[errorMessage] = error?.take(500)
         }
-        // Keep only last 100 tests per channel
-        val toKeep = ChannelTestHistoryTable.selectAll()
+        // Keep only last 100 tests per channel - delete older ones
+        val allTests = ChannelTestHistoryTable.selectAll()
             .where { ChannelTestHistoryTable.channelId eq channelId }
             .orderBy(ChannelTestHistoryTable.testedAt to SortOrder.DESC)
-            .limit(100)
-            .map { it[ChannelTestHistoryTable.testId] }
-            .toSet()
-        if (toKeep.isNotEmpty()) {
-            ChannelTestHistoryTable.deleteWhere {
-                (ChannelTestHistoryTable.channelId eq channelId) and (ChannelTestHistoryTable.testId notInList toKeep)
+            .toList()
+        if (allTests.size > 100) {
+            val toDelete = allTests.drop(100).map { it[ChannelTestHistoryTable.testId] }
+            toDelete.forEach { id ->
+                ChannelTestHistoryTable.deleteWhere { ChannelTestHistoryTable.testId eq id }
             }
         }
     }
