@@ -32,7 +32,7 @@ describe('AI Gateway legacy UI migration entry', () => {
 
   it('keeps migrated legacy JS and CSS in parity with the existing backend static UI', () => {
     const sourceFiles = listFiles(sourceRoot).filter((file) => file.startsWith('js/') || file.startsWith('css/'));
-    const legacyFiles = listFiles(legacyRoot);
+    const legacyFiles = listFiles(legacyRoot).filter((file) => !file.endsWith('.test.ts'));
 
     expect(legacyFiles).toEqual(sourceFiles);
     for (const file of sourceFiles) {

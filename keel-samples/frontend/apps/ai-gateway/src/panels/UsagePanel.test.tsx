@@ -1,4 +1,5 @@
 import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
 import { UsagePanel } from './UsagePanel';
 
@@ -15,10 +16,11 @@ describe('UsagePanel', () => {
           errorCode: 'pool_exhausted',
           errorDetail: 'target channel ch-c1559f8d0ffa497f8e22 saturated at 10/10',
           upstreamKeyId: 'ch-c1559f8d0ffa497f8e22',
+          poolLevelId: 'default',
           streamed: true,
           failoverCount: 0,
-          usage: { promptTokens: 0, completionTokens: 0 },
-          cost: { totalCostUsd: 0 }
+          usage: { promptTokens: 0, completionTokens: 0, cacheReadInputTokens: 0, cacheCreationInputTokens: 0 },
+          cost: { totalCostUsd: 0, inputCostUsd: 0, outputCostUsd: 0 }
         }]
       })
     };
@@ -27,6 +29,11 @@ describe('UsagePanel', () => {
 
     await screen.findByText('pool_exhausted');
     expect(screen.getByText('target channel ch-c1559f8d0ffa497f8e22 saturated at 10/10')).toBeInTheDocument();
-    expect(screen.getByText('ch-c1559f8d0ffa497f8e22')).toBeInTheDocument();
+    expect(screen.getAllByText('ch-c1559f8d0ffa497f8e22').length).toBeGreaterThan(0);
+
+    await userEvent.click(screen.getByRole('button', { name: 'View' }));
+    expect(screen.getByRole('dialog', { name: 'Usage detail' })).toBeInTheDocument();
+    expect(screen.getByText('Request detail')).toBeInTheDocument();
+    expect(screen.getByText('Tokens')).toBeInTheDocument();
   });
 });

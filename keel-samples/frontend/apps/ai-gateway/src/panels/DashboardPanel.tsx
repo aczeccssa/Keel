@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   BarChart,
   DataTable,
@@ -8,12 +8,14 @@ import {
   ErrorBanner,
   PageHeader,
   SectionHeader,
+  SparklineChart,
   StatGrid
 } from '@keel/sample-ui';
 import type { AiGatewayApi } from '../api/aiGatewayApi';
 
 interface UsageRecord {
   requestId?: string;
+  recordId?: string;
   model?: string;
   createdAt?: string;
   totalCostUsd?: number;
@@ -32,6 +34,13 @@ interface UsageRecord {
   cacheHitRate?: number;
   latencyMs?: number;
   status?: number;
+  outcome?: string;
+  streamed?: boolean;
+  failoverCount?: number;
+  upstreamKeyId?: string;
+  poolLevelId?: string;
+  errorCode?: string;
+  errorDetail?: string;
 }
 
 interface DashboardStats {
@@ -51,10 +60,20 @@ interface DashboardStats {
   };
   trends?: {
     requestsByHour?: Array<{ timestamp: number; requests: number; successRate: number }>;
+    tokensByHour?: Array<{
+      timestamp: number;
+      promptTokens: number;
+      completionTokens: number;
+      cacheWriteTokens: number;
+      cacheReadTokens: number;
+      costUsd: number;
+    }>;
+    latencyByHour?: Array<{ timestamp: number; p50: number; p95: number; p99: number }>;
   };
   distributions?: {
     modelDistribution?: Array<{ model: string; requests: number; percentage: number; totalCostUsd: number }>;
     channelDistribution?: Array<{ channelId: string; channelName: string; requests: number; successRate: number; avgLatencyMs: number }>;
+    groupDistribution?: Array<{ groupId: string; groupName: string; requests: number; totalCostUsd: number; topModels: string[] }>;
     errorDistribution?: Array<{ errorType: string; count: number; percentage: number }>;
   };
 }
@@ -69,33 +88,63 @@ interface UsageGlobal {
   requestsByDay?: Array<{ day: string; requests: number; cost: number }>;
 }
 
+function formatTrendLabel(timestamp: number, window: string) {
+  const d = new Date(timestamp);
+  if (window === '1h' || window === '24h') {
+    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  }
+  return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+}
+
+function formatTotalTokens(value: number) {
+  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
+  if (value >= 1_000) return `${(value / 1_000).toFixed(1)}K`;
+  return value.toLocaleString();
+}
+
 export function DashboardPanel({ api }: { api: AiGatewayApi }) {
   const [global, setGlobal] = useState<UsageGlobal | null>(null);
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [records, setRecords] = useState<UsageRecord[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [timeWindow, setTimeWindow] = useState<string>('24h');
+  const [autoRefresh, setAutoRefresh] = useState(false);
 
-  useEffect(() => {
-    let cancelled = false;
+  const loadDashboard = useCallback((cancelled: () => boolean) => {
     Promise.all([
       api.usageGlobal() as Promise<UsageGlobal>,
       api.dashboardStats(timeWindow) as Promise<DashboardStats>,
       api.usageRecords(200) as Promise<{ records?: UsageRecord[] }>
     ])
       .then(([g, s, r]) => {
-        if (cancelled) return;
+        if (cancelled()) return;
+        setError(null);
         setGlobal(g);
         setStats(s);
         setRecords(r.records ?? []);
       })
       .catch((err) => {
-        if (!cancelled) setError(err instanceof Error ? err.message : 'Unable to load dashboard');
+        if (!cancelled()) setError(err instanceof Error ? err.message : 'Unable to load dashboard');
       });
+  }, [api, timeWindow]);
+
+  useEffect(() => {
+    let cancelled = false;
+    loadDashboard(() => cancelled);
     return () => {
       cancelled = true;
     };
-  }, [api, timeWindow]);
+  }, [loadDashboard]);
+
+  useEffect(() => {
+    if (!autoRefresh) return;
+    let cancelled = false;
+    const timer = setInterval(() => loadDashboard(() => cancelled), 30_000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [autoRefresh, loadDashboard]);
 
   const topModels = useMemo(() => {
     const map = new Map<string, { requests: number; cost: number }>();
@@ -157,6 +206,24 @@ export function DashboardPanel({ api }: { api: AiGatewayApi }) {
       .slice(-14);
   }, [global, records]);
 
+  const requestTrend = useMemo(() => {
+    const points = stats?.trends?.requestsByHour ?? [];
+    return points.map((p) => ({ label: formatTrendLabel(p.timestamp, timeWindow), value: p.requests }));
+  }, [stats, timeWindow]);
+
+  const tokenTrend = useMemo(() => {
+    const points = stats?.trends?.tokensByHour ?? [];
+    return points.map((p) => ({
+      label: formatTrendLabel(p.timestamp, timeWindow),
+      value: p.promptTokens + p.completionTokens + p.cacheWriteTokens + p.cacheReadTokens
+    }));
+  }, [stats, timeWindow]);
+
+  const latencyTrend = useMemo(() => {
+    const points = stats?.trends?.latencyByHour ?? [];
+    return points.map((p) => ({ label: formatTrendLabel(p.timestamp, timeWindow), value: p.p95 }));
+  }, [stats, timeWindow]);
+
   const recentCols: DataTableColumn<UsageRecord>[] = [
     {
       key: 'requestId',
@@ -217,6 +284,10 @@ export function DashboardPanel({ api }: { api: AiGatewayApi }) {
             {window}
           </button>
         ))}
+        <label style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13, color: 'var(--keel-muted)' }}>
+          <input checked={autoRefresh} onChange={(e) => setAutoRefresh(e.target.checked)} type="checkbox" />
+          Auto-refresh 30s
+        </label>
       </div>
 
       <StatGrid
@@ -264,6 +335,32 @@ export function DashboardPanel({ api }: { api: AiGatewayApi }) {
           centerHint="Requests"
         />
       </div>
+
+      <section className="keel-section">
+        <SectionHeader title="Time-series trends" description={`Traffic, token, and latency trends for ${timeWindow}.`} />
+        <div className="keel-grid-2">
+          <BarChart
+            title="Requests by bucket"
+            hint="Request count"
+            data={requestTrend.length > 0 ? requestTrend : [{ label: '—', value: 0 }]}
+          />
+          <BarChart
+            title="Tokens by bucket"
+            hint="Input + output + cache tokens"
+            data={tokenTrend.length > 0 ? tokenTrend : [{ label: '—', value: 0 }]}
+          />
+        </div>
+        <div style={{ marginTop: 16, padding: 16, border: '1px solid var(--keel-border)', borderRadius: 8 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16 }}>
+            <div>
+              <strong>Latency P95 trend</strong>
+              <div style={{ color: 'var(--keel-muted)', fontSize: 12 }}>Higher values indicate slower upstream responses.</div>
+            </div>
+            <SparklineChart values={latencyTrend.map((p) => p.value)} width={260} height={56} title="Latency P95 trend" />
+          </div>
+        </div>
+      </section>
+
       {stats?.overview && (
         <section className="keel-section">
           <SectionHeader title="Additional metrics" description="Cache efficiency and channel health" />
@@ -365,8 +462,18 @@ export function DashboardPanel({ api }: { api: AiGatewayApi }) {
               />
             )}
           </div>
-          {stats.distributions.errorDistribution && stats.distributions.errorDistribution.length > 0 && (
-            <div style={{ marginTop: '24px' }}>
+          <div className="keel-grid-2" style={{ marginTop: 24 }}>
+            {stats.distributions.groupDistribution && stats.distributions.groupDistribution.length > 0 && (
+              <BarChart
+                title="Group distribution"
+                hint="Top groups by requests"
+                data={stats.distributions.groupDistribution.slice(0, 10).map(g => ({
+                  label: g.groupName.slice(0, 20),
+                  value: g.requests
+                }))}
+              />
+            )}
+            {stats.distributions.errorDistribution && stats.distributions.errorDistribution.length > 0 && (
               <DonutChart
                 title="Error distribution"
                 hint="By error type"
@@ -377,10 +484,45 @@ export function DashboardPanel({ api }: { api: AiGatewayApi }) {
                 centerLabel={stats.distributions.errorDistribution.reduce((sum, e) => sum + e.count, 0).toLocaleString()}
                 centerHint="Total errors"
               />
-            </div>
-          )}
+            )}
+          </div>
         </>
       )}
+
+      <section className="keel-section">
+        <SectionHeader title="Real-time monitor" description="Latest traffic and channel health snapshot." />
+        <div className="keel-grid-2">
+          <div style={{ border: '1px solid var(--keel-border)', borderRadius: 8, padding: 16 }}>
+            <strong>Recent request stream</strong>
+            <div style={{ display: 'grid', gap: 8, marginTop: 12, maxHeight: 260, overflow: 'auto' }}>
+              {records.slice(0, 20).map((r, i) => (
+                <div key={r.requestId ?? r.recordId ?? i} style={{ display: 'grid', gridTemplateColumns: '90px 1fr auto', gap: 8, alignItems: 'center', fontSize: 12 }}>
+                  <span className="keel-mono" style={{ color: 'var(--keel-muted)' }}>{r.createdAt ? r.createdAt.replace('T', ' ').slice(11, 19) : '—'}</span>
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.model ?? 'unknown'}</span>
+                  <span style={{ color: (r.status ?? 0) >= 400 ? 'var(--keel-danger)' : 'var(--keel-success)' }}>{r.status ?? '—'}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div style={{ border: '1px solid var(--keel-border)', borderRadius: 8, padding: 16 }}>
+            <strong>Channel health board</strong>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginTop: 12 }}>
+              <div style={{ padding: 12, borderRadius: 8, background: 'rgba(16,185,129,.12)' }}>
+                <div style={{ color: 'var(--keel-muted)', fontSize: 12 }}>Healthy</div>
+                <div style={{ fontSize: 24, fontWeight: 700 }}>{stats?.overview?.healthyChannels ?? 0}</div>
+              </div>
+              <div style={{ padding: 12, borderRadius: 8, background: 'rgba(245,158,11,.12)' }}>
+                <div style={{ color: 'var(--keel-muted)', fontSize: 12 }}>Cooldown</div>
+                <div style={{ fontSize: 24, fontWeight: 700 }}>{stats?.overview?.cooldownChannels ?? 0}</div>
+              </div>
+              <div style={{ padding: 12, borderRadius: 8, background: 'rgba(239,68,68,.12)' }}>
+                <div style={{ color: 'var(--keel-muted)', fontSize: 12 }}>Disabled</div>
+                <div style={{ fontSize: 24, fontWeight: 700 }}>{stats?.overview?.disabledChannels ?? 0}</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
 
       <section className="keel-section">
         <SectionHeader title="Top models" description="Highest traffic routes by request count." />

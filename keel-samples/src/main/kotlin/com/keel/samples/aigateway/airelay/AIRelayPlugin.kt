@@ -110,6 +110,7 @@ class AIRelayPlugin : StandardKeelPlugin {
     private var configService: ConfigService? = null
     private var channelRepository: ChannelRepository? = null
     private var configDbFactory: DatabaseFactory? = null
+    private val dashboardStatsCache = java.util.concurrent.ConcurrentHashMap<String, CachedDashboardStats>()
 
     override fun modules() = listOf(
         module {
@@ -885,9 +886,17 @@ class AIRelayPlugin : StandardKeelPlugin {
     }
 
     private suspend fun calculateDashboardStats(window: String): DashboardStatsResponse {
+        val normalizedWindow = window.takeIf { it in setOf("1h", "24h", "7d", "30d") } ?: "24h"
+        val cacheKey = "dashboard:$normalizedWindow"
+        val now = System.currentTimeMillis()
+        dashboardStatsCache[cacheKey]?.let { cached ->
+            if (now - cached.cachedAtEpochMs < 60_000L) return cached.stats
+        }
+
         val usageRecorder = kernelKoin.get<UsageRecorder>()
         val snapshot = usageRecorder.snapshot()
-        val records = snapshot.recentRequests
+        val windowStart = now - windowDurationMs(normalizedWindow)
+        val records = snapshot.recentRequests.filter { parseEpochMs(it.createdAt) >= windowStart }
 
         // Overview calculations
         val totalRequests = records.size.toLong()
@@ -903,8 +912,13 @@ class AIRelayPlugin : StandardKeelPlugin {
         val p95 = if (sortedLatencies.isNotEmpty()) sortedLatencies[(sortedLatencies.size * 0.95).toInt().coerceAtMost(sortedLatencies.size - 1)] else 0L
         val p99 = if (sortedLatencies.isNotEmpty()) sortedLatencies[(sortedLatencies.size * 0.99).toInt().coerceAtMost(sortedLatencies.size - 1)] else 0L
 
-        // Cache hit rate (placeholder - needs proper implementation)
-        val cacheHitRate = 0.0
+        // Cache hit rate
+        val cacheDenominator = records.sumOf { (it.usage.promptTokens + it.usage.cacheReadInputTokens).toLong() }
+        val cacheHitRate = if (cacheDenominator > 0) {
+            records.sumOf { it.usage.cacheReadInputTokens.toLong() }.toDouble() / cacheDenominator
+        } else {
+            0.0
+        }
 
         // Channel health
         val poolSnapshot = activeManager().snapshot()
@@ -939,12 +953,24 @@ class AIRelayPlugin : StandardKeelPlugin {
         )
 
         // Trends - hourly bucketing with complete metrics
-        val now = System.currentTimeMillis()
-        val hourlyBuckets = (0..23).map { hour ->
-            val bucketStart = now - (hour + 1) * 3600_000
-            val bucketEnd = now - hour * 3600_000
+        val bucketCount = when (normalizedWindow) {
+            "1h" -> 12
+            "24h" -> 24
+            "7d" -> 7
+            "30d" -> 30
+            else -> 24
+        }
+        val bucketMs = when (normalizedWindow) {
+            "1h" -> 5 * 60_000L
+            "24h" -> 60 * 60_000L
+            "7d", "30d" -> 24 * 60 * 60_000L
+            else -> 60 * 60_000L
+        }
+        val hourlyBuckets = (0 until bucketCount).map { bucket ->
+            val bucketStart = now - (bucket + 1) * bucketMs
+            val bucketEnd = now - bucket * bucketMs
             val bucketRecords = records.filter { record ->
-                val timestamp = record.createdAt.toLongOrNull() ?: 0L
+                val timestamp = parseEpochMs(record.createdAt)
                 timestamp in bucketStart..bucketEnd
             }
             TimeSeriesPoint(
@@ -954,28 +980,28 @@ class AIRelayPlugin : StandardKeelPlugin {
             )
         }.reversed()
 
-        val tokensByHour = (0..23).map { hour ->
-            val bucketStart = now - (hour + 1) * 3600_000
-            val bucketEnd = now - hour * 3600_000
+        val tokensByHour = (0 until bucketCount).map { bucket ->
+            val bucketStart = now - (bucket + 1) * bucketMs
+            val bucketEnd = now - bucket * bucketMs
             val bucketRecords = records.filter { record ->
-                val timestamp = record.createdAt.toLongOrNull() ?: 0L
+                val timestamp = parseEpochMs(record.createdAt)
                 timestamp in bucketStart..bucketEnd
             }
             TokenTimeSeriesPoint(
                 timestamp = bucketEnd,
-                promptTokens = bucketRecords.sumOf { it.usage?.promptTokens?.toLong() ?: 0L },
-                completionTokens = bucketRecords.sumOf { it.usage?.completionTokens?.toLong() ?: 0L },
-                cacheWriteTokens = bucketRecords.sumOf { it.usage?.cacheCreationInputTokens?.toLong() ?: 0L },
-                cacheReadTokens = bucketRecords.sumOf { it.usage?.cacheReadInputTokens?.toLong() ?: 0L },
-                costUsd = bucketRecords.sumOf { it.cost?.totalCostUsd ?: 0.0 }
+                promptTokens = bucketRecords.sumOf { it.usage.promptTokens.toLong() },
+                completionTokens = bucketRecords.sumOf { it.usage.completionTokens.toLong() },
+                cacheWriteTokens = bucketRecords.sumOf { it.usage.cacheCreationInputTokens.toLong() },
+                cacheReadTokens = bucketRecords.sumOf { it.usage.cacheReadInputTokens.toLong() },
+                costUsd = bucketRecords.sumOf { it.cost.totalCostUsd }
             )
         }.reversed()
 
-        val latencyByHour = (0..23).map { hour ->
-            val bucketStart = now - (hour + 1) * 3600_000
-            val bucketEnd = now - hour * 3600_000
+        val latencyByHour = (0 until bucketCount).map { bucket ->
+            val bucketStart = now - (bucket + 1) * bucketMs
+            val bucketEnd = now - bucket * bucketMs
             val bucketRecords = records.filter { record ->
-                val timestamp = record.createdAt.toLongOrNull() ?: 0L
+                val timestamp = parseEpochMs(record.createdAt)
                 timestamp in bucketStart..bucketEnd
             }
             val latencies = bucketRecords.map { it.latencyMs }.sorted()
@@ -1056,12 +1082,25 @@ class AIRelayPlugin : StandardKeelPlugin {
             errorDistribution = errorDistribution
         )
 
-        return DashboardStatsResponse(
+        val stats = DashboardStatsResponse(
             overview = overview,
             trends = trends,
             distributions = distributions
         )
+        dashboardStatsCache[cacheKey] = CachedDashboardStats(stats, now)
+        return stats
     }
+
+    private fun windowDurationMs(window: String): Long = when (window) {
+        "1h" -> 60 * 60_000L
+        "24h" -> 24 * 60 * 60_000L
+        "7d" -> 7 * 24 * 60 * 60_000L
+        "30d" -> 30L * 24 * 60 * 60_000L
+        else -> 24 * 60 * 60_000L
+    }
+
+    private fun parseEpochMs(value: String): Long = value.toLongOrNull()
+        ?: runCatching { java.time.Instant.parse(value).toEpochMilli() }.getOrDefault(0L)
 
     private fun com.keel.kernel.plugin.KeelRequestContext.streamIntervalMs(): Long =
         queryParameters["intervalMs"]?.firstOrNull()?.toLongOrNull()?.coerceIn(1_000L, 60_000L) ?: 5_000L
@@ -1395,6 +1434,11 @@ data class UsageStreamPayload(
     val recentRequests: List<com.keel.contract.ai.UsageRecordView>,
     val topModels: List<com.keel.contract.ai.ModelUsageSummary>,
     val topUsers: List<com.keel.contract.ai.UserUsageSummary>
+)
+
+private data class CachedDashboardStats(
+    val stats: DashboardStatsResponse,
+    val cachedAtEpochMs: Long
 )
 
 // ---- token counting ----

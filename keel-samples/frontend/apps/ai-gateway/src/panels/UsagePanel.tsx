@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import {
+  Button,
   DataTable,
   type DataTableColumn,
   EmptyState,
@@ -66,6 +67,15 @@ function renderModelRoute(model?: string) {
   );
 }
 
+function DetailRow({ label, value }: { label: string; value: unknown }) {
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: '130px 1fr', gap: 8, fontSize: 13 }}>
+      <span style={{ color: 'var(--keel-muted)' }}>{label}</span>
+      <span className={typeof value === 'number' ? 'keel-mono' : undefined}>{value == null || value === '' ? '—' : String(value)}</span>
+    </div>
+  );
+}
+
 export function UsagePanel({ api }: { api: AiGatewayApi }) {
   const [rows, setRows] = useState<UsageRecord[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -75,6 +85,7 @@ export function UsagePanel({ api }: { api: AiGatewayApi }) {
     model?: string;
     statusFilter?: string;
   }>({});
+  const [selectedRecord, setSelectedRecord] = useState<UsageRecord | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -324,8 +335,86 @@ export function UsagePanel({ api }: { api: AiGatewayApi }) {
           rows={rows}
           getRowKey={(r, i) => r.requestId ?? r.recordId ?? `row-${i}`}
           maxHeight="calc(100vh - 220px)"
+          actionsHeader="Detail"
+          actionsColumn={(r) => (
+            <Button size="sm" variant="secondary" onClick={() => setSelectedRecord(r)}>
+              View
+            </Button>
+          )}
         />
       )}
+
+      {selectedRecord ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Usage detail"
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(15, 23, 42, .35)',
+            zIndex: 100,
+            display: 'flex',
+            justifyContent: 'flex-end'
+          }}
+          onClick={() => setSelectedRecord(null)}
+        >
+          <aside
+            style={{
+              width: 'min(520px, 100vw)',
+              height: '100%',
+              background: 'var(--keel-surface, #fff)',
+              boxShadow: '-20px 0 40px rgba(15, 23, 42, .18)',
+              padding: 24,
+              overflow: 'auto'
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, marginBottom: 20 }}>
+              <div>
+                <h2 style={{ margin: 0 }}>Request detail</h2>
+                <p style={{ margin: '4px 0 0', color: 'var(--keel-muted)', fontSize: 13 }}>Full token, cost, routing, and error context.</p>
+              </div>
+              <Button size="sm" variant="secondary" onClick={() => setSelectedRecord(null)}>Close</Button>
+            </div>
+
+            <section style={{ display: 'grid', gap: 8, marginBottom: 20 }}>
+              <h3>Basic</h3>
+              <DetailRow label="Request ID" value={selectedRecord.requestId ?? selectedRecord.recordId} />
+              <DetailRow label="Timestamp" value={selectedRecord.createdAt} />
+              <DetailRow label="Model" value={selectedRecord.model} />
+              <DetailRow label="Group" value={selectedRecord.groupId ?? selectedRecord.poolLevelId} />
+              <DetailRow label="Channel" value={selectedRecord.channelName ?? selectedRecord.channelId ?? selectedRecord.upstreamKeyId} />
+              <DetailRow label="Status" value={`${selectedRecord.status ?? '—'} (${selectedRecord.outcome ?? '—'})`} />
+            </section>
+
+            <section style={{ display: 'grid', gap: 8, marginBottom: 20 }}>
+              <h3>Tokens</h3>
+              <DetailRow label="Input" value={(selectedRecord.usage?.promptTokens ?? 0).toLocaleString()} />
+              <DetailRow label="Output" value={(selectedRecord.usage?.completionTokens ?? 0).toLocaleString()} />
+              <DetailRow label="Cache Write" value={(selectedRecord.usage?.cacheCreationInputTokens ?? 0).toLocaleString()} />
+              <DetailRow label="Cache Read" value={(selectedRecord.usage?.cacheReadInputTokens ?? 0).toLocaleString()} />
+              <DetailRow label="Cache Hit Rate" value={selectedRecord.cacheHitRate != null || selectedRecord.cost?.cacheHitRate != null ? `${((selectedRecord.cacheHitRate ?? selectedRecord.cost?.cacheHitRate ?? 0) * 100).toFixed(1)}%` : '—'} />
+            </section>
+
+            <section style={{ display: 'grid', gap: 8, marginBottom: 20 }}>
+              <h3>Cost</h3>
+              <DetailRow label="Input Cost" value={`$${(selectedRecord.cost?.inputCostUsd ?? 0).toFixed(4)}`} />
+              <DetailRow label="Output Cost" value={`$${(selectedRecord.cost?.outputCostUsd ?? 0).toFixed(4)}`} />
+              <DetailRow label="Total Cost" value={`$${(selectedRecord.cost?.totalCostUsd ?? selectedRecord.totalCostUsd ?? 0).toFixed(4)}`} />
+            </section>
+
+            <section style={{ display: 'grid', gap: 8 }}>
+              <h3>Performance & Errors</h3>
+              <DetailRow label="Latency" value={selectedRecord.latencyMs != null ? `${selectedRecord.latencyMs} ms` : '—'} />
+              <DetailRow label="Failover" value={selectedRecord.failoverCount ?? 0} />
+              <DetailRow label="Streamed" value={selectedRecord.streamed ? 'yes' : 'no'} />
+              <DetailRow label="Error Code" value={selectedRecord.errorCode} />
+              <DetailRow label="Error Detail" value={selectedRecord.errorDetail} />
+            </section>
+          </aside>
+        </div>
+      ) : null}
     </>
   );
 }
