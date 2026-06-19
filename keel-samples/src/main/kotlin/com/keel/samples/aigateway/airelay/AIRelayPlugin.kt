@@ -618,7 +618,13 @@ class AIRelayPlugin : StandardKeelPlugin {
                 ) { request ->
                     val groupId = pathParameters["groupId"] ?: throw PluginApiException(400, "Missing groupId")
                     val aliasOrModel = pathParameters["aliasOrModel"] ?: throw PluginApiException(400, "Missing aliasOrModel")
-                    PluginResult(body = activeManager().explainSelection(groupId, request.requestedModel ?: aliasOrModel))
+                    PluginResult(
+                        body = activeManager().explainSelection(
+                            groupId,
+                            request.requestedModel ?: aliasOrModel,
+                            request.resolvedTraceId,
+                        )
+                    )
                 }
             }
 
@@ -1290,7 +1296,13 @@ data class PoolResetResponse(val message: String)
 data class PoolListResponse(val pools: List<PoolView>)
 
 @Serializable
-data class PoolExplainRequest(val requestedModel: String? = null)
+data class PoolExplainRequest(
+    val requestedModel: String? = null,
+    val traceId: String? = null,
+    val requestId: String? = null,
+) {
+    val resolvedTraceId: String? get() = traceId ?: requestId
+}
 
 @Serializable
 data class PoolConfigResponse(

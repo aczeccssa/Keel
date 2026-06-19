@@ -4,6 +4,15 @@ import com.keel.kernel.plugin.UnifiedPluginManager
 import com.keel.openapi.runtime.OpenApiRegistry
 import com.keel.samples.aigateway.account.AccountPlugin
 import com.keel.samples.aigateway.airelay.AIRelayPlugin
+import com.keel.samples.aigateway.airelay.AliasRouteConfig
+import com.keel.samples.aigateway.airelay.AliasRoutingPolicy
+import com.keel.samples.aigateway.airelay.AliasTargetConfig
+import com.keel.samples.aigateway.airelay.PoolChainConfig
+import com.keel.samples.aigateway.airelay.PoolLevelConfig
+import com.keel.samples.aigateway.airelay.PooledKeyConfig
+import com.keel.samples.aigateway.airelay.UpstreamProviderConfig
+import com.keel.samples.aigateway.airelay.protocol.WireProtocol
+import com.keel.samples.aigateway.airelay.upstream.MockFailure
 import com.keel.samples.aigateway.riskcontrol.RiskControlPlugin
 import com.keel.samples.aigateway.token.TokenPlugin
 import io.ktor.client.request.get
@@ -21,6 +30,7 @@ import io.ktor.server.application.install
 import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.server.routing.routing
 import io.ktor.server.sse.SSE
+import io.ktor.sse.ServerSentEvent
 import io.ktor.server.testing.testApplication
 import io.ktor.utils.io.readUTF8Line
 import kotlinx.serialization.json.Json
@@ -56,7 +66,8 @@ class AiGatewayPluginIntegrationTest {
         manager.registerPlugin(AccountPlugin())
         manager.registerPlugin(TokenPlugin())
         manager.registerPlugin(RiskControlPlugin())
-        manager.registerPlugin(AIRelayPlugin())
+        val relayPlugin = AIRelayPlugin()
+        manager.registerPlugin(relayPlugin)
 
         application {
             install(ContentNegotiation) { json() }
@@ -87,7 +98,7 @@ class AiGatewayPluginIntegrationTest {
             val rawKey = json.parseToJsonElement(keyResponse.bodyAsText()).jsonObject["rawKey"]!!.jsonPrimitive.content
             assertTrue(rawKey.startsWith("sk-keel-"))
 
-            with(TestContext(client, accessToken, rawKey, json)) {
+            with(TestContext(client, accessToken, rawKey, json, relayPlugin)) {
                 block()
             }
         } finally {
@@ -109,7 +120,8 @@ class AiGatewayPluginIntegrationTest {
         val client: io.ktor.client.HttpClient,
         val accessToken: String,
         val rawKey: String,
-        private val json: Json
+        private val json: Json,
+        val relayPlugin: AIRelayPlugin,
     ) {
         suspend fun readUsageSnapshot(path: String): kotlinx.serialization.json.JsonObject {
             return client.prepareGet(path).execute { response ->
@@ -553,10 +565,22 @@ class AiGatewayPluginIntegrationTest {
 
     @Test
     fun adminGroupPoolsEndpointReturnsRuntimePools() = setupApp {
+        val relay = client.post("/api/plugins/airelay/v1/chat/completions") {
+            header("Authorization", "Bearer $rawKey")
+            contentType(ContentType.Application.Json)
+            setBody("""{"model":"gpt-4o-mini","messages":[{"role":"user","content":"Hello"}]}""")
+        }
+        assertEquals(HttpStatusCode.OK, relay.status)
+
         val response = client.get("/api/plugins/airelay/admin/groups/default/pools")
         assertEquals(HttpStatusCode.OK, response.status)
         val body = json.parseToJsonElement(response.bodyAsText()).jsonObject
         assertTrue(body["pools"]!!.jsonArray.isNotEmpty())
+        val pool = body["pools"]!!.jsonArray.map { it.jsonObject }
+            .first { it["aliasOrModel"]!!.jsonPrimitive.content == "gpt-4o-mini" }
+        assertTrue(pool["metrics1m"]!!.jsonObject["selectedRequests"]!!.jsonPrimitive.content.toLong() >= 1L)
+        assertTrue(pool["channels"]!!.jsonArray.first().jsonObject.containsKey("expectedShare"))
+        assertTrue(pool["channels"]!!.jsonArray.first().jsonObject.containsKey("metrics15m"))
     }
 
     @Test
@@ -588,5 +612,116 @@ class AiGatewayPluginIntegrationTest {
                 System.setProperty("keel.airelay.debugHeaders", previous)
             }
         }
+    }
+
+    @Test
+    fun nonRetryableUpstreamAuthenticationErrorKeepsItsStatus() = setupApp {
+        relayPlugin.upstreamClient.failKey("mock-default-1", MockFailure.Http(401, "invalid upstream credential"))
+
+        val response = client.post("/api/plugins/airelay/v1/chat/completions") {
+            header("Authorization", "Bearer $rawKey")
+            contentType(ContentType.Application.Json)
+            setBody("""{"model":"gpt-4o-mini","messages":[{"role":"user","content":"Hello"}]}""")
+        }
+
+        assertEquals(HttpStatusCode.Unauthorized, response.status)
+        assertTrue(response.bodyAsText().contains("invalid upstream credential"))
+    }
+
+    @Test
+    fun explainEndpointReturnsTheRequestedHistoricalTrace() = setupApp {
+        listOf("trace-one", "trace-two").forEach { requestId ->
+            val relay = client.post("/api/plugins/airelay/v1/chat/completions") {
+                header("Authorization", "Bearer $rawKey")
+                header("X-Request-Id", requestId)
+                contentType(ContentType.Application.Json)
+                setBody("""{"model":"gpt-4o-mini","messages":[{"role":"user","content":"Hello"}]}""")
+            }
+            assertEquals(HttpStatusCode.OK, relay.status)
+        }
+
+        val response = client.post("/api/plugins/airelay/admin/groups/default/pools/gpt-4o-mini/explain") {
+            contentType(ContentType.Application.Json)
+            setBody("""{"requestedModel":"gpt-4o-mini","requestId":"trace-one"}""")
+        }
+
+        assertEquals(HttpStatusCode.OK, response.status)
+        val trace = json.parseToJsonElement(response.bodyAsText()).jsonObject["requestTrace"]!!.jsonObject
+        assertEquals("trace-one", trace["requestId"]!!.jsonPrimitive.content)
+        assertEquals("SUCCESS", trace["outcome"]!!.jsonPrimitive.content)
+        assertTrue(trace["attempts"]!!.jsonArray.isNotEmpty())
+    }
+
+    @Test
+    fun debugHeaderReportsOrderedFailoverPolicy() = setupApp {
+        relayPlugin.installRealUpstream(
+            relayPlugin.upstreamClient,
+            listOf(
+                PoolChainConfig(
+                    chainId = "default",
+                    modelAliases = listOf("legacy"),
+                    aliasRoutes = listOf(
+                        AliasRouteConfig(
+                            aliasName = "legacy",
+                            targets = listOf(AliasTargetConfig("upstream-model")),
+                            routingPolicy = AliasRoutingPolicy.ORDERED_FAILOVER,
+                        )
+                    ),
+                    levels = listOf(
+                        PoolLevelConfig(
+                            levelId = "default-p0",
+                            levelIndex = 0,
+                            provider = UpstreamProviderConfig("legacy-provider", protocol = WireProtocol.OPENAI_CHAT),
+                            keys = listOf(PooledKeyConfig("legacy-channel", supportedModels = listOf("upstream-model"))),
+                        )
+                    ),
+                )
+            ),
+        )
+        val previous = System.getProperty("keel.airelay.debugHeaders")
+        System.setProperty("keel.airelay.debugHeaders", "true")
+        try {
+            val response = client.post("/api/plugins/airelay/v1/chat/completions") {
+                header("Authorization", "Bearer $rawKey")
+                header("X-AIRelay-Debug", "true")
+                contentType(ContentType.Application.Json)
+                setBody("""{"model":"legacy","messages":[{"role":"user","content":"Hello"}]}""")
+            }
+
+            assertEquals(HttpStatusCode.OK, response.status, response.bodyAsText())
+            assertEquals("ORDERED_FAILOVER", response.headers["X-AIRelay-Routing-Policy"])
+        } finally {
+            if (previous == null) System.clearProperty("keel.airelay.debugHeaders") else System.setProperty("keel.airelay.debugHeaders", previous)
+        }
+    }
+
+    @Test
+    fun streamingSemanticFailureIsCountedAsFailure() = setupApp {
+        relayPlugin.upstreamClient.streamEventsForKey(
+            "mock-default-1",
+            listOf(
+                ServerSentEvent(
+                    data = """{"type":"response.failed","response":{"id":"resp-failed","status":"failed","error":{"type":"server_error","message":"stream failed"}}}""",
+                    event = "response.failed",
+                )
+            ),
+        )
+
+        val response = client.post("/api/plugins/airelay/v1/chat/completions") {
+            header("Authorization", "Bearer $rawKey")
+            contentType(ContentType.Application.Json)
+            setBody("""{"model":"gpt-4o-mini","stream":true,"messages":[{"role":"user","content":"Hello"}]}""")
+        }
+        assertEquals(HttpStatusCode.OK, response.status)
+        response.bodyAsText()
+
+        val pools = client.get("/api/plugins/airelay/admin/groups/default/pools")
+        val pool = json.parseToJsonElement(pools.bodyAsText()).jsonObject["pools"]!!.jsonArray
+            .map { it.jsonObject }
+            .first {
+                it["aliasOrModel"]!!.jsonPrimitive.content == "gpt-4o-mini" &&
+                    it["channels"]!!.jsonArray.any { channel -> channel.jsonObject["channelId"]!!.jsonPrimitive.content == "mock-default-1" }
+            }
+        assertTrue(pool["metrics1m"]!!.jsonObject["failedRequests"]!!.jsonPrimitive.content.toLong() >= 1L)
     }
 }

@@ -730,6 +730,16 @@ git commit -m "docs: mark ai relay routing pools plan executed"
 2. Placeholder scan: no `TODO`/`TBD` instructions remain in executable plan steps; every code-changing step includes concrete snippets.
 3. Type consistency: the plan uses `AliasRoutingPolicy`, `PoolRouteConfig`, `PoolLease`, `PoolView`, and `PoolExplainResponse` consistently across tasks.
 
+## Execution Notes
+
+- [x] Pool scheduling, priority tiers, weighted selection, leases, cooldown and saturation handling implemented.
+- [x] Non-retryable upstream errors preserve their original status; retryable failures record actual failover paths.
+- [x] Request-level explain traces and debug headers report the effective routing policy and selected channel.
+- [x] Per-channel and per-pool rolling metrics are available for 1m, 5m and 15m windows, including latency percentiles and traffic-share deviation.
+- [x] Runtime channel state survives configuration reloads without losing cooldown or diagnostic fields.
+- [x] Admin Pool UI displays live metrics and an explain panel with the actual attempt path.
+- [x] Full `keel-samples` and `keel-test-suite` tests, frontend tests, typecheck and production build passed on 2026-06-19.
+
 Plan complete and saved to `docs/superpowers/plans/2026-06-19-ai-gateway-routing-pools.md`. Two execution options:
 
 1. Subagent-Driven (recommended) - I dispatch a fresh subagent per task, review between tasks, fast iteration

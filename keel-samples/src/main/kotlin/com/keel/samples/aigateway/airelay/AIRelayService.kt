@@ -161,7 +161,7 @@ class AIRelayService(
         var lastError: Throwable? = null
         val excludedKeyIds = linkedSetOf<String>()
         while (true) {
-            val lease = poolChainManager.acquire(keyContext.verified.routingGroupId, ir.model, excludedKeyIds)
+            val lease = poolChainManager.acquire(keyContext.verified.routingGroupId, ir.model, excludedKeyIds, context.requestId)
                 ?: break
             val selection = lease.selection
             val upstreamHeaders = upstreamHeaderOverrides(context, selection.provider.protocol, ir)
@@ -210,7 +210,7 @@ class AIRelayService(
                     )
                 } catch (error: Throwable) {
                     recordLocalAccountingFailure(keyContext.verified, clientProtocol, ir, started, error)
-                    poolChainManager.markSuccess(selection)
+                    poolChainManager.markSuccess(selection, elapsedMs(started))
                     return protocolError(clientProtocol, 500, "api_error", localAccountingMessage(error))
                 }
 
@@ -229,10 +229,10 @@ class AIRelayService(
                         )
                     )
                 } catch (error: Throwable) {
-                    poolChainManager.markSuccess(selection)
+                    poolChainManager.markSuccess(selection, elapsedMs(started))
                     return protocolError(clientProtocol, 500, "api_error", localAccountingMessage(error))
                 }
-                poolChainManager.markSuccess(selection)
+                poolChainManager.markSuccess(selection, elapsedMs(started))
 
                 val headers = (extraHeaders + creditHeaders).toMutableMap()
                 headers["Content-Type"] = listOf("application/json")
@@ -243,20 +243,38 @@ class AIRelayService(
                 return RelayResult(status = upstream.status, headers = headers, body = responseBody)
             } catch (error: UpstreamHttpException) {
                 System.err.println("airelay_error model=${ir.model} client=${clientProtocol} upstream=${selection.provider.protocol} status=${error.status} error=upstream_${error.status} message=${(error.message ?: "").take(180)}")
-                poolChainManager.markFailure(selection, error.status, error.message, error.retryAfterSeconds)
+                poolChainManager.markFailure(selection, error.status, error.message, error.retryAfterSeconds, elapsedMs(started))
                 lastError = error
                 failoverCount += 1
                 excludedKeyIds += selection.keyState.key.keyId
-                if (!shouldFailover(error.status)) break
+                if (!shouldFailover(error.status)) {
+                    poolChainManager.completeTrace(context.requestId, "FAILED")
+                    usageRecorder.record(
+                        rejectionRecord(
+                            key = keyContext.verified,
+                            clientProtocol = clientProtocol,
+                            ir = ir,
+                            status = error.status,
+                            errorCode = "upstream_${error.status}",
+                            errorDetail = error.message,
+                            started = started,
+                            failoverCount = failoverCount,
+                        )
+                    )
+                    return protocolError(clientProtocol, error.status, "upstream_error", error.message)
+                }
+                poolChainManager.recordFailover(selection)
             } catch (error: Throwable) {
-                poolChainManager.markFailure(selection, null, error.message)
+                poolChainManager.markFailure(selection, null, error.message, latencyMs = elapsedMs(started))
                 lastError = error
                 failoverCount += 1
                 excludedKeyIds += selection.keyState.key.keyId
+                poolChainManager.recordFailover(selection)
             } finally {
                 lease.close()
             }
         }
+        poolChainManager.completeTrace(context.requestId, "EXHAUSTED")
         System.err.println(
             "airelay_pool_exhausted model=${ir.model} client=$clientProtocol detail=${
                 poolChainManager.explainAvailability(keyContext.verified.routingGroupId, ir.model)
@@ -290,7 +308,7 @@ class AIRelayService(
         var lastError: Throwable? = null
         val excludedKeyIds = linkedSetOf<String>()
         while (true) {
-            val lease = poolChainManager.acquire(keyContext.verified.routingGroupId, ir.model, excludedKeyIds)
+            val lease = poolChainManager.acquire(keyContext.verified.routingGroupId, ir.model, excludedKeyIds, context.requestId)
                 ?: break
             val selection = lease.selection
             val upstreamHeaders = upstreamHeaderOverrides(context, selection.provider.protocol, ir)
@@ -349,17 +367,35 @@ class AIRelayService(
                 )
             } catch (error: UpstreamHttpException) {
                 System.err.println("airelay_error model=${ir.model} client=${clientProtocol} upstream=${selection.provider.protocol} status=${error.status} error=upstream_${error.status} message=${(error.message ?: "").take(180)}")
-                poolChainManager.markFailure(selection, error.status, error.message, error.retryAfterSeconds)
+                poolChainManager.markFailure(selection, error.status, error.message, error.retryAfterSeconds, elapsedMs(started))
                 lastError = error
                 failoverCount += 1
                 excludedKeyIds += selection.keyState.key.keyId
-                if (!shouldFailover(error.status)) break
+                if (!shouldFailover(error.status)) {
+                    poolChainManager.completeTrace(context.requestId, "FAILED")
+                    usageRecorder.record(
+                        rejectionRecord(
+                            key = keyContext.verified,
+                            clientProtocol = clientProtocol,
+                            ir = ir,
+                            status = error.status,
+                            errorCode = "upstream_${error.status}",
+                            errorDetail = error.message,
+                            started = started,
+                            streamed = true,
+                            failoverCount = failoverCount,
+                        )
+                    )
+                    return protocolError(clientProtocol, error.status, "upstream_error", error.message)
+                }
+                poolChainManager.recordFailover(selection)
             } catch (error: Throwable) {
                 System.err.println("airelay_error model=${ir.model} client=${clientProtocol} upstream=${selection.provider.protocol} status=500 error=${error.javaClass.simpleName?.take(64)} message=${(error.message ?: "").take(180)}")
-                poolChainManager.markFailure(selection, null, error.message)
+                poolChainManager.markFailure(selection, null, error.message, latencyMs = elapsedMs(started))
                 lastError = error
                 failoverCount += 1
                 excludedKeyIds += selection.keyState.key.keyId
+                poolChainManager.recordFailover(selection)
             } finally {
                 if (!handedOff) {
                     lease.close()
@@ -367,6 +403,7 @@ class AIRelayService(
             }
         }
 
+        poolChainManager.completeTrace(context.requestId, "EXHAUSTED")
         val detail = poolChainManager.explainAvailability(keyContext.verified.routingGroupId, ir.model)
         System.err.println("airelay_pool_exhausted model=${ir.model} client=$clientProtocol stream=true detail=$detail")
         usageRecorder.record(
@@ -495,10 +532,18 @@ class AIRelayService(
                 )
             }
 
-            if (completionError == null || isClientDisconnect(completionError)) {
-                poolChainManager.markSuccess(selection)
-            } else {
-                poolChainManager.markFailure(selection, null, completionError.message)
+            when {
+                isSemanticError -> {
+                    poolChainManager.markFailure(selection, semanticStatus, errorDetail, latencyMs = elapsedMs(started))
+                    selection.traceId?.let { poolChainManager.completeTrace(it, "FAILED") }
+                }
+                completionError == null || isClientDisconnect(completionError) -> {
+                    poolChainManager.markSuccess(selection, elapsedMs(started))
+                }
+                else -> {
+                    poolChainManager.markFailure(selection, null, completionError.message, latencyMs = elapsedMs(started))
+                    selection.traceId?.let { poolChainManager.completeTrace(it, "FAILED") }
+                }
             }
         } finally {
             lease.close()
@@ -819,7 +864,7 @@ class AIRelayService(
         if (!debugHeadersEnabled(context)) return
         headers["X-AIRelay-Selected-Channel"] = listOf(selection.keyState.key.keyId)
         headers["X-AIRelay-Selected-Priority"] = listOf(selectedPriority(selection).toString())
-        headers["X-AIRelay-Routing-Policy"] = listOf(if (selection.matchedAliasName != null) "POOL_BALANCE" else "POOL_BALANCE")
+        headers["X-AIRelay-Routing-Policy"] = listOf(selection.routingPolicy.name)
         headers["X-AIRelay-Failover-Count"] = listOf(failoverCount.toString())
     }
 

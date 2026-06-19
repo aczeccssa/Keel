@@ -46,4 +46,19 @@ describe('AiGatewayApi', () => {
       headers: expect.objectContaining({ Authorization: 'Bearer abc' })
     }));
   });
+
+  it('requests a specific pool trace from explain', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ requestTrace: null }), { status: 200 })));
+
+    const api = new AiGatewayApi('abc');
+    await api.explainGroupPool('default', 'gpt-5', { requestedModel: 'gpt-5', requestId: 'req-42' });
+
+    expect(fetch).toHaveBeenCalledWith(
+      '/api/plugins/airelay/admin/groups/default/pools/gpt-5/explain',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ requestedModel: 'gpt-5', requestId: 'req-42' })
+      })
+    );
+  });
 });

@@ -34,10 +34,30 @@ data class UpstreamKeyState(
     val totalRequests: AtomicLong = AtomicLong(0),
     val totalFailures: AtomicLong = AtomicLong(0),
     val consecutiveFailures: AtomicInteger = AtomicInteger(0),
-    @Volatile var cooldownUntilEpochMs: Long = 0L,
-    @Volatile var lastError: String? = null,
-    @Volatile var lastSelectedAt: Long? = null,
-)
+    private val sharedState: SharedChannelRuntimeState? = null,
+) {
+    @Volatile private var localCooldownUntilEpochMs: Long = 0L
+    @Volatile private var localLastError: String? = null
+    @Volatile private var localLastSelectedAt: Long? = null
+
+    var cooldownUntilEpochMs: Long
+        get() = sharedState?.cooldownUntilEpochMs ?: localCooldownUntilEpochMs
+        set(value) {
+            if (sharedState != null) sharedState.cooldownUntilEpochMs = value else localCooldownUntilEpochMs = value
+        }
+
+    var lastError: String?
+        get() = sharedState?.lastError ?: localLastError
+        set(value) {
+            if (sharedState != null) sharedState.lastError = value else localLastError = value
+        }
+
+    var lastSelectedAt: Long?
+        get() = sharedState?.lastSelectedAt ?: localLastSelectedAt
+        set(value) {
+            if (sharedState != null) sharedState.lastSelectedAt = value else localLastSelectedAt = value
+        }
+}
 
 class AtomicReferenceStatus(initial: KeyStatus) {
     @Volatile private var value: KeyStatus = initial
@@ -55,6 +75,10 @@ data class PoolSelection(
     val resolvedModel: String,
     val upstreamModel: String,
     val requestedModel: String,
+    val routingPolicy: AliasRoutingPolicy = AliasRoutingPolicy.POOL_BALANCE,
+    val poolId: String = "",
+    val priority: Int = 0,
+    val traceId: String? = null,
     val matchedAliasName: String? = null,
     val matchedAliasCreditMultiplier: Double? = null,
 )
@@ -96,9 +120,7 @@ class PoolChainManager(
                     totalRequests = shared.totalRequests,
                     totalFailures = shared.totalFailures,
                     consecutiveFailures = shared.consecutiveFailures,
-                    cooldownUntilEpochMs = shared.cooldownUntilEpochMs,
-                    lastError = shared.lastError,
-                    lastSelectedAt = shared.lastSelectedAt,
+                    sharedState = shared,
                 )
             }
         }
@@ -113,12 +135,20 @@ class PoolChainManager(
         return chain
     }
 
-    fun acquire(groupId: String, model: String, excludedKeyIds: Set<String> = emptySet()): PoolLease? {
+    fun acquire(
+        groupId: String,
+        model: String,
+        excludedKeyIds: Set<String> = emptySet(),
+        traceId: String? = null,
+    ): PoolLease? {
         val route = resolveRoute(groupId, model)
-        return when (route.routingPolicy) {
-            AliasRoutingPolicy.POOL_BALANCE -> acquirePoolBalance(route, excludedKeyIds)
-            AliasRoutingPolicy.ORDERED_FAILOVER -> acquireOrderedFailover(route, excludedKeyIds)
+        if (traceId != null) runtimeRegistry.beginTrace(traceId, route.chain.chainId, model, route.routingPolicy.name)
+        val lease = when (route.routingPolicy) {
+            AliasRoutingPolicy.POOL_BALANCE -> acquirePoolBalance(route, excludedKeyIds, traceId)
+            AliasRoutingPolicy.ORDERED_FAILOVER -> acquireOrderedFailover(route, excludedKeyIds, traceId)
         }
+        lease?.selection?.let { runtimeRegistry.recordSelection(traceId, it) }
+        return lease
     }
 
     fun selectCandidates(groupId: String, model: String): List<PoolSelection> {
@@ -129,7 +159,7 @@ class PoolChainManager(
         }
     }
 
-    fun explainSelection(groupId: String, model: String): PoolExplainResponse {
+    fun explainSelection(groupId: String, model: String, traceId: String? = null): PoolExplainResponse {
         val route = resolveRoute(groupId, model)
         val now = System.currentTimeMillis()
         val tiers = states.getValue(route.chain).entries.sortedBy { it.key.levelIndex }.map { (level, keyStates) ->
@@ -155,7 +185,7 @@ class PoolChainManager(
                     currentConcurrency = state.currentConcurrency.get(),
                     maxConcurrency = state.key.maxConcurrency,
                     score = ordered.firstOrNull { it.keyState.key.keyId == state.key.keyId }?.let {
-                        scoreCandidate(level, route.requestedModel, ordered.map { candidate -> candidate.keyState }, state)
+                        scoreCandidate(route, level, ordered.map { candidate -> candidate.keyState }, state)
                     },
                     targetModel = target?.model ?: route.targets.firstOrNull()?.model.orEmpty(),
                     resolvedModel = target?.let { resolvePublicModel(state.key, it.model) } ?: route.routedModel,
@@ -183,6 +213,7 @@ class PoolChainManager(
             routingPolicy = route.routingPolicy.name,
             selectedChannelId = selected,
             priorityTiers = tiers,
+            requestTrace = runtimeRegistry.trace(traceId, route.chain.chainId, model),
         )
     }
 
@@ -238,17 +269,25 @@ class PoolChainManager(
         }
     }
 
-    fun markSuccess(selection: PoolSelection) {
+    fun markSuccess(selection: PoolSelection, latencyMs: Long = 0L) {
         selection.keyState.consecutiveFailures.set(0)
         selection.keyState.lastError = null
         if (selection.keyState.status.get() == KeyStatus.DEGRADED) {
             selection.keyState.status.set(KeyStatus.HEALTHY)
         }
+        runtimeRegistry.recordOutcome(selection, success = true, status = 200, reason = null, latencyMs = latencyMs)
         syncSharedState(selection.keyState)
     }
 
-    fun markFailure(selection: PoolSelection, status: Int?, message: String?, retryAfterSeconds: Long? = null) {
+    fun markFailure(
+        selection: PoolSelection,
+        status: Int?,
+        message: String?,
+        retryAfterSeconds: Long? = null,
+        latencyMs: Long = 0L,
+    ) {
         val state = selection.keyState
+        val previousStatus = state.status.get()
         state.totalFailures.incrementAndGet()
         val consecutiveFailures = state.consecutiveFailures.incrementAndGet()
         state.lastError = message ?: status?.toString()
@@ -273,8 +312,16 @@ class PoolChainManager(
             }
             else -> state.status.set(KeyStatus.DEGRADED)
         }
+        if (state.status.get() == KeyStatus.COOLDOWN && previousStatus != KeyStatus.COOLDOWN) {
+            runtimeRegistry.channelState(state.key.keyId).cooldownCount.incrementAndGet()
+        }
+        runtimeRegistry.recordOutcome(selection, success = false, status = status, reason = message, latencyMs = latencyMs)
         syncSharedState(state)
     }
+
+    fun recordFailover(selection: PoolSelection) = runtimeRegistry.recordFailover(selection)
+
+    fun completeTrace(traceId: String, outcome: String) = runtimeRegistry.completeTrace(traceId, outcome)
 
     fun reset(chainId: String, keyId: String): Boolean {
         val state = states.entries.firstOrNull { it.key.chainId == chainId }
@@ -409,6 +456,7 @@ class PoolChainManager(
                         resolvedModel = resolvedModel,
                         upstreamModel = resolveUpstreamModel(state.key, target.model, resolvedModel),
                         requestedModel = route.requestedModel,
+                        routingPolicy = route.routingPolicy,
                         matchedAliasName = route.matchedAlias?.aliasName,
                         matchedAliasCreditMultiplier = route.matchedAlias?.creditMultiplier,
                     )
@@ -431,6 +479,7 @@ class PoolChainManager(
                     resolvedModel = resolvedModel,
                     upstreamModel = resolveUpstreamModel(candidate.keyState.key, candidate.target.model, resolvedModel),
                     requestedModel = route.requestedModel,
+                    routingPolicy = route.routingPolicy,
                     matchedAliasName = route.matchedAlias?.aliasName,
                     matchedAliasCreditMultiplier = route.matchedAlias?.creditMultiplier,
                 )
@@ -438,14 +487,19 @@ class PoolChainManager(
         }
     }
 
-    private fun acquireOrderedFailover(route: ResolvedRoute, excludedKeyIds: Set<String>): PoolLease? {
+    private fun acquireOrderedFailover(route: ResolvedRoute, excludedKeyIds: Set<String>, traceId: String?): PoolLease? {
         previewOrderedFailover(route).forEach { selection ->
             if (selection.keyState.key.keyId in excludedKeyIds) return@forEach
             if (tryAcquire(selection.keyState)) {
+                val tracedSelection = selection.copy(
+                    poolId = tierId(route, selection.level),
+                    priority = priorityForLevel(selection.level),
+                    traceId = traceId,
+                )
                 selection.keyState.totalRequests.incrementAndGet()
                 selection.keyState.lastSelectedAt = System.currentTimeMillis()
                 syncSharedState(selection.keyState)
-                return PoolLease(selection) {
+                return PoolLease(tracedSelection) {
                     selection.keyState.currentConcurrency.decrementAndGet()
                     syncSharedState(selection.keyState)
                 }
@@ -454,7 +508,7 @@ class PoolChainManager(
         return null
     }
 
-    private fun acquirePoolBalance(route: ResolvedRoute, excludedKeyIds: Set<String>): PoolLease? {
+    private fun acquirePoolBalance(route: ResolvedRoute, excludedKeyIds: Set<String>, traceId: String?): PoolLease? {
         val now = System.currentTimeMillis()
         states.getValue(route.chain).entries.sortedBy { it.key.levelIndex }.forEach { (level, keyStates) ->
             keyStates.forEach { maybeRecover(it, now) }
@@ -505,6 +559,10 @@ class PoolChainManager(
                             resolvedModel = resolvedModel,
                             upstreamModel = resolveUpstreamModel(keyState.key, selected.candidate.target.model, resolvedModel),
                             requestedModel = route.requestedModel,
+                            routingPolicy = route.routingPolicy,
+                            poolId = tierId,
+                            priority = priorityForLevel(level),
+                            traceId = traceId,
                             matchedAliasName = route.matchedAlias?.aliasName,
                             matchedAliasCreditMultiplier = route.matchedAlias?.creditMultiplier,
                         )
@@ -539,6 +597,14 @@ class PoolChainManager(
             if (candidates.isEmpty()) return@mapNotNull null
             val channels = candidates.map { candidate ->
                 val provider = providerFor(level, candidate.keyState.key)
+                val poolId = tierId(route, level)
+                val poolMetrics1m = runtimeRegistry.metrics(poolId, windowMs = 60_000L)
+                val channelMetrics1m = runtimeRegistry.metrics(poolId, candidate.keyState.key.keyId, 60_000L)
+                val totalWeight = candidates.sumOf { max(it.keyState.key.weight, 1) }.toDouble()
+                val expectedShare = max(candidate.keyState.key.weight, 1).toDouble() / totalWeight
+                val trafficShare = if (poolMetrics1m.selectedRequests == 0L) 0.0 else {
+                    channelMetrics1m.selectedRequests.toDouble() / poolMetrics1m.selectedRequests.toDouble()
+                }
                 PoolChannelRuntimeView(
                     channelId = candidate.keyState.key.keyId,
                     channelName = provider.providerId,
@@ -547,19 +613,50 @@ class PoolChainManager(
                     weight = candidate.keyState.key.weight,
                     currentConcurrency = candidate.keyState.currentConcurrency.get(),
                     maxConcurrency = candidate.keyState.key.maxConcurrency,
+                    saturation = candidate.keyState.currentConcurrency.get().toDouble() /
+                        max(candidate.keyState.key.maxConcurrency, 1).toDouble(),
                     totalRequests = candidate.keyState.totalRequests.get(),
                     totalFailures = candidate.keyState.totalFailures.get(),
+                    selectedRequests1m = channelMetrics1m.selectedRequests,
+                    successRequests1m = channelMetrics1m.successRequests,
+                    failedRequests1m = channelMetrics1m.failedRequests,
+                    errorRate1m = channelMetrics1m.errorRate,
+                    p95Latency1m = channelMetrics1m.p95LatencyMs,
+                    p99Latency1m = channelMetrics1m.p99LatencyMs,
+                    metrics1m = channelMetrics1m,
+                    metrics5m = runtimeRegistry.metrics(poolId, candidate.keyState.key.keyId, 5 * 60_000L),
+                    metrics15m = runtimeRegistry.metrics(poolId, candidate.keyState.key.keyId, 15 * 60_000L),
+                    trafficShare1m = trafficShare,
+                    expectedShare = expectedShare,
+                    shareDeviation = trafficShare - expectedShare,
+                    cooldownCount = runtimeRegistry.channelState(candidate.keyState.key.keyId).cooldownCount.get(),
                     cooldownUntilEpochMs = candidate.keyState.cooldownUntilEpochMs.takeIf { it > 0L },
                     lastError = candidate.keyState.lastError,
                     lastSelectedAt = candidate.keyState.lastSelectedAt,
                 )
             }
+            val poolId = tierId(route, level)
+            val statuses = channels.groupingBy { it.effectiveStatus }.eachCount()
+            val metrics1m = runtimeRegistry.metrics(poolId, windowMs = 60_000L)
             PoolView(
                 groupId = groupId,
                 aliasOrModel = aliasOrModel,
                 routingPolicy = route.routingPolicy.name,
                 priority = priorityForLevel(level),
                 totalInflight = channels.sumOf { it.currentConcurrency },
+                totalRequests1m = metrics1m.selectedRequests,
+                errorRate1m = metrics1m.errorRate,
+                p95Latency1m = metrics1m.p95LatencyMs,
+                p99Latency1m = metrics1m.p99LatencyMs,
+                metrics1m = metrics1m,
+                metrics5m = runtimeRegistry.metrics(poolId, windowMs = 5 * 60_000L),
+                metrics15m = runtimeRegistry.metrics(poolId, windowMs = 15 * 60_000L),
+                healthyChannels = statuses["HEALTHY"] ?: 0,
+                cooldownChannels = statuses["COOLDOWN"] ?: 0,
+                degradedChannels = statuses["DEGRADED"] ?: 0,
+                disabledChannels = statuses["DISABLED"] ?: 0,
+                saturatedChannels = statuses["SATURATED"] ?: 0,
+                failoverCount1m = runtimeRegistry.failoverCount(poolId, 60_000L),
                 channels = channels,
             )
         }
@@ -611,12 +708,12 @@ class PoolChainManager(
     }
 
     private fun scoreCandidate(
+        route: ResolvedRoute,
         level: PoolLevelConfig,
-        routeKey: String,
         keyStates: List<UpstreamKeyState>,
         state: UpstreamKeyState,
     ): Double {
-        val tierState = runtimeRegistry.tierState("${level.levelId}:$routeKey")
+        val tierState = runtimeRegistry.tierState(tierId(route, level))
         val totalWeight = keyStates.sumOf { max(it.key.weight, 1) }
         val base = tierState.currentWeights[state.key.keyId] ?: 0.0
         val nextWeight = base + max(state.key.weight, 1)
@@ -693,7 +790,11 @@ class PoolChainManager(
 
     private fun providerFor(level: PoolLevelConfig, key: PooledKeyConfig): UpstreamProviderConfig = key.provider ?: level.provider
 
-    private fun priorityForLevel(level: PoolLevelConfig): Int = level.levelId.substringAfterLast("-p", "0").toIntOrNull() ?: 0
+    private fun priorityForLevel(level: PoolLevelConfig): Int =
+        level.levelId.takeIf { "-p" in it }
+            ?.substringAfterLast("-p")
+            ?.toIntOrNull()
+            ?: level.levelIndex
 
     private fun tierId(route: ResolvedRoute, level: PoolLevelConfig): String = "${route.chain.chainId}:${route.routedModel}:${level.levelId}"
 

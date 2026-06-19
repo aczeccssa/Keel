@@ -47,6 +47,42 @@ data class PoolExplainResponse(
     val routingPolicy: String,
     val selectedChannelId: String?,
     val priorityTiers: List<PoolExplainTierView>,
+    val requestTrace: PoolRequestTraceView? = null,
+)
+
+@Serializable
+data class PoolRequestAttemptView(
+    val channelId: String,
+    val priority: Int,
+    val outcome: String,
+    val status: Int? = null,
+    val reason: String? = null,
+    val latencyMs: Long? = null,
+    val selectedAtEpochMs: Long,
+)
+
+@Serializable
+data class PoolRequestTraceView(
+    val requestId: String,
+    val groupId: String,
+    val requestedModel: String,
+    val routingPolicy: String,
+    val attempts: List<PoolRequestAttemptView>,
+    val selectedChannelId: String? = null,
+    val failoverCount: Int = 0,
+    val outcome: String = "PENDING",
+    val completedAtEpochMs: Long? = null,
+)
+
+@Serializable
+data class RuntimeWindowMetrics(
+    val selectedRequests: Long = 0,
+    val successRequests: Long = 0,
+    val failedRequests: Long = 0,
+    val errorRate: Double = 0.0,
+    val p50LatencyMs: Long = 0,
+    val p95LatencyMs: Long = 0,
+    val p99LatencyMs: Long = 0,
 )
 
 @Serializable
@@ -58,8 +94,22 @@ data class PoolChannelRuntimeView(
     val weight: Int,
     val currentConcurrency: Int,
     val maxConcurrency: Int,
+    val saturation: Double = 0.0,
     val totalRequests: Long,
     val totalFailures: Long,
+    val selectedRequests1m: Long = 0,
+    val successRequests1m: Long = 0,
+    val failedRequests1m: Long = 0,
+    val errorRate1m: Double = 0.0,
+    val p95Latency1m: Long = 0,
+    val p99Latency1m: Long = 0,
+    val metrics1m: RuntimeWindowMetrics = RuntimeWindowMetrics(),
+    val metrics5m: RuntimeWindowMetrics = RuntimeWindowMetrics(),
+    val metrics15m: RuntimeWindowMetrics = RuntimeWindowMetrics(),
+    val trafficShare1m: Double = 0.0,
+    val expectedShare: Double = 0.0,
+    val shareDeviation: Double = 0.0,
+    val cooldownCount: Long = 0,
     val cooldownUntilEpochMs: Long? = null,
     val lastError: String? = null,
     val lastSelectedAt: Long? = null,
@@ -73,5 +123,18 @@ data class PoolView(
     val schedulerPolicy: String = "WEIGHTED_LEAST_LOAD",
     val priority: Int,
     val totalInflight: Int,
+    val totalRequests1m: Long = 0,
+    val errorRate1m: Double = 0.0,
+    val p95Latency1m: Long = 0,
+    val p99Latency1m: Long = 0,
+    val metrics1m: RuntimeWindowMetrics = RuntimeWindowMetrics(),
+    val metrics5m: RuntimeWindowMetrics = RuntimeWindowMetrics(),
+    val metrics15m: RuntimeWindowMetrics = RuntimeWindowMetrics(),
+    val healthyChannels: Int = 0,
+    val cooldownChannels: Int = 0,
+    val degradedChannels: Int = 0,
+    val disabledChannels: Int = 0,
+    val saturatedChannels: Int = 0,
+    val failoverCount1m: Long = 0,
     val channels: List<PoolChannelRuntimeView>,
 )

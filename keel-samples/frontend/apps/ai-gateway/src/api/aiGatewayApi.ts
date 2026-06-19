@@ -47,10 +47,14 @@ export class AiGatewayApi {
   pricing() { return requestJson(`${AIRELAY_BASE}/admin/pricing`, { token: this.token }); }
   pools() { return requestJson(`${AIRELAY_BASE}/admin/pools`, { token: this.token }); }
   groupPools(groupId: string) { return requestJson(`${AIRELAY_BASE}/admin/groups/${groupId}/pools`, { token: this.token }); }
-  explainGroupPool(groupId: string, aliasOrModel: string, requestedModel?: string) {
+  explainGroupPool(
+    groupId: string,
+    aliasOrModel: string,
+    body: { requestedModel?: string; traceId?: string; requestId?: string } = {}
+  ) {
     return requestJson(`${AIRELAY_BASE}/admin/groups/${groupId}/pools/${encodeURIComponent(aliasOrModel)}/explain`, {
       method: 'POST',
-      body: requestedModel ? { requestedModel } : {},
+      body,
       token: this.token
     });
   }
