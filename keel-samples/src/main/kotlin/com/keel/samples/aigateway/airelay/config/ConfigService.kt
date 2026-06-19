@@ -2,6 +2,7 @@ package com.keel.samples.aigateway.airelay.config
 
 import com.keel.samples.aigateway.airelay.AliasRouteConfig
 import com.keel.samples.aigateway.airelay.AliasTargetConfig
+import com.keel.samples.aigateway.airelay.AliasRoutingPolicy
 import com.keel.samples.aigateway.airelay.GroupExposureMode
 import com.keel.samples.aigateway.airelay.ModelPricing
 import com.keel.samples.aigateway.airelay.PoolChainConfig
@@ -140,7 +141,8 @@ class ConfigService(
                     targetModels = alias.targetModels,
                     enabled = alias.enabled,
                     creditMultiplier = alias.creditMultiplier,
-                    targets = alias.targets.map { target -> AliasTargetConfig(target.model, target.channelId) }
+                    targets = alias.targets.map { target -> AliasTargetConfig(target.model, target.channelId) },
+                    routingPolicy = AliasRoutingPolicy.from(alias.routingPolicy),
                 )
             }
         )

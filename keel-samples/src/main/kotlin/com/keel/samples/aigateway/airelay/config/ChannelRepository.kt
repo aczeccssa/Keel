@@ -2,6 +2,7 @@ package com.keel.samples.aigateway.airelay.config
 
 import com.keel.db.database.KeelDatabase
 import com.keel.samples.aigateway.airelay.AliasRouteConfig
+import com.keel.samples.aigateway.airelay.AliasRoutingPolicy
 import com.keel.samples.aigateway.airelay.AliasTargetConfig
 import com.keel.samples.aigateway.airelay.AI_RELAY_MIN_TIMEOUT_MS
 import com.keel.samples.aigateway.airelay.GroupExposureMode
@@ -58,6 +59,7 @@ data class GroupAliasView(
     val enabled: Boolean = true,
     val creditMultiplier: Double? = null,
     val targets: List<GroupAliasTargetView> = targetModels.map { GroupAliasTargetView(it) },
+    val routingPolicy: String = AliasRoutingPolicy.ORDERED_FAILOVER.name,
 )
 
 @Serializable
@@ -73,6 +75,7 @@ data class UpsertGroupAliasRequest(
     val enabled: Boolean = true,
     val creditMultiplier: Double? = null,
     val targets: List<GroupAliasTargetView> = emptyList(),
+    val routingPolicy: String = AliasRoutingPolicy.ORDERED_FAILOVER.name,
 ) {
     fun orderedTargets(): List<GroupAliasTargetView> = targets.ifEmpty {
         targetModels.map { GroupAliasTargetView(it) }
@@ -224,6 +227,7 @@ class ChannelRepository(
         migrateGroupExposureMode()
         migratePricingSchema()
         migrateCreditMultiplierSchema()
+        migrateAliasRoutingPolicySchema()
         ensureDefaultGroup()
         backfillChannelGroups()
         backfillChannelMemberships()
@@ -631,6 +635,12 @@ class ChannelRepository(
         }
     }
 
+    private fun migrateAliasRoutingPolicySchema() = database.transaction {
+        runCatching {
+            exec("ALTER TABLE airelay_group_alias ADD COLUMN IF NOT EXISTS routing_policy VARCHAR(32) NOT NULL DEFAULT 'ORDERED_FAILOVER'")
+        }
+    }
+
     private fun backfillChannelMemberships() = database.transaction {
         val existing = ChannelMembershipTable.selectAll().map { it[ChannelMembershipTable.channelId] to it[ChannelMembershipTable.groupId] }.toSet()
         val legacy = ChannelGroupTable.selectAll().toList()
@@ -692,6 +702,7 @@ class ChannelRepository(
                 it[targetModelsJson] = json.encodeToString(targets)
                 it[enabled] = alias.enabled
                 it[creditMultiplier] = alias.creditMultiplier
+                it[routingPolicy] = AliasRoutingPolicy.from(alias.routingPolicy).name
             }
         }
     }
@@ -888,6 +899,7 @@ class ChannelRepository(
             enabled = this[GroupAliasTable.enabled],
             creditMultiplier = this[GroupAliasTable.creditMultiplier],
             targets = targets,
+            routingPolicy = AliasRoutingPolicy.from(runCatching { this[GroupAliasTable.routingPolicy] }.getOrNull()).name,
         )
     }
 

@@ -43,6 +43,7 @@ object GroupAliasTable : AuditPluginTable("airelay", "group_alias") {
     val targetModelsJson: Column<String> = text("target_models_json")
     val enabled: Column<Boolean> = bool("enabled").default(true)
     val creditMultiplier: Column<Double?> = double("credit_multiplier").nullable()
+    val routingPolicy: Column<String> = varchar("routing_policy", 32).default("ORDERED_FAILOVER")
 
     override val primaryKey = PrimaryKey(aliasId)
 }

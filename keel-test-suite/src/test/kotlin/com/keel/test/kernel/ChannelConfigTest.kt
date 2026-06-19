@@ -391,6 +391,74 @@ class ChannelConfigTest {
     }
 
     @Test
+    fun groupAliasDefaultsToOrderedFailover() {
+        val repo = newRepo()
+        repo.createGroup(
+            UpsertGroupRequest(
+                groupId = "premium",
+                name = "Premium",
+                aliasRoutes = listOf(
+                    com.keel.samples.aigateway.airelay.config.UpsertGroupAliasRequest(
+                        aliasName = "smart-claude",
+                        targetModels = listOf("claude-a", "claude-b"),
+                    )
+                )
+            )
+        )
+
+        val alias = repo.listGroupAliases("premium").single()
+        assertEquals("ORDERED_FAILOVER", alias.routingPolicy)
+    }
+
+    @Test
+    fun aliasRoutingPolicyRoundTripsThroughRepository() {
+        val repo = newRepo()
+        repo.createGroup(
+            UpsertGroupRequest(
+                groupId = "premium",
+                name = "Premium",
+                aliasRoutes = listOf(
+                    com.keel.samples.aigateway.airelay.config.UpsertGroupAliasRequest(
+                        aliasName = "smart-claude",
+                        targets = listOf(
+                            com.keel.samples.aigateway.airelay.config.GroupAliasTargetView("claude-a"),
+                            com.keel.samples.aigateway.airelay.config.GroupAliasTargetView("claude-b"),
+                        ),
+                        routingPolicy = "POOL_BALANCE",
+                    )
+                )
+            )
+        )
+
+        val alias = repo.listGroupAliases("premium").single()
+        assertEquals("POOL_BALANCE", alias.routingPolicy)
+    }
+
+    @Test
+    fun configServicePreservesAliasRoutingPolicy() {
+        val repo = newRepo()
+        repo.createGroup(
+            UpsertGroupRequest(
+                groupId = "premium",
+                name = "Premium",
+                aliasRoutes = listOf(
+                    com.keel.samples.aigateway.airelay.config.UpsertGroupAliasRequest(
+                        aliasName = "smart-claude",
+                        targetModels = listOf("claude-a"),
+                        routingPolicy = "POOL_BALANCE",
+                    )
+                )
+            )
+        )
+
+        val service = ConfigService(repo)
+        service.reload()
+
+        val chain = service.chains.single { it.chainId == "premium" }
+        assertEquals("POOL_BALANCE", chain.aliasRoutes.single().routingPolicy.name)
+    }
+
+    @Test
     fun secretCipherRoundTrips() {
         val cipher = SecretCipher("master")
         val enc = cipher.encrypt("hello-world")

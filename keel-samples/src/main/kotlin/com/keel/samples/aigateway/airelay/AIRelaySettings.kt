@@ -124,13 +124,26 @@ data class AliasTargetConfig(
 )
 
 @Serializable
+enum class AliasRoutingPolicy {
+    POOL_BALANCE,
+    ORDERED_FAILOVER;
+
+    companion object {
+        fun from(value: String?): AliasRoutingPolicy = runCatching {
+            value?.takeIf { it.isNotBlank() }?.let(::valueOf)
+        }.getOrNull() ?: ORDERED_FAILOVER
+    }
+}
+
+@Serializable
 data class AliasRouteConfig(
     val aliasName: String,
     /** Legacy flat target model list. New writes should prefer [targets]. */
     val targetModels: List<String> = emptyList(),
     val enabled: Boolean = true,
     val creditMultiplier: Double? = null,
-    val targets: List<AliasTargetConfig> = emptyList()
+    val targets: List<AliasTargetConfig> = emptyList(),
+    val routingPolicy: AliasRoutingPolicy = AliasRoutingPolicy.ORDERED_FAILOVER,
 ) {
     fun orderedTargets(): List<AliasTargetConfig> = targets.ifEmpty {
         targetModels.map { AliasTargetConfig(it) }
