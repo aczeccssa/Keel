@@ -81,9 +81,10 @@ export class PanelAvailability extends KeelElement {
                     font-size:11px;
                     font-weight:700;
                     color:var(--muted);
-                    overflow:hidden;
-                    text-overflow:ellipsis;
-                    white-space:nowrap;
+                    line-height:1.35;
+                    overflow:visible;
+                    white-space:normal;
+                    word-break:break-word;
                     text-transform:uppercase;
                 }
                 .status-badge {
@@ -97,6 +98,7 @@ export class PanelAvailability extends KeelElement {
                     text-transform:uppercase;
                 }
                 .status-badge.ok { color:var(--green); background:var(--green-soft); }
+                .status-badge.warn { color:var(--amber); background:var(--amber-soft); }
                 .status-badge.err { color:var(--red); background:var(--red-soft); }
                 .card-body { display:grid; gap:16px; padding:18px 22px 22px; }
                 .metrics { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
@@ -256,9 +258,13 @@ export class PanelAvailability extends KeelElement {
 
     async refresh() {
         try {
-            const data = await requestJson(`${API.airelay}/admin/channels`);
+            const [data, pools] = await Promise.all([
+                requestJson(`${API.airelay}/admin/channels`),
+                requestJson(`${API.airelay}/admin/pools`).catch(() => ({ chains: [] })),
+            ]);
             const channels = data.channels || [];
             const items = channels.map((channel, index) => ({ key: this._channelKey(channel, index), channel }));
+            const runtimeByChannel = this._runtimeStatusByChannel(pools);
             this._renderHeroCount(channels.length);
             if (channels.length === 0) {
                 this._layoutKey = '';
@@ -269,7 +275,7 @@ export class PanelAvailability extends KeelElement {
                 return;
             }
             this._ensureGrid(items);
-            items.forEach(({ key, channel }) => this._patchCard(key, channel, null));
+            items.forEach(({ key, channel }) => this._patchCard(key, channel, null, runtimeByChannel.get(channel.channelId)));
             await Promise.all(items.map(async ({ key, channel }) => {
                 if (!channel.channelId) {
                     this._patchCard(key, channel, null);
@@ -277,7 +283,7 @@ export class PanelAvailability extends KeelElement {
                 }
                 let stats = null;
                 try { stats = await requestJson(`${API.airelay}/admin/channels/${channel.channelId}/stats?window=7d`); } catch { stats = null; }
-                this._patchCard(key, channel, stats);
+                this._patchCard(key, channel, stats, runtimeByChannel.get(channel.channelId));
             }));
         } catch (e) {
             this.refs.grid.innerHTML = `<div class="empty">Failed to load channels: ${escapeHtml(e.message)}</div>`;
@@ -301,7 +307,6 @@ export class PanelAvailability extends KeelElement {
                         <h3 class="name" data-field="name"></h3>
                         <div class="sub">
                             <span class="proto-tag" data-field="protocol"></span>
-                            <span class="model-name" data-field="model"></span>
                         </div>
                     </div>
                     <span class="status-badge" data-field="status"></span>
@@ -340,10 +345,10 @@ export class PanelAvailability extends KeelElement {
         `;
     }
 
-    _patchCard(key, c, stats) {
+    _patchCard(key, c, stats, runtime) {
         const card = this._cardEls.get(key);
         if (!card) return;
-        const state = this._cardState(c, stats);
+        const state = this._cardState(c, stats, runtime);
         const field = (name) => card.querySelector(`[data-field="${name}"]`);
 
         this._setText(field('signal'), state.signalText);
@@ -364,15 +369,17 @@ export class PanelAvailability extends KeelElement {
         this._setHtml(field('spark'), state.sparkHtml);
     }
 
-    _cardState(c, stats) {
+    _cardState(c, stats, runtime = null) {
         const enabled = c.enabled !== false;
-        const ok = enabled && c.status === 'HEALTHY' && !c.lastTestError;
-        const models = (c.models || []).filter(m => m.enabled).map(m => m.publicModelName);
-        const primaryModel = models[0] || '—';
-        const extraModels = models.length > 1 ? `+${models.length - 1} models` : '';
+        const status = enabled ? (runtime?.status || c.status || 'HEALTHY') : 'DISABLED';
+        const ok = enabled && status === 'HEALTHY' && !c.lastTestError;
+        const models = (c.models || []).filter(m => m.enabled).map(m => m.publicModelName).filter(Boolean);
+        const primaryModel = models.join(', ') || '—';
+        const extraModels = '';
         const convLatency = stats?.avgLatencyMs ?? c.lastTestLatencyMs ?? 0;
         const pingLatency = c.lastTestLatencyMs ?? 0;
-        const avail = stats ? (stats.successRate7d * 100) : null;
+        const hasAvailability = typeof stats?.successRate7d === 'number';
+        const avail = hasAvailability ? (stats.successRate7d * 100) : null;
         const availColor = avail == null ? 'var(--muted)' : avail >= 95 ? 'var(--green)' : avail >= 50 ? 'var(--amber)' : 'var(--red)';
         const tests = stats?.recentTests || [];
         const signalClass = ok ? 'ok' : 'err';
@@ -383,8 +390,8 @@ export class PanelAvailability extends KeelElement {
             name: c.name || '—',
             protocol: this._protoLabel(c.protocol),
             model: primaryModel,
-            statusClass: ok ? 'ok' : 'err',
-            statusLabel: this._statusLabel(c, ok),
+            statusClass: this._statusClass(status, ok),
+            statusLabel: this._statusLabel(status),
             convLatency: String(convLatency),
             pingLatency: String(pingLatency),
             availability: avail == null ? '—' : avail.toFixed(2),
@@ -394,6 +401,27 @@ export class PanelAvailability extends KeelElement {
             sparkCountLabel: `Last ${tests.length || 60} checks`,
             sparkHtml: this._sparkHtml(tests),
         };
+    }
+
+    _runtimeStatusByChannel(pools) {
+        const map = new Map();
+        (pools?.chains || []).forEach(chain => {
+            (chain.levels || []).forEach(level => {
+                (level.keys || []).forEach(key => {
+                    if (!key.keyId) return;
+                    const current = map.get(key.keyId);
+                    if (!current || this._statusRank(key.status) > this._statusRank(current.status)) {
+                        map.set(key.keyId, key);
+                    }
+                });
+            });
+        });
+        return map;
+    }
+
+    _statusRank(status) {
+        const ranks = { HEALTHY: 0, DEGRADED: 1, COOLDOWN: 2, DISABLED: 3 };
+        return ranks[String(status || '').toUpperCase()] ?? 1;
     }
 
     _sparkHtml(tests) {
@@ -414,11 +442,21 @@ export class PanelAvailability extends KeelElement {
         return protocol || '—';
     }
 
-    _statusLabel(channel, ok) {
-        if (!channel.enabled) return 'Disabled';
-        if (ok) return 'Healthy';
-        if (channel.status === 'DEGRADED') return 'Degraded';
-        return 'Error';
+    _statusLabel(status) {
+        const labels = {
+            HEALTHY: 'Healthy',
+            COOLDOWN: 'Cooldown',
+            DEGRADED: 'Degraded',
+            DISABLED: 'Disabled',
+        };
+        return labels[String(status || '').toUpperCase()] || 'Error';
+    }
+
+    _statusClass(status, ok) {
+        if (ok) return 'ok';
+        const normalized = String(status || '').toUpperCase();
+        if (normalized === 'COOLDOWN' || normalized === 'DEGRADED') return 'warn';
+        return 'err';
     }
 
     _renderHeroCount(count) {

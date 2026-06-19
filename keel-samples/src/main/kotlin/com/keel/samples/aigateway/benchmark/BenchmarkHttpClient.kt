@@ -1,5 +1,6 @@
 package com.keel.samples.aigateway.benchmark
 
+import com.keel.samples.aigateway.airelay.AI_RELAY_MIN_TIMEOUT_MS
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.cio.CIO
 import io.ktor.client.plugins.HttpTimeout
@@ -37,9 +38,9 @@ data class BenchmarkRequestResult(
 class BenchmarkHttpClient : Closeable {
     private val client = HttpClient(CIO) {
         install(HttpTimeout) {
-            requestTimeoutMillis = 180_000
+            requestTimeoutMillis = AI_RELAY_MIN_TIMEOUT_MS
             connectTimeoutMillis = 15_000
-            socketTimeoutMillis = 180_000
+            socketTimeoutMillis = AI_RELAY_MIN_TIMEOUT_MS
         }
         expectSuccess = false
     }

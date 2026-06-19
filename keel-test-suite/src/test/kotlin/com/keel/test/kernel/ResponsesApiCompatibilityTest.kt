@@ -408,13 +408,13 @@ class ResponsesApiCompatibilityTest {
             return delegate.send(selection, request, extraHeaders)
         }
 
-        override fun stream(
+        override suspend fun openStream(
             selection: com.keel.samples.aigateway.airelay.pool.PoolSelection,
             request: JsonObject,
             extraHeaders: Map<String, String>
-        ): kotlinx.coroutines.flow.Flow<io.ktor.sse.ServerSentEvent> {
+        ): com.keel.samples.aigateway.airelay.upstream.OpenedUpstreamStream {
             captured.add(request)
-            return delegate.stream(selection, request, extraHeaders)
+            return delegate.openStream(selection, request, extraHeaders)
         }
 
         override suspend fun countTokens(

@@ -8,6 +8,8 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import java.io.File
 
+const val AI_RELAY_MIN_TIMEOUT_MS: Long = 10 * 60 * 1000L
+
 @Serializable
 data class AIRelaySettings(
     val chains: List<PoolChainConfig> = defaultChains(),
@@ -149,7 +151,7 @@ data class UpstreamProviderConfig(
     val providerId: String,
     val baseUrl: String = "mock://local",
     val protocol: WireProtocol,
-    val timeoutMs: Long = 60_000,
+    val timeoutMs: Long = AI_RELAY_MIN_TIMEOUT_MS,
     val defaultHeaders: Map<String, String> = emptyMap()
 )
 

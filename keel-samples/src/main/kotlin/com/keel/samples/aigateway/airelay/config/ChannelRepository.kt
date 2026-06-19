@@ -3,6 +3,7 @@ package com.keel.samples.aigateway.airelay.config
 import com.keel.db.database.KeelDatabase
 import com.keel.samples.aigateway.airelay.AliasRouteConfig
 import com.keel.samples.aigateway.airelay.AliasTargetConfig
+import com.keel.samples.aigateway.airelay.AI_RELAY_MIN_TIMEOUT_MS
 import com.keel.samples.aigateway.airelay.GroupExposureMode
 import com.keel.kernel.plugin.PluginApiException
 import com.keel.samples.aigateway.airelay.batches.BatchListResponse
@@ -162,7 +163,7 @@ data class UpsertChannelRequest(
     val priority: Int = 0,
     val weight: Int = 100,
     val maxConcurrency: Int = 10,
-    val timeoutMs: Long = 60_000,
+    val timeoutMs: Long = AI_RELAY_MIN_TIMEOUT_MS,
     val groupId: String = ChannelRepository.DEFAULT_GROUP_ID,
     val memberships: List<UpsertChannelMembershipRequest> = emptyList(),
     val models: List<UpsertModelRequest> = emptyList()

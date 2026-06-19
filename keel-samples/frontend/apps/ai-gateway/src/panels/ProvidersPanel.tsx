@@ -25,7 +25,7 @@ interface TestRecord {
 
 interface ChannelStats {
   channelId: string;
-  successRate7d: number;
+  successRate7d: number | null;
   totalRequests7d: number;
   avgLatencyMs: number;
   totalCostUsd: number;
@@ -174,14 +174,18 @@ export function ProvidersPanel({ api }: { api: AiGatewayApi }) {
                     {ch.stats && (
                       <>
                         <KeyValue label="可用率 · 7天">
-                          <span style={{
-                            color: ch.stats.successRate7d >= 0.95 ? 'var(--keel-success, #10b981)' :
-                                   ch.stats.successRate7d >= 0.80 ? 'var(--keel-warning, #f59e0b)' :
-                                   'var(--keel-danger, #ef4444)',
-                            fontWeight: 'bold'
-                          }}>
-                            {(ch.stats.successRate7d * 100).toFixed(2)}%
-                          </span>
+                          {ch.stats.successRate7d == null ? (
+                            <span className="keel-muted">—</span>
+                          ) : (
+                            <span style={{
+                              color: ch.stats.successRate7d >= 0.95 ? 'var(--keel-success, #10b981)' :
+                                     ch.stats.successRate7d >= 0.80 ? 'var(--keel-warning, #f59e0b)' :
+                                     'var(--keel-danger, #ef4444)',
+                              fontWeight: 'bold'
+                            }}>
+                              {(ch.stats.successRate7d * 100).toFixed(2)}%
+                            </span>
+                          )}
                         </KeyValue>
 
                         {ch.stats.recentTests && ch.stats.recentTests.length > 0 && (

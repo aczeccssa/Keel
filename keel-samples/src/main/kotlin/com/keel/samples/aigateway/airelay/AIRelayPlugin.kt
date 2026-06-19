@@ -74,6 +74,8 @@ import kotlinx.coroutines.isActive
 import org.koin.core.Koin
 import org.koin.dsl.module
 
+private const val AI_RELAY_ENDPOINT_TIMEOUT_MS = AI_RELAY_MIN_TIMEOUT_MS
+
 @KeelApiPlugin(
     pluginId = "airelay",
     title = "AI Gateway Relay Plugin",
@@ -89,7 +91,7 @@ class AIRelayPlugin : StandardKeelPlugin {
         displayName = "AI Gateway Relay Plugin",
         defaultRuntimeMode = PluginRuntimeMode.IN_PROCESS,
         supportedRuntimeModes = setOf(PluginRuntimeMode.IN_PROCESS),
-        callTimeoutMs = 60_000,
+        callTimeoutMs = AI_RELAY_MIN_TIMEOUT_MS,
         maxConcurrentCalls = 256
     )
 
@@ -353,28 +355,28 @@ class AIRelayPlugin : StandardKeelPlugin {
             post<JsonObject, OpenAiChatCompletionResponse>(
                 "/chat/completions",
                 doc = OpenApiDoc(summary = "OpenAI Chat Completions compatible relay", tags = listOf("ai-gateway", "airelay"), errorStatuses = setOf(400, 401, 402, 403, 429, 503)),
-                executionPolicy = EndpointExecutionPolicy(timeoutMs = 120_000, maxPayloadBytes = 200_000_000, allowChunkedTransfer = true)
+                executionPolicy = EndpointExecutionPolicy(timeoutMs = AI_RELAY_ENDPOINT_TIMEOUT_MS, maxPayloadBytes = 200_000_000, allowChunkedTransfer = true)
             ) { request ->
                 buildService().handleBlocking(this, request, WireProtocol.OPENAI_CHAT).toOpenAiChatCompletionResult()
             }
             post<JsonObject, OpenAiResponseObject>(
                 "/responses",
                 doc = OpenApiDoc(summary = "OpenAI Responses compatible relay", tags = listOf("ai-gateway", "airelay", "openai-responses"), errorStatuses = setOf(400, 401, 402, 403, 429, 503)),
-                executionPolicy = EndpointExecutionPolicy(timeoutMs = 120_000, maxPayloadBytes = 200_000_000, allowChunkedTransfer = true)
+                executionPolicy = EndpointExecutionPolicy(timeoutMs = AI_RELAY_ENDPOINT_TIMEOUT_MS, maxPayloadBytes = 200_000_000, allowChunkedTransfer = true)
             ) { request ->
                 buildService().handleBlocking(this, request, WireProtocol.OPENAI_RESPONSES).toOpenAiResponseResult()
             }
             post<JsonObject, AnthropicMessageResponse>(
                 "/messages",
                 doc = OpenApiDoc(summary = "Anthropic Messages compatible relay", tags = listOf("ai-gateway", "airelay", "anthropic"), errorStatuses = setOf(400, 401, 402, 403, 429, 503)),
-                executionPolicy = EndpointExecutionPolicy(timeoutMs = 120_000, maxPayloadBytes = 200_000_000, allowChunkedTransfer = true)
+                executionPolicy = EndpointExecutionPolicy(timeoutMs = AI_RELAY_ENDPOINT_TIMEOUT_MS, maxPayloadBytes = 200_000_000, allowChunkedTransfer = true)
             ) { request ->
                 buildService().handleBlocking(this, request, WireProtocol.ANTHROPIC_MESSAGES).toAnthropicMessageResult()
             }
             // ---- Anthropic Files API (raw proxy) ----
             rawPost("/files",
                 doc = OpenApiDoc(summary = "Anthropic Files upload proxy", tags = listOf("ai-gateway", "airelay", "anthropic", "files")),
-                executionPolicy = EndpointExecutionPolicy(timeoutMs = 120_000, maxPayloadBytes = 200_000_000, allowChunkedTransfer = true)
+                executionPolicy = EndpointExecutionPolicy(timeoutMs = AI_RELAY_ENDPOINT_TIMEOUT_MS, maxPayloadBytes = 200_000_000, allowChunkedTransfer = true)
             ) { raw ->
                 val result = buildService().proxyAnthropicRaw(this, raw, "/v1/files", io.ktor.http.HttpMethod.Post, requireFilesBeta = true)
                 PluginResult(status = result.status, headers = result.headers, body = result)
@@ -869,7 +871,7 @@ class AIRelayPlugin : StandardKeelPlugin {
 
         // Calculate stats
         val successCount = channelRecords.count { it.status < 400 }
-        val successRate = if (channelRecords.isNotEmpty()) successCount.toDouble() / channelRecords.size else 0.0
+        val successRate = if (channelRecords.isNotEmpty()) successCount.toDouble() / channelRecords.size else null
         val avgLatency = if (channelRecords.isNotEmpty()) channelRecords.map { it.latencyMs }.average().toLong() else 0L
         val totalCost = channelRecords.sumOf { it.totalCostUsd }
         val totalTokens = channelRecords.sumOf { it.totalTokens.toLong() }
@@ -1322,7 +1324,7 @@ data class ChannelModelTestRequest(
 @Serializable
 data class ChannelStatsResponse(
     val channelId: String,
-    val successRate7d: Double,
+    val successRate7d: Double?,
     val totalRequests7d: Long,
     val avgLatencyMs: Long,
     val totalCostUsd: Double,

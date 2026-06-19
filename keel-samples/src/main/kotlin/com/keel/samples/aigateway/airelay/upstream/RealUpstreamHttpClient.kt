@@ -1,5 +1,6 @@
 package com.keel.samples.aigateway.airelay.upstream
 
+import com.keel.samples.aigateway.airelay.AI_RELAY_MIN_TIMEOUT_MS
 import com.keel.samples.aigateway.airelay.SseChunkDecoder
 import com.keel.samples.aigateway.airelay.parseSseBlock
 import com.keel.samples.aigateway.airelay.pool.PoolSelection
@@ -11,6 +12,8 @@ import io.ktor.client.HttpClient
 import io.ktor.client.call.body
 import io.ktor.client.engine.cio.CIO
 import io.ktor.client.plugins.HttpTimeout
+import io.ktor.client.plugins.timeout
+import io.ktor.client.request.HttpRequestBuilder
 import io.ktor.client.request.headers
 import io.ktor.client.request.get
 import io.ktor.client.request.post
@@ -57,6 +60,7 @@ class RealUpstreamHttpClient private constructor(
         val url = endpointUrl(selection, stream = false)
         val apiKey = resolveApiKey(selection)
         val response: HttpResponse = client.post(url) {
+            applyChannelTimeout(selection, streaming = false)
             headers {
                 selection.provider.defaultHeaders.forEach { (k, v) -> append(k, v) }
                 extraHeaders.forEach { (k, v) -> append(k, v) }
@@ -208,6 +212,7 @@ class RealUpstreamHttpClient private constructor(
         val url = endpointUrl(selection, stream = true)
         val apiKey = resolveApiKey(selection)
         val response = client.post(url) {
+            applyChannelTimeout(selection, streaming = true)
             headers {
                 selection.provider.defaultHeaders.forEach { (k, v) -> append(k, v) }
                 extraHeaders.forEach { (k, v) -> append(k, v) }
@@ -259,6 +264,7 @@ class RealUpstreamHttpClient private constructor(
     ): UpstreamResponse {
         val apiKey = resolveApiKey(selection)
         val response: HttpResponse = client.post("${selection.provider.baseUrl.trimEnd('/')}/v1/messages/count_tokens") {
+            applyChannelTimeout(selection, streaming = false)
             headers {
                 selection.provider.defaultHeaders.forEach { (k, v) -> append(k, v) }
                 extraHeaders.forEach { (k, v) -> append(k, v) }
@@ -402,6 +408,7 @@ class RealUpstreamHttpClient private constructor(
             if (request.queryString.isNotBlank()) append('?').append(request.queryString)
         }
         val response: HttpResponse = client.request(url) {
+            applyChannelTimeout(selection, streaming = false)
             method = request.method
             headers {
                 selection.provider.defaultHeaders.forEach { (k, v) -> append(k, v) }
@@ -431,13 +438,26 @@ class RealUpstreamHttpClient private constructor(
         )
     }
 
+    private fun HttpRequestBuilder.applyChannelTimeout(selection: PoolSelection, streaming: Boolean) {
+        val timeoutMs = selection.provider.timeoutMs.coerceAtLeast(AI_RELAY_MIN_TIMEOUT_MS)
+        timeout {
+            requestTimeoutMillis = if (streaming) null else timeoutMs
+            socketTimeoutMillis = timeoutMs
+            connectTimeoutMillis = timeoutMs.coerceAtMost(DEFAULT_CONNECT_TIMEOUT_MS)
+        }
+    }
+
     companion object {
+        private const val DEFAULT_CONNECT_TIMEOUT_MS = 15_000L
+        private const val DEFAULT_REQUEST_TIMEOUT_MS = AI_RELAY_MIN_TIMEOUT_MS
+        private const val DEFAULT_SOCKET_TIMEOUT_MS = AI_RELAY_MIN_TIMEOUT_MS
+
         fun create(): RealUpstreamHttpClient = RealUpstreamHttpClient(
             client = HttpClient(CIO) {
                 install(HttpTimeout) {
-                    requestTimeoutMillis = 120_000
-                    connectTimeoutMillis = 15_000
-                    socketTimeoutMillis = 120_000
+                    requestTimeoutMillis = DEFAULT_REQUEST_TIMEOUT_MS
+                    connectTimeoutMillis = DEFAULT_CONNECT_TIMEOUT_MS
+                    socketTimeoutMillis = DEFAULT_SOCKET_TIMEOUT_MS
                 }
                 expectSuccess = false
             }

@@ -1,6 +1,7 @@
 package com.keel.samples.aigateway.airelay.config
 
 import com.keel.db.table.AuditPluginTable
+import com.keel.samples.aigateway.airelay.AI_RELAY_MIN_TIMEOUT_MS
 import org.jetbrains.exposed.sql.Column
 
 object GroupTable : AuditPluginTable("airelay", "group") {
@@ -65,7 +66,7 @@ object ChannelTable : AuditPluginTable("airelay", "channel") {
     val priority: Column<Int> = integer("priority").default(0)
     val weight: Column<Int> = integer("weight").default(100)
     val maxConcurrency: Column<Int> = integer("max_concurrency").default(10)
-    val timeoutMs: Column<Long> = long("timeout_ms").default(60_000)
+    val timeoutMs: Column<Long> = long("timeout_ms").default(AI_RELAY_MIN_TIMEOUT_MS)
     /** HEALTHY / DEGRADED / DISABLED — last observed status from a Test or live traffic. */
     val status: Column<String> = varchar("status", 16).default("HEALTHY")
     val lastTestLatencyMs: Column<Long?> = long("last_test_latency_ms").nullable()
@@ -100,7 +101,7 @@ object ChannelModelTable : AuditPluginTable("airelay", "model") {
 
 /**
  * Channel test history — stores the result of each channel test (admin "Test" button).
- * Used to render the "near 60 tests" sparkline and calculate 7-day availability.
+ * Used to render the "near 60 tests" sparkline.
  */
 object ChannelTestHistoryTable : AuditPluginTable("airelay", "channel_test_history") {
     val testId: Column<String> = varchar("test_id", 32)

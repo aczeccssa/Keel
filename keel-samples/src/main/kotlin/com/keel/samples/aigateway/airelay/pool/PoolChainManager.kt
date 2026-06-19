@@ -29,6 +29,7 @@ data class UpstreamKeyState(
     val currentConcurrency: AtomicInteger = AtomicInteger(0),
     val totalRequests: AtomicLong = AtomicLong(0),
     val totalFailures: AtomicLong = AtomicLong(0),
+    val consecutiveFailures: AtomicInteger = AtomicInteger(0),
     @Volatile var cooldownUntilEpochMs: Long = 0L,
     @Volatile var lastError: String? = null
 )
@@ -211,6 +212,7 @@ class PoolChainManager(
 
     fun markSuccess(selection: PoolSelection) {
         selection.keyState.totalRequests.incrementAndGet()
+        selection.keyState.consecutiveFailures.set(0)
         selection.keyState.lastError = null
         if (selection.keyState.status.get() == KeyStatus.DEGRADED) selection.keyState.status.set(KeyStatus.HEALTHY)
     }
@@ -218,16 +220,19 @@ class PoolChainManager(
     fun markFailure(selection: PoolSelection, status: Int?, message: String?, retryAfterSeconds: Long? = null) {
         val state = selection.keyState
         state.totalFailures.incrementAndGet()
+        val consecutiveFailures = state.consecutiveFailures.incrementAndGet()
         state.lastError = message ?: status?.toString()
         when (status) {
             401, 403 -> state.status.set(KeyStatus.DISABLED)
             429 -> {
                 state.status.set(KeyStatus.COOLDOWN)
-                state.cooldownUntilEpochMs = System.currentTimeMillis() + (retryAfterSeconds?.times(1000) ?: selection.level.cooldownMs)
+                state.cooldownUntilEpochMs = System.currentTimeMillis() +
+                    (retryAfterSeconds?.times(1000) ?: cooldownBackoffMs(baseMs = 30_000L, consecutiveFailures, selection.level.cooldownMs))
             }
             in 500..599, null -> {
                 state.status.set(KeyStatus.COOLDOWN)
-                state.cooldownUntilEpochMs = System.currentTimeMillis() + selection.level.cooldownMs
+                val baseMs = if (status == null) 30_000L else 10_000L
+                state.cooldownUntilEpochMs = System.currentTimeMillis() + cooldownBackoffMs(baseMs, consecutiveFailures, selection.level.cooldownMs)
             }
             else -> state.status.set(KeyStatus.DEGRADED)
         }
@@ -241,6 +246,7 @@ class PoolChainManager(
             ?.firstOrNull { it.key.keyId == keyId }
             ?: return false
         state.status.set(KeyStatus.HEALTHY)
+        state.consecutiveFailures.set(0)
         state.cooldownUntilEpochMs = 0L
         state.lastError = null
         return true
@@ -289,6 +295,11 @@ class PoolChainManager(
             state.status.set(KeyStatus.HEALTHY)
             state.cooldownUntilEpochMs = 0L
         }
+    }
+
+    private fun cooldownBackoffMs(baseMs: Long, consecutiveFailures: Int, maxMs: Long): Long {
+        val multiplier = 1L shl (consecutiveFailures - 1).coerceIn(0, 10)
+        return (baseMs * multiplier).coerceAtMost(maxMs)
     }
 
     private fun supportsTargetModel(key: PooledKeyConfig, targetModel: String): Boolean {

@@ -3,6 +3,7 @@ package com.keel.samples.aigateway.benchmark
 import com.keel.samples.aigateway.airelay.AIRelaySettings
 import com.keel.samples.aigateway.airelay.AliasRouteConfig
 import com.keel.samples.aigateway.airelay.AliasTargetConfig
+import com.keel.samples.aigateway.airelay.AI_RELAY_MIN_TIMEOUT_MS
 import com.keel.samples.aigateway.airelay.GroupExposureMode
 import com.keel.samples.aigateway.airelay.ModelPricing
 import com.keel.samples.aigateway.airelay.PoolChainConfig
@@ -48,7 +49,7 @@ object BenchmarkTopologyFactory {
                     providerId = channelId,
                     baseUrl = providerBaseUrl,
                     protocol = case.protocol.toWireProtocol(),
-                    timeoutMs = maxOf(120_000L, case.generationDurationMs * 3),
+                    timeoutMs = maxOf(AI_RELAY_MIN_TIMEOUT_MS, case.generationDurationMs * 3),
                     defaultHeaders = mapOf(
                         "X-Benchmark-Provider-Id" to channelId,
                         "X-Benchmark-Generation-Ms" to case.generationDurationMs.toString(),
@@ -87,7 +88,7 @@ object BenchmarkTopologyFactory {
                         providerId = "$prefix-provider-level",
                         baseUrl = providerBaseUrl,
                         protocol = case.protocol.toWireProtocol(),
-                        timeoutMs = maxOf(120_000L, case.generationDurationMs * 3),
+                        timeoutMs = maxOf(AI_RELAY_MIN_TIMEOUT_MS, case.generationDurationMs * 3),
                     ),
                     keys = keys,
                     cooldownMs = 5_000,
