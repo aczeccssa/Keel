@@ -45,6 +45,9 @@ import com.keel.samples.aigateway.airelay.config.UpsertChannelMembershipRequest
 import com.keel.samples.aigateway.airelay.config.UpsertGroupAliasRequest
 import com.keel.samples.aigateway.airelay.config.UpsertGroupRequest
 import com.keel.samples.aigateway.airelay.pool.PoolChainManager
+import com.keel.samples.aigateway.airelay.pool.PoolExplainResponse
+import com.keel.samples.aigateway.airelay.pool.PoolRuntimeRegistry
+import com.keel.samples.aigateway.airelay.pool.PoolView
 import com.keel.samples.aigateway.airelay.protocol.ProtocolTranscoder
 import com.keel.samples.aigateway.airelay.protocol.WireProtocol
 import com.keel.samples.aigateway.airelay.protocol.anthropic.AnthropicMessagesCodec
@@ -103,6 +106,7 @@ class AIRelayPlugin : StandardKeelPlugin {
     private lateinit var pricing: ModelPricingRegistry
     lateinit var upstreamClient: MockableUpstreamHttpClient
         private set
+    private val runtimeRegistry = PoolRuntimeRegistry()
     private var installedUpstreamOverride: UpstreamHttpClient? = null
     private var installedPoolChainOverride: PoolChainManager? = null
 
@@ -123,7 +127,7 @@ class AIRelayPlugin : StandardKeelPlugin {
     override suspend fun onInit(context: PluginInitContext) {
         kernelKoin = context.kernelKoin
         settings = AIRelaySettings.load()
-        poolChainManager = installedPoolChainOverride ?: PoolChainManager(settings.chains)
+        poolChainManager = installedPoolChainOverride ?: PoolChainManager(settings.chains, runtimeRegistry)
         transcoder = ProtocolTranscoder(listOf(OpenAIChatCodec(), OpenAIResponsesCodec(), AnthropicMessagesCodec()))
         pricing = ModelPricingRegistry(settings.pricings)
         // When any chain in the configured set targets a non-mock baseUrl we wire a real
@@ -147,7 +151,7 @@ class AIRelayPlugin : StandardKeelPlugin {
         val db = factory.init()
         val repo = ChannelRepository(db, SecretCipher.fromEnv())
         repo.initializeSchema()
-        val service = ConfigService(repo)
+        val service = ConfigService(repo, runtimeRegistry)
         if (repo.count() == 0L) {
             AIRelaySettings.seedChannelsIfPresent(repo)
         }
@@ -300,7 +304,7 @@ class AIRelayPlugin : StandardKeelPlugin {
      */
     fun installRealUpstream(client: UpstreamHttpClient, chains: List<PoolChainConfig>) {
         installedUpstreamOverride = client
-        installedPoolChainOverride = PoolChainManager(chains)
+        installedPoolChainOverride = PoolChainManager(chains, runtimeRegistry)
         if (this::poolChainManager.isInitialized) {
             poolChainManager = installedPoolChainOverride!!
         }
@@ -592,6 +596,29 @@ class AIRelayPlugin : StandardKeelPlugin {
                     val aliases = repo.replaceAliasesForGroupFromAdmin(groupId, request.aliasRoutes)
                     configService?.reload()
                     PluginResult(body = GroupAliasListResponse(aliases))
+                }
+                get<PoolListResponse>(
+                    "/{groupId}/pools",
+                    doc = OpenApiDoc(summary = "List runtime pools for a routing group", tags = listOf("ai-gateway", "airelay", "admin"), errorStatuses = setOf(404))
+                ) {
+                    val groupId = pathParameters["groupId"] ?: throw PluginApiException(400, "Missing groupId")
+                    PluginResult(body = PoolListResponse(activeManager().listPools(groupId)))
+                }
+                get<PoolView>(
+                    "/{groupId}/pools/{aliasOrModel}",
+                    doc = OpenApiDoc(summary = "Get runtime pool detail", tags = listOf("ai-gateway", "airelay", "admin"), errorStatuses = setOf(404))
+                ) {
+                    val groupId = pathParameters["groupId"] ?: throw PluginApiException(400, "Missing groupId")
+                    val aliasOrModel = pathParameters["aliasOrModel"] ?: throw PluginApiException(400, "Missing aliasOrModel")
+                    PluginResult(body = activeManager().poolDetails(groupId, aliasOrModel))
+                }
+                post<PoolExplainRequest, PoolExplainResponse>(
+                    "/{groupId}/pools/{aliasOrModel}/explain",
+                    doc = OpenApiDoc(summary = "Explain runtime pool selection", tags = listOf("ai-gateway", "airelay", "admin"), errorStatuses = setOf(404))
+                ) { request ->
+                    val groupId = pathParameters["groupId"] ?: throw PluginApiException(400, "Missing groupId")
+                    val aliasOrModel = pathParameters["aliasOrModel"] ?: throw PluginApiException(400, "Missing aliasOrModel")
+                    PluginResult(body = activeManager().explainSelection(groupId, request.requestedModel ?: aliasOrModel))
                 }
             }
 
@@ -1258,6 +1285,12 @@ data class ModelView(val id: String, val chainId: String, val objectType: String
 
 @Serializable
 data class PoolResetResponse(val message: String)
+
+@Serializable
+data class PoolListResponse(val pools: List<PoolView>)
+
+@Serializable
+data class PoolExplainRequest(val requestedModel: String? = null)
 
 @Serializable
 data class PoolConfigResponse(

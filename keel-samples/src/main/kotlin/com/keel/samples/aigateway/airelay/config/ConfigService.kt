@@ -10,6 +10,7 @@ import com.keel.samples.aigateway.airelay.PoolLevelConfig
 import com.keel.samples.aigateway.airelay.PooledKeyConfig
 import com.keel.samples.aigateway.airelay.UpstreamProviderConfig
 import com.keel.samples.aigateway.airelay.pool.PoolChainManager
+import com.keel.samples.aigateway.airelay.pool.PoolRuntimeRegistry
 import com.keel.samples.aigateway.airelay.protocol.WireProtocol
 import java.util.concurrent.atomic.AtomicReference
 
@@ -20,9 +21,10 @@ import java.util.concurrent.atomic.AtomicReference
  * Channels with the same priority share a level and are weighted by their channel weight.
  */
 class ConfigService(
-    private val repository: ChannelRepository
+    private val repository: ChannelRepository,
+    private val runtimeRegistry: PoolRuntimeRegistry = PoolRuntimeRegistry(),
 ) {
-    private val managerRef = AtomicReference<PoolChainManager>(PoolChainManager(emptyList()))
+    private val managerRef = AtomicReference<PoolChainManager>(PoolChainManager(emptyList(), runtimeRegistry))
     private val chainsRef = AtomicReference<List<PoolChainConfig>>(emptyList())
     private val pricingRef = AtomicReference<List<ModelPricing>>(emptyList())
 
@@ -93,7 +95,7 @@ class ConfigService(
             }
         }.filter { it.model !in standaloneModels }.distinctBy { it.model }
         val pricing = standalone + fromChannels
-        managerRef.set(PoolChainManager(chains))
+        managerRef.set(PoolChainManager(chains, runtimeRegistry))
         chainsRef.set(chains)
         pricingRef.set(pricing)
     }

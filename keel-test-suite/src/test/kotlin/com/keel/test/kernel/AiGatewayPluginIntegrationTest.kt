@@ -550,4 +550,43 @@ class AiGatewayPluginIntegrationTest {
         }
         assertEquals(HttpStatusCode.NotFound, response.status)
     }
+
+    @Test
+    fun adminGroupPoolsEndpointReturnsRuntimePools() = setupApp {
+        val response = client.get("/api/plugins/airelay/admin/groups/default/pools")
+        assertEquals(HttpStatusCode.OK, response.status)
+        val body = json.parseToJsonElement(response.bodyAsText()).jsonObject
+        assertTrue(body["pools"]!!.jsonArray.isNotEmpty())
+    }
+
+    @Test
+    fun debugHeadersRequireBothServerAndRequestOptIn() = setupApp {
+        val defaultResponse = client.post("/api/plugins/airelay/v1/chat/completions") {
+            header("Authorization", "Bearer $rawKey")
+            contentType(ContentType.Application.Json)
+            setBody("""{"model":"gpt-4o-mini","messages":[{"role":"user","content":"Hello"}]}""")
+        }
+        assertEquals(HttpStatusCode.OK, defaultResponse.status)
+        assertEquals(null, defaultResponse.headers["X-AIRelay-Selected-Channel"])
+
+        val previous = System.getProperty("keel.airelay.debugHeaders")
+        System.setProperty("keel.airelay.debugHeaders", "true")
+        try {
+            val debugResponse = client.post("/api/plugins/airelay/v1/chat/completions") {
+                header("Authorization", "Bearer $rawKey")
+                header("X-AIRelay-Debug", "true")
+                contentType(ContentType.Application.Json)
+                setBody("""{"model":"gpt-4o-mini","messages":[{"role":"user","content":"Hello"}]}""")
+            }
+            assertEquals(HttpStatusCode.OK, debugResponse.status)
+            assertTrue((debugResponse.headers["X-AIRelay-Selected-Channel"] ?: "").isNotBlank())
+            assertTrue((debugResponse.headers["X-AIRelay-Failover-Count"] ?: "").isNotBlank())
+        } finally {
+            if (previous == null) {
+                System.clearProperty("keel.airelay.debugHeaders")
+            } else {
+                System.setProperty("keel.airelay.debugHeaders", previous)
+            }
+        }
+    }
 }

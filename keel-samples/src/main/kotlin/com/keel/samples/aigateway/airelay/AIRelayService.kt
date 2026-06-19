@@ -21,6 +21,7 @@ import com.keel.contract.customer.CustomerUsageRow
 import com.keel.kernel.plugin.KeelRequestContext
 import com.keel.kernel.plugin.PluginApiException
 import com.keel.samples.aigateway.airelay.pool.PoolChainManager
+import com.keel.samples.aigateway.airelay.pool.PoolLease
 import com.keel.samples.aigateway.airelay.protocol.IrItem
 import com.keel.samples.aigateway.airelay.protocol.IrRequest
 import com.keel.samples.aigateway.airelay.protocol.IrStreamEvent
@@ -158,30 +159,13 @@ class AIRelayService(
     ): RelayResult {
         var failoverCount = 0
         var lastError: Throwable? = null
-        val candidates = poolChainManager.selectCandidates(keyContext.verified.routingGroupId, ir.model)
-        if (candidates.isEmpty()) {
-            System.err.println(
-                "airelay_pool_exhausted model=${ir.model} client=$clientProtocol detail=${
-                    poolChainManager.explainAvailability(keyContext.verified.routingGroupId, ir.model)
-                }"
-            )
-            usageRecorder.record(
-                rejectionRecord(
-                    key = keyContext.verified,
-                    clientProtocol = clientProtocol,
-                    ir = ir,
-                    status = 503,
-                    errorCode = "pool_exhausted",
-                    errorDetail = poolChainManager.explainAvailability(keyContext.verified.routingGroupId, ir.model),
-                    started = started
-                )
-            )
-            return poolExhaustedError(clientProtocol, ir.model, keyContext.verified.routingGroupId)
-        }
-        for (selection in candidates) {
+        val excludedKeyIds = linkedSetOf<String>()
+        while (true) {
+            val lease = poolChainManager.acquire(keyContext.verified.routingGroupId, ir.model, excludedKeyIds)
+                ?: break
+            val selection = lease.selection
             val upstreamHeaders = upstreamHeaderOverrides(context, selection.provider.protocol, ir)
             val upstreamRequest = buildUpstreamRequest(rawRequest, clientProtocol, selection.provider.protocol, ir.copy(model = selection.upstreamModel, stream = false))
-            selection.keyState.currentConcurrency.incrementAndGet()
             try {
                 val upstream = upstreamClient.send(
                     selection,
@@ -255,19 +239,22 @@ class AIRelayService(
                 headers["X-Cost-USD"] = listOf(cost.totalCostUsd.toString())
                 headers["X-Upstream-Protocol"] = listOf(selection.provider.protocol.name)
                 headers["X-Request-Id"] = listOf(upstreamIr.id)
+                applyDebugHeaders(context, headers, selection, failoverCount)
                 return RelayResult(status = upstream.status, headers = headers, body = responseBody)
             } catch (error: UpstreamHttpException) {
                 System.err.println("airelay_error model=${ir.model} client=${clientProtocol} upstream=${selection.provider.protocol} status=${error.status} error=upstream_${error.status} message=${(error.message ?: "").take(180)}")
                 poolChainManager.markFailure(selection, error.status, error.message, error.retryAfterSeconds)
                 lastError = error
                 failoverCount += 1
-                if (error.status in 400..499 && error.status != 429) break
+                excludedKeyIds += selection.keyState.key.keyId
+                if (!shouldFailover(error.status)) break
             } catch (error: Throwable) {
                 poolChainManager.markFailure(selection, null, error.message)
                 lastError = error
                 failoverCount += 1
+                excludedKeyIds += selection.keyState.key.keyId
             } finally {
-                selection.keyState.currentConcurrency.decrementAndGet()
+                lease.close()
             }
         }
         System.err.println(
@@ -299,28 +286,13 @@ class AIRelayService(
         started: kotlinx.datetime.Instant,
         extraHeaders: Map<String, List<String>>
     ): RelayResult {
-        val candidates = poolChainManager.selectCandidates(keyContext.verified.routingGroupId, ir.model)
-        if (candidates.isEmpty()) {
-            val detail = poolChainManager.explainAvailability(keyContext.verified.routingGroupId, ir.model)
-            System.err.println("airelay_pool_exhausted model=${ir.model} client=$clientProtocol stream=true detail=$detail")
-            usageRecorder.record(
-                rejectionRecord(
-                    key = keyContext.verified,
-                    clientProtocol = clientProtocol,
-                    ir = ir,
-                    status = 503,
-                    errorCode = "pool_exhausted",
-                    errorDetail = detail,
-                    started = started,
-                    streamed = true
-                )
-            )
-            return poolExhaustedError(clientProtocol, ir.model, keyContext.verified.routingGroupId)
-        }
-
         var failoverCount = 0
         var lastError: Throwable? = null
-        for (selection in candidates) {
+        val excludedKeyIds = linkedSetOf<String>()
+        while (true) {
+            val lease = poolChainManager.acquire(keyContext.verified.routingGroupId, ir.model, excludedKeyIds)
+                ?: break
+            val selection = lease.selection
             val upstreamHeaders = upstreamHeaderOverrides(context, selection.provider.protocol, ir)
             val upstreamRequest = buildUpstreamRequest(
                 rawRequest,
@@ -328,7 +300,6 @@ class AIRelayService(
                 selection.provider.protocol,
                 ir.copy(model = selection.upstreamModel, stream = true)
             )
-            selection.keyState.currentConcurrency.incrementAndGet()
             var handedOff = false
             try {
                 val opened = upstreamClient.openStream(selection, upstreamRequest, upstreamHeaders)
@@ -354,6 +325,7 @@ class AIRelayService(
                 val headers = extraHeaders.toMutableMap()
                 headers["X-Upstream-Protocol"] = listOf(selection.provider.protocol.name)
                 headers["Content-Type"] = listOf("text/event-stream")
+                applyDebugHeaders(context, headers, selection, failoverCount)
                 handedOff = true
                 return RelayResult(
                     status = 200,
@@ -371,6 +343,7 @@ class AIRelayService(
                             outputText = outputText.toString(),
                             anthropicObserver = anthropicObserver,
                             responsesObserver = responsesObserver,
+                            lease = lease,
                         )
                     }
                 )
@@ -379,15 +352,17 @@ class AIRelayService(
                 poolChainManager.markFailure(selection, error.status, error.message, error.retryAfterSeconds)
                 lastError = error
                 failoverCount += 1
-                if (error.status in 400..499 && error.status != 429) break
+                excludedKeyIds += selection.keyState.key.keyId
+                if (!shouldFailover(error.status)) break
             } catch (error: Throwable) {
                 System.err.println("airelay_error model=${ir.model} client=${clientProtocol} upstream=${selection.provider.protocol} status=500 error=${error.javaClass.simpleName?.take(64)} message=${(error.message ?: "").take(180)}")
                 poolChainManager.markFailure(selection, null, error.message)
                 lastError = error
                 failoverCount += 1
+                excludedKeyIds += selection.keyState.key.keyId
             } finally {
                 if (!handedOff) {
-                    selection.keyState.currentConcurrency.decrementAndGet()
+                    lease.close()
                 }
             }
         }
@@ -422,6 +397,7 @@ class AIRelayService(
         outputText: String,
         anthropicObserver: AnthropicStreamObserver?,
         responsesObserver: ResponsesStreamObserver?,
+        lease: PoolLease,
     ) {
         try {
             val streamOutcome = anthropicObserver?.outcome(transportStatus = 200)
@@ -525,7 +501,7 @@ class AIRelayService(
                 poolChainManager.markFailure(selection, null, completionError.message)
             }
         } finally {
-            selection.keyState.currentConcurrency.decrementAndGet()
+            lease.close()
         }
     }
 
@@ -819,6 +795,37 @@ class AIRelayService(
         is UpstreamHttpException -> "upstream_${error.status}"
         else -> error::class.simpleName?.take(64) ?: "upstream_error"
     }
+
+    private fun shouldFailover(status: Int?): Boolean = when (status) {
+        null -> true
+        408, 429 -> true
+        in 500..599 -> true
+        else -> false
+    }
+
+    private fun debugHeadersEnabled(context: KeelRequestContext): Boolean {
+        val requestOptIn = context.requestHeaders["X-AIRelay-Debug"]?.firstOrNull()?.equals("true", ignoreCase = true) == true
+        val serverOptIn = System.getenv("KEEL_AIRELAY_DEBUG_HEADERS") == "true" ||
+            System.getProperty("keel.airelay.debugHeaders") == "true"
+        return requestOptIn && serverOptIn
+    }
+
+    private fun applyDebugHeaders(
+        context: KeelRequestContext,
+        headers: MutableMap<String, List<String>>,
+        selection: com.keel.samples.aigateway.airelay.pool.PoolSelection,
+        failoverCount: Int,
+    ) {
+        if (!debugHeadersEnabled(context)) return
+        headers["X-AIRelay-Selected-Channel"] = listOf(selection.keyState.key.keyId)
+        headers["X-AIRelay-Selected-Priority"] = listOf(selectedPriority(selection).toString())
+        headers["X-AIRelay-Routing-Policy"] = listOf(if (selection.matchedAliasName != null) "POOL_BALANCE" else "POOL_BALANCE")
+        headers["X-AIRelay-Failover-Count"] = listOf(failoverCount.toString())
+    }
+
+    private fun selectedPriority(selection: com.keel.samples.aigateway.airelay.pool.PoolSelection): Int =
+        selection.level.levelId.substringAfterLast("-p", selection.level.levelIndex.toString()).toIntOrNull()
+            ?: selection.level.levelIndex
 
     private fun elapsedMs(started: kotlinx.datetime.Instant): Long =
         (kotlinx.datetime.Clock.System.now() - started).inWholeMilliseconds
