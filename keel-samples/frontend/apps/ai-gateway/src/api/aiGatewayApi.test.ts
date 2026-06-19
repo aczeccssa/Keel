@@ -35,4 +35,15 @@ describe('AiGatewayApi', () => {
       headers: expect.objectContaining({ Authorization: 'Bearer abc' })
     }));
   });
+
+  it('loads group-scoped pool data from the new admin endpoint', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ pools: [] }), { status: 200 })));
+
+    const api = new AiGatewayApi('abc');
+    await api.groupPools('default');
+
+    expect(fetch).toHaveBeenCalledWith('/api/plugins/airelay/admin/groups/default/pools', expect.objectContaining({
+      headers: expect.objectContaining({ Authorization: 'Bearer abc' })
+    }));
+  });
 });

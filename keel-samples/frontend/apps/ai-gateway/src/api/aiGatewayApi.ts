@@ -46,6 +46,14 @@ export class AiGatewayApi {
   keys() { return requestJson(`${TOKEN_BASE}/admin/keys`, { token: this.token }); }
   pricing() { return requestJson(`${AIRELAY_BASE}/admin/pricing`, { token: this.token }); }
   pools() { return requestJson(`${AIRELAY_BASE}/admin/pools`, { token: this.token }); }
+  groupPools(groupId: string) { return requestJson(`${AIRELAY_BASE}/admin/groups/${groupId}/pools`, { token: this.token }); }
+  explainGroupPool(groupId: string, aliasOrModel: string, requestedModel?: string) {
+    return requestJson(`${AIRELAY_BASE}/admin/groups/${groupId}/pools/${encodeURIComponent(aliasOrModel)}/explain`, {
+      method: 'POST',
+      body: requestedModel ? { requestedModel } : {},
+      token: this.token
+    });
+  }
   rateLimitRules() { return requestJson(`${RISK_BASE}/v1/rules`, { token: this.token }); }
   rateLimitSnapshot() { return requestJson(`${RISK_BASE}/v1/snapshot`, { token: this.token }); }
   users() { return requestJson(`${ACCOUNT_BASE}/admin/users`, { token: this.token }); }

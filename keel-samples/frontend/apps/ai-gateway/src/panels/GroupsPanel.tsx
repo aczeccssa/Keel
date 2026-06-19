@@ -15,12 +15,13 @@ import type { AiGatewayApi } from '../api/aiGatewayApi';
 interface Group {
   groupId?: string;
   name?: string;
-  aliases?: string[];
+  enabled?: boolean;
+  description?: string;
+  exposureMode?: string;
   exposedToClients?: boolean;
   clientVisible?: boolean;
   publiclyExposed?: boolean;
-  enabled?: boolean;
-  description?: string;
+  aliasRoutes?: Array<{ aliasName?: string; routingPolicy?: string; enabled?: boolean }>;
 }
 
 interface Channel {
@@ -189,7 +190,7 @@ export function GroupsPanel({ api }: { api: AiGatewayApi }) {
           <div className="keel-card-list">
             {groups.map((g, i) => {
               const exposed = isExposed(g);
-              const aliases = g.aliases ?? [];
+              const aliases = (g.aliasRoutes ?? []).filter((alias) => alias.enabled !== false);
               const members = membersFor(channels, g.groupId);
               return (
                 <article key={g.groupId ?? g.name ?? i} className="keel-list-card">
@@ -210,11 +211,14 @@ export function GroupsPanel({ api }: { api: AiGatewayApi }) {
                         <div className="keel-chip-cluster">
                           {aliases.map((a, ai) => (
                             <Chip key={ai} tone="accent">
-                              {a}
+                              {`${a.aliasName ?? '—'} · ${a.routingPolicy ?? 'ORDERED_FAILOVER'}`}
                             </Chip>
                           ))}
                         </div>
                       )}
+                    </KeyValue>
+                    <KeyValue label="Exposure">
+                      <span className="keel-mono">{g.exposureMode ?? 'ALL_MODELS'}</span>
                     </KeyValue>
                     <KeyValue label="Exposed to clients">
                       <Chip tone={exposed === true ? 'ok' : 'muted'}>

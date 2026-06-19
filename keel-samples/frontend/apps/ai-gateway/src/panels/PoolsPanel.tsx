@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import {
+  Chip,
   DataTable,
   type DataTableColumn,
   EmptyState,
@@ -8,23 +9,44 @@ import {
 } from '@keel/sample-ui';
 import type { AiGatewayApi } from '../api/aiGatewayApi';
 
+interface Group {
+  groupId?: string;
+}
+
+interface PoolChannel {
+  channelId?: string;
+  channelName?: string;
+  effectiveStatus?: string;
+  weight?: number;
+  currentConcurrency?: number;
+  maxConcurrency?: number;
+  totalRequests?: number;
+  totalFailures?: number;
+  lastError?: string | null;
+}
+
 interface Pool {
-  chainId?: string;
-  modelAliases?: string[];
-  levels?: Array<{
-    levelId?: string;
-    protocol?: string;
-    providerId?: string;
-    keys?: Array<{
-      keyId?: string;
-      status?: string;
-      totalRequests?: number;
-      totalFailures?: number;
-      currentConcurrency?: number;
-      maxConcurrency?: number;
-      lastError?: string;
-    }>;
-  }>;
+  groupId?: string;
+  aliasOrModel?: string;
+  routingPolicy?: string;
+  priority?: number;
+  totalInflight?: number;
+  channels?: PoolChannel[];
+}
+
+function statusTone(status: string | undefined): 'ok' | 'warn' | 'danger' | 'muted' {
+  switch ((status ?? '').toUpperCase()) {
+    case 'HEALTHY':
+      return 'ok';
+    case 'SATURATED':
+    case 'COOLDOWN':
+      return 'warn';
+    case 'DISABLED':
+    case 'DEGRADED':
+      return 'danger';
+    default:
+      return 'muted';
+  }
 }
 
 export function PoolsPanel({ api }: { api: AiGatewayApi }) {
@@ -33,45 +55,79 @@ export function PoolsPanel({ api }: { api: AiGatewayApi }) {
 
   useEffect(() => {
     let cancelled = false;
-    api.pools()
-      .then((data) => {
-        if (cancelled) return;
-        setRows(((data as { chains?: Pool[] }).chains ?? []) as Pool[]);
-      })
-      .catch((err) => {
-        if (!cancelled) setError(err instanceof Error ? err.message : 'Unable to load pools');
-      });
+    let timer: number | undefined;
+
+    const load = async () => {
+      if (document.visibilityState === 'hidden') {
+        timer = window.setTimeout(load, 5000);
+        return;
+      }
+      try {
+        const groupsData = await api.groups();
+        const groups = ((groupsData as { groups?: Group[] }).groups ?? []) as Group[];
+        const pools = await Promise.all(
+          groups
+            .map((group) => group.groupId)
+            .filter((groupId): groupId is string => !!groupId)
+            .map(async (groupId) => {
+              const response = await api.groupPools(groupId);
+              return ((response as { pools?: Pool[] }).pools ?? []) as Pool[];
+            })
+        );
+        if (!cancelled) {
+          setRows(pools.flat());
+          setError(null);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : 'Unable to load pools');
+        }
+      } finally {
+        timer = window.setTimeout(load, 5000);
+      }
+    };
+
+    void load();
     return () => {
       cancelled = true;
+      if (timer) window.clearTimeout(timer);
     };
   }, [api]);
 
   const columns: DataTableColumn<Pool>[] = [
-    { key: 'chainId', header: 'Chain', mono: true, render: (r) => r.chainId ?? '—' },
+    { key: 'groupId', header: 'Group', mono: true, render: (r) => r.groupId ?? '—' },
+    { key: 'aliasOrModel', header: 'Alias / Model', mono: true, render: (r) => r.aliasOrModel ?? '—' },
     {
-      key: 'models',
-      header: 'Models',
-      render: (r) => (r.modelAliases ?? []).length ? (r.modelAliases ?? []).join(', ') : '—'
+      key: 'routingPolicy',
+      header: 'Policy',
+      render: (r) => <Chip tone={r.routingPolicy === 'POOL_BALANCE' ? 'ok' : 'warn'}>{r.routingPolicy ?? '—'}</Chip>
     },
     {
-      key: 'levels',
-      header: 'Levels',
+      key: 'priority',
+      header: 'Priority',
+      width: '88px',
+      align: 'right',
+      mono: true,
+      render: (r) => String(r.priority ?? 0)
+    },
+    {
+      key: 'channels',
+      header: 'Channels',
       render: (r) => (
         <div style={{ display: 'grid', gap: 6 }}>
-          {(r.levels ?? []).map((level, index) => (
-            <div key={`${level.levelId ?? 'level'}-${index}`} style={{ display: 'grid', gap: 4 }}>
+          {(r.channels ?? []).map((channel, index) => (
+            <div key={`${channel.channelId ?? 'channel'}-${index}`} style={{ display: 'grid', gap: 4 }}>
               <span>
-                <strong>{level.levelId ?? '—'}</strong>
+                <strong>{channel.channelName ?? channel.channelId ?? '—'}</strong>
                 {' · '}
-                <span style={{ color: 'var(--keel-muted)' }}>{level.protocol ?? '—'}</span>
+                <Chip tone={statusTone(channel.effectiveStatus)}>{channel.effectiveStatus ?? 'UNKNOWN'}</Chip>
               </span>
-              {(level.keys ?? []).map((key, keyIndex) => (
-                <span key={`${key.keyId ?? 'key'}-${keyIndex}`} style={{ fontSize: 12, color: 'var(--keel-muted)' }}>
-                  {key.keyId ?? '—'} · {key.status ?? '—'} · cc {key.currentConcurrency ?? 0}/{key.maxConcurrency ?? 0}
-                  {(key.totalFailures ?? 0) > 0 ? ` · fail ${key.totalFailures}` : ''}
-                  {key.lastError ? ` · ${key.lastError}` : ''}
-                </span>
-              ))}
+              <span style={{ fontSize: 12, color: 'var(--keel-muted)' }}>
+                {channel.channelId ?? '—'} · weight {channel.weight ?? 0} · inflight {channel.currentConcurrency ?? 0}/{channel.maxConcurrency ?? 0}
+                {' · '}requests {channel.totalRequests ?? 0}
+                {(channel.totalFailures ?? 0) > 0 ? ` · fail ${channel.totalFailures}` : ''}
+                {channel.lastError ? ` · ${channel.lastError}` : ''}
+              </span>
             </div>
           ))}
         </div>
@@ -81,19 +137,19 @@ export function PoolsPanel({ api }: { api: AiGatewayApi }) {
 
   return (
     <>
-      <PageHeader title="Pools" description="Routing chains and their levels." />
+      <PageHeader title="Pools" description="Runtime pool selection state grouped by routing group, alias/model, and priority tier." />
       {error ? <ErrorBanner message={error} /> : null}
       {rows.length === 0 ? (
         <EmptyState
           title="No pool data"
-          detail="Routing chains will appear here once configured."
+          detail="Routing pools will appear here once a routing group has channels or aliases."
           icon="account_tree"
         />
       ) : (
         <DataTable
           columns={columns}
           rows={rows}
-          getRowKey={(r, i) => r.chainId ?? `row-${i}`}
+          getRowKey={(r, i) => `${r.groupId ?? 'group'}:${r.aliasOrModel ?? 'pool'}:${r.priority ?? i}`}
           maxHeight="calc(100vh - 220px)"
         />
       )}
