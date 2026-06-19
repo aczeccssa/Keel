@@ -137,6 +137,11 @@ internal fun encodeResponseBody(body: Any?, responseType: KType): String? {
     return runtimeJson.encodeToString(serializer(responseType), body)
 }
 
+internal fun encodeResponseBodyForTransport(body: Any?, responseType: KType): String? {
+    if (body == null || body is OutgoingContent) return null
+    return runtimeJson.encodeToString(serializer(responseType), body)
+}
+
 @Suppress("UNCHECKED_CAST")
 internal fun serializer(type: KType): KSerializer<Any> = runtimeJson.serializersModule.serializer(type) as KSerializer<Any>
 

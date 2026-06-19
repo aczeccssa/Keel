@@ -9,6 +9,13 @@ import kotlin.test.assertNull
 
 class PluginEndpointRuntimeTest {
     @Test
+    fun `encodeResponseBodyForTransport serializes strings as JSON`() {
+        val encoded = encodeResponseBodyForTransport("pong", typeOf<String>())
+
+        assertEquals("\"pong\"", encoded)
+    }
+
+    @Test
     fun `encodeResponseBody returns raw string for Any response type`() {
         val encoded = encodeResponseBody("""{"ok":true}""", typeOf<Any>())
 

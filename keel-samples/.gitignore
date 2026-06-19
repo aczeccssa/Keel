@@ -1,0 +1,5 @@
+# Frontend (React/Vite) build artifacts must never be committed to source resources.
+# They are produced at build time under build/generated-resources/frontend/ and merged
+# into the classpath by the processResources task.
+/src/main/resources/ui/ai-gateway-ui/
+/src/main/resources/ui/customer-portal-ui/

@@ -5,15 +5,16 @@ plugins {
     id("application")
 }
 
-// Generated React/Vite bundles are staged here and added to the main resources
-// classpath ahead of checked-in fallback assets.
+// React/Vite bundles are staged here by the sync*Frontend tasks and merged into the
+// main resources at the processResources stage (see tasks.processResources below).
+// They are never declared as a resource source directory, so generated build
+// output stays out of the source set.
 val generatedFrontendResources = layout.buildDirectory.dir("generated-resources/frontend")
 
 sourceSets {
-    named("main") {
-        resources.setSrcDirs(listOf(generatedFrontendResources, "src/main/resources"))
-    }
-
+    // Keep the "main" source set at its defaults (including src/main/resources).
+    // Generated frontend bundles are injected during processResources instead of
+    // being treated as source inputs.
     create("tools") {
         kotlin.srcDir("src/tools/kotlin")
         compileClasspath += sourceSets["main"].output + sourceSets["main"].compileClasspath
@@ -130,6 +131,7 @@ tasks.register("buildSampleFrontends") {
 
 tasks.processResources {
     dependsOn(syncCustomerPortalFrontend, syncAiGatewayFrontend)
+    from(generatedFrontendResources)
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
 }
 

@@ -10,7 +10,7 @@ import com.keel.kernel.plugin.PluginDescriptor
 import com.keel.kernel.plugin.KeelInterceptorResult
 import com.keel.kernel.plugin.PluginNodeAssetMetadata
 import com.keel.kernel.plugin.decodeRequestBody
-import com.keel.kernel.plugin.encodeResponseBody
+import com.keel.kernel.plugin.encodeResponseBodyForTransport
 import com.keel.kernel.plugin.executeKeelInterceptors
 import com.keel.kernel.plugin.mergeGeneratedInterceptorMetadata
 import com.keel.kernel.plugin.normalizeRequestHeaders
@@ -931,7 +931,7 @@ object ExternalPluginHostMain {
                 }
             }
 
-            val encodedBody = encodeResponseBody(result.body, endpoint.responseType)
+            val encodedBody = encodeResponseBodyForTransport(result.body, endpoint.responseType)
             val responseBytes = encodedBody?.toByteArray(Charsets.UTF_8)?.size?.toLong() ?: 0L
             if (payloadLimit != null && responseBytes > payloadLimit && !endpoint.executionPolicy.allowChunkedTransfer) {
                 PluginJvmFrameCodec.write(
