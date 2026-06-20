@@ -68,14 +68,22 @@ data class TempBudgetRequest(
 @Serializable
 data class UsageListResponse(
     val records: List<TokenUsageRecordView>,
-    val total: Int
+    val total: Int,
+    val pageSize: Int = records.size,
+    val offset: Int = 0,
+    val nextCursor: String? = null,
+    val filtersApplied: Map<String, String> = emptyMap()
 )
 
 @Serializable
 data class TokenUsageRecordView(
     val recordId: String,
+    val requestId: String? = null,
     val keyId: String,
+    val keyDisplayName: String? = null,
     val userId: String,
+    val userGroupId: String? = null,
+    val userEmail: String? = null,
     val model: String,
     val provider: String,
     val status: Int,
@@ -86,6 +94,12 @@ data class TokenUsageRecordView(
     val usageSource: String = "PROVIDER",
     val upstreamKeyId: String? = null,
     val poolLevelId: String? = null,
+    val routingGroupId: String? = null,
+    val routingGroupName: String? = null,
+    val channelId: String? = null,
+    val channelName: String? = null,
+    val customerId: String? = null,
+    val customerEmail: String? = null,
     val streamed: Boolean = false,
     val failoverCount: Int = 0,
     val usage: TokenUsage,

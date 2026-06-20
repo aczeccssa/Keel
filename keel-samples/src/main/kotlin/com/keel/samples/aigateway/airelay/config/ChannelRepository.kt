@@ -28,6 +28,8 @@ import org.jetbrains.exposed.sql.selectAll
 import org.jetbrains.exposed.sql.update
 import java.util.UUID
 
+enum class GroupDeleteResult { DELETED, DEFAULT_PROTECTED, HAS_CHANNELS, NOT_FOUND }
+
 @Serializable
 data class GroupView(
     val groupId: String,
@@ -303,6 +305,16 @@ class ChannelRepository(
         if (hasChannels) return@transaction false
         GroupAliasTable.deleteWhere { GroupAliasTable.groupId eq groupId }
         GroupTable.deleteWhere { GroupTable.groupId eq groupId } > 0
+    }
+
+    fun deleteGroupDetailed(groupId: String): GroupDeleteResult = database.transaction {
+        if (groupId == DEFAULT_GROUP_ID) return@transaction GroupDeleteResult.DEFAULT_PROTECTED
+        val exists = GroupTable.selectAll().where { GroupTable.groupId eq groupId }.count() > 0
+        if (!exists) return@transaction GroupDeleteResult.NOT_FOUND
+        val hasChannels = ChannelMembershipTable.selectAll().where { ChannelMembershipTable.groupId eq groupId }.count() > 0
+        if (hasChannels) return@transaction GroupDeleteResult.HAS_CHANNELS
+        GroupAliasTable.deleteWhere { GroupAliasTable.groupId eq groupId }
+        if (GroupTable.deleteWhere { GroupTable.groupId eq groupId } > 0) GroupDeleteResult.DELETED else GroupDeleteResult.NOT_FOUND
     }
 
     fun listChannels(): List<ChannelView> = database.transaction {

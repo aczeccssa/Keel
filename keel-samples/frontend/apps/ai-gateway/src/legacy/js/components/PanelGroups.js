@@ -234,6 +234,7 @@ export class PanelGroups extends KeelElement {
                         ${group.groupId === 'default' ? '' : `<button class="btn-danger" data-delete-group="${escapeHtml(group.groupId)}">Delete</button>`}
                     </div>
                 </header>
+                <div class="card-error" data-card-error="${escapeHtml(group.groupId)}" style="display:none;padding:10px 18px;background:var(--red);color:var(--on-accent);font-family:var(--font-mono);font-size:11px;font-weight:800;"></div>
                 <div class="group-body">
                     <div class="group-overview">
                         <div class="info-stack">
@@ -264,7 +265,7 @@ export class PanelGroups extends KeelElement {
 
     _bindCardActions() {
         this.shadowRoot.querySelectorAll('[data-edit-group]').forEach(btn => btn.addEventListener('click', () => this._openModal(this._groups.find(x => x.groupId === btn.dataset.editGroup))));
-        this.shadowRoot.querySelectorAll('[data-delete-group]').forEach(btn => btn.addEventListener('click', () => this._delete(btn.dataset.deleteGroup)));
+        this.shadowRoot.querySelectorAll('[data-delete-group]').forEach(btn => btn.addEventListener('click', () => this._delete(btn.dataset.deleteGroup, btn)));
         this.shadowRoot.querySelectorAll('[data-attach-membership]').forEach(btn => btn.addEventListener('click', () => this._attachMembership(btn.dataset.attachMembership)));
         this.shadowRoot.querySelectorAll('[data-save-membership]').forEach(btn => btn.addEventListener('click', () => this._saveMembership(btn.dataset.saveMembership)));
         this.shadowRoot.querySelectorAll('[data-detach-membership]').forEach(btn => btn.addEventListener('click', () => this._detachMembership(btn.dataset.detachMembership)));
@@ -410,8 +411,14 @@ export class PanelGroups extends KeelElement {
         if (!channelId) return;
         const priority = parseInt(this.shadowRoot.querySelector(`[data-attach-priority="${CSS.escape(groupId)}"]`)?.value, 10) || 0;
         const weight = parseInt(this.shadowRoot.querySelector(`[data-attach-weight="${CSS.escape(groupId)}"]`)?.value, 10) || 100;
+        const btn = this.shadowRoot.querySelector(`[data-attach-membership="${CSS.escape(groupId)}"]`);
+        this._clearCardError(groupId);
+        if (btn) { btn.disabled = true; btn.textContent = 'Attaching…'; }
         try { await postJson(`${API.airelay}/admin/groups/${encodeURIComponent(groupId)}/memberships`, { channelId, priority, weight, enabled: true }); await this.refresh(); }
-        catch (e) { alert(e.message); }
+        catch (e) {
+            this._showCardError(groupId, e.message);
+            if (btn) { btn.disabled = false; btn.textContent = 'Attach'; }
+        }
     }
 
     async _saveMembership(key) {
@@ -419,21 +426,58 @@ export class PanelGroups extends KeelElement {
         const row = this.shadowRoot.querySelector(`[data-membership-row="${CSS.escape(key)}"]`);
         const priority = parseInt(row?.querySelector('[data-member-priority]')?.value, 10) || 0;
         const weight = parseInt(row?.querySelector('[data-member-weight]')?.value, 10) || 100;
+        const btn = this.shadowRoot.querySelector(`[data-save-membership="${CSS.escape(key)}"]`);
+        this._clearCardError(groupId);
+        if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
         try { await putJson(`${API.airelay}/admin/groups/${encodeURIComponent(groupId)}/memberships/${encodeURIComponent(channelId)}`, { priority, weight, enabled: true }); await this.refresh(); }
-        catch (e) { alert(e.message); }
+        catch (e) {
+            this._showCardError(groupId, e.message);
+            if (btn) { btn.disabled = false; btn.textContent = 'Save'; }
+        }
     }
 
     async _detachMembership(key) {
         const [groupId, channelId] = key.split(':');
         if (!confirm(`Detach channel ${channelId} from group ${groupId}?`)) return;
+        const btn = this.shadowRoot.querySelector(`[data-detach-membership="${CSS.escape(key)}"]`);
+        this._clearCardError(groupId);
+        if (btn) { btn.disabled = true; btn.textContent = 'Detaching…'; }
         try { await deleteJson(`${API.airelay}/admin/groups/${encodeURIComponent(groupId)}/memberships/${encodeURIComponent(channelId)}`); await this.refresh(); }
-        catch (e) { alert(e.message); }
+        catch (e) {
+            this._showCardError(groupId, e.message);
+            if (btn) { btn.disabled = false; btn.textContent = 'Detach'; }
+        }
     }
 
-    async _delete(groupId) {
-        if (!confirm(`Delete group ${groupId}? Group must have no channels.`)) return;
-        try { await deleteJson(`${API.airelay}/admin/groups/${encodeURIComponent(groupId)}`); this.refresh(); }
-        catch (e) { alert(e.message); }
+    async _delete(groupId, btn) {
+        if (!confirm(`Delete group "${groupId}"? Detach all channels first; the default group cannot be deleted.`)) return;
+        this._clearCardError(groupId);
+        if (btn) { btn.disabled = true; btn.textContent = 'Deleting…'; }
+        try {
+            await deleteJson(`${API.airelay}/admin/groups/${encodeURIComponent(groupId)}`);
+            this.refresh();
+        } catch (e) {
+            this._showCardError(groupId, e.message);
+            if (btn) { btn.disabled = false; btn.textContent = 'Delete'; }
+        }
+    }
+
+    _cardErrorEl(groupId) {
+        return this.shadowRoot.querySelector(`[data-card-error="${CSS.escape(groupId)}"]`);
+    }
+
+    _showCardError(groupId, message) {
+        const errorEl = this._cardErrorEl(groupId);
+        if (!errorEl) return;
+        errorEl.textContent = message;
+        errorEl.style.display = 'block';
+    }
+
+    _clearCardError(groupId) {
+        const errorEl = this._cardErrorEl(groupId);
+        if (!errorEl) return;
+        errorEl.textContent = '';
+        errorEl.style.display = 'none';
     }
 
     _showError(message) {

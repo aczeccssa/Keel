@@ -1,11 +1,11 @@
 import { KeelElement } from './base/KeelElement.js';
 import { requestJson, postJson, deleteJson } from '../api.js';
 import { API } from '../config.js';
+import { setTab } from '../state.js';
 import { escapeHtml, copyText } from '../utils.js';
 
 async function copyToClipboard(text) {
-    const ok = await copyText(text);
-    if (!ok) { try { alert('Copy failed — text is selectable above.'); } catch {} }
+    return copyText(text);
 }
 
 const CLIENTS = [
@@ -76,6 +76,19 @@ export class PanelKeys extends KeelElement {
         return `
             <style>
                 .panel-layout { display: grid; gap: 22px; }
+                .status-note {
+                    display: none;
+                    padding: 12px 14px;
+                    border: 2px solid var(--red);
+                    background: var(--red-soft);
+                    color: var(--ink);
+                    font-family: var(--font-mono);
+                    font-size: 11px;
+                    font-weight: 800;
+                    letter-spacing: 0.06em;
+                    text-transform: uppercase;
+                }
+                .status-note.show { display: block; }
                 .section-card {
                     position: relative;
                     background: var(--panel-strong);
@@ -245,6 +258,7 @@ export class PanelKeys extends KeelElement {
             </style>
             <div class="panel-layout" data-ref="root">
                 <keel-hero data-ref="hero"></keel-hero>
+                <div class="status-note" data-ref="statusNote"></div>
 
                 <div class="section-card">
                     <div class="section-title-row">
@@ -324,13 +338,23 @@ export class PanelKeys extends KeelElement {
             this.refs.formBody.hidden = true;
         });
         // Copy newly generated key
-        this.refs.copyKeyBtn.addEventListener('click', () => {
-            copyToClipboard(this.refs.keyValue.textContent);
+        this.refs.copyKeyBtn.addEventListener('click', async () => {
+            this._hideStatus();
+            const ok = await copyToClipboard(this.refs.keyValue.textContent);
+            if (!ok) {
+                this._showStatus('Copy failed. The generated key is still visible above.');
+                return;
+            }
             this.refs.copyKeyBtn.textContent = 'Copied';
             setTimeout(() => { this.refs.copyKeyBtn.textContent = 'Copy'; }, 1500);
         });
         // Generate key
         this.refs.submitBtn.addEventListener('click', async () => {
+            const btn = this.refs.submitBtn;
+            this._hideStatus();
+            btn.disabled = true;
+            const originalText = btn.textContent;
+            btn.textContent = 'Generating…';
             try {
                 const data = await postJson(`${API.token}/v1/keys`, {
                     displayName: this.refs.fName.value || 'API Key',
@@ -342,8 +366,13 @@ export class PanelKeys extends KeelElement {
                 this.refs.keyValue.textContent = data.rawKey;
                 this.refs.keyReveal.classList.add('is-visible');
                 if (data.key?.keyId) this._generatedSecrets.set(data.key.keyId, data.rawKey);
-                this.refresh();
-            } catch (e) { alert(e.message); }
+                await this.refresh();
+            } catch (e) {
+                this._showStatus(e.message);
+            } finally {
+                btn.disabled = false;
+                btn.textContent = originalText;
+            }
         });
         // Modal close
         this.refs.modalClose.addEventListener('click', () => this._closeModal());
@@ -354,9 +383,14 @@ export class PanelKeys extends KeelElement {
             if (e.key === 'Escape' && this.refs.connectOverlay.classList.contains('is-open')) this._closeModal();
         });
         // Modal key copy
-        this.refs.modalKeyCopy.addEventListener('click', () => {
+        this.refs.modalKeyCopy.addEventListener('click', async () => {
             if (!this._currentModalKey) return;
-            copyToClipboard(this._currentModalKey);
+            this._hideStatus();
+            const ok = await copyToClipboard(this._currentModalKey);
+            if (!ok) {
+                this._showStatus('Copy failed. The key is still visible in the setup panel.');
+                return;
+            }
             this.refs.modalKeyCopy.textContent = 'Copied';
             setTimeout(() => { this.refs.modalKeyCopy.textContent = 'Copy Key'; }, 1500);
         });
@@ -367,12 +401,17 @@ export class PanelKeys extends KeelElement {
             this._setActiveClient(tab.dataset.client);
         });
         // Modal snippet copy (delegated)
-        this.refs.modalContent.addEventListener('click', (e) => {
+        this.refs.modalContent.addEventListener('click', async (e) => {
             const btn = e.target.closest('.snippet-copy');
             if (!btn) return;
             const pre = btn.previousElementSibling;
             if (!pre) return;
-            copyToClipboard(pre.textContent);
+            this._hideStatus();
+            const ok = await copyToClipboard(pre.textContent);
+            if (!ok) {
+                this._showStatus('Snippet copy failed. The setup text remains selectable.');
+                return;
+            }
             btn.textContent = 'Copied';
             setTimeout(() => { btn.textContent = 'Copy to Clipboard'; }, 1500);
         });
@@ -394,6 +433,7 @@ export class PanelKeys extends KeelElement {
             this._populateGroupSelect();
             this._render(data.keys || []);
         } catch (e) {
+            this._showStatus(e.message);
             this.refs.table.render({ headers: [], rows: [], emptyHtml: `<div class="km-empty">// Failed to load: ${escapeHtml(e.message)}</div>` });
         }
     }
@@ -424,25 +464,69 @@ export class PanelKeys extends KeelElement {
                 `<data value="${k.currentSpendUsd || 0}">$${(k.currentSpendUsd || 0).toFixed(4)}</data>`,
                 `<data value="${k.remainingBudgetUsd || 0}">$${(k.remainingBudgetUsd || 0).toFixed(4)}</data>`,
                 k.status === 'active'
-                    ? `<button class="btn-ghost btn-connect" data-connect="${escapeHtml(k.keyId)}" style="margin-right:6px;padding:6px 10px;font-size:9px;">Connect</button><button class="btn-danger" data-delete-key="${escapeHtml(k.keyId)}">Delete</button>`
+                    ? `<button class="btn-ghost" data-usage-key="${escapeHtml(k.keyId)}" style="margin-right:6px;padding:6px 10px;font-size:9px;">Usage</button><button class="btn-ghost" data-setup="${escapeHtml(k.keyId)}" style="margin-right:6px;padding:6px 10px;font-size:9px;">${this._generatedSecrets.has(k.keyId) ? 'Connect' : 'Setup'}</button><button class="btn-ghost" data-revoke-key="${escapeHtml(k.keyId)}" style="margin-right:6px;padding:6px 10px;font-size:9px;">Revoke</button><button class="btn-danger" data-delete-key="${escapeHtml(k.keyId)}">Delete</button>`
                     : ''
             ]),
             emptyHtml: '<div class="km-empty">// No API keys. Generate one above to get started.</div>'
         });
         this._hasRendered = true;
 
-        // Connect buttons
-        this.refs.table.shadowRoot.querySelectorAll('[data-connect]').forEach(btn => {
-            btn.addEventListener('click', () => this._openModal(btn.dataset.connect));
+        // Setup / Connect buttons
+        this.refs.table.shadowRoot.querySelectorAll('[data-setup]').forEach(btn => {
+            btn.addEventListener('click', () => this._openModal(btn.dataset.setup));
+        });
+        this.refs.table.shadowRoot.querySelectorAll('[data-usage-key]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                this._hideStatus();
+                setTab('usage', { keyId: btn.dataset.usageKey });
+            });
+        });
+        this.refs.table.shadowRoot.querySelectorAll('[data-revoke-key]').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                if (!confirm('Revoke this key? Existing clients will stop working immediately.')) return;
+                this._hideStatus();
+                btn.disabled = true;
+                const originalText = btn.textContent;
+                btn.textContent = 'Revoking…';
+                try {
+                    await postJson(`${API.token}/admin/keys/${btn.dataset.revokeKey}/revoke`, {});
+                    await this.refresh();
+                } catch (e) {
+                    btn.disabled = false;
+                    btn.textContent = originalText;
+                    this._showStatus(e.message);
+                }
+            });
         });
         // Delete buttons
         this.refs.table.shadowRoot.querySelectorAll('[data-delete-key]').forEach(btn => {
             btn.addEventListener('click', async () => {
                 if (!confirm('Delete this key? This cannot be undone.')) return;
-                try { await deleteJson(`${API.token}/v1/keys/${btn.dataset.deleteKey}`); this.refresh(); }
-                catch (e) { alert(e.message); }
+                this._hideStatus();
+                btn.disabled = true;
+                btn.textContent = 'Deleting…';
+                try {
+                    await deleteJson(`${API.token}/admin/keys/${btn.dataset.deleteKey}`);
+                    await this.refresh();
+                } catch (e) {
+                    btn.disabled = false;
+                    btn.textContent = 'Delete';
+                    this._showStatus(e.message);
+                }
             });
         });
+    }
+
+    _showStatus(message) {
+        if (!this.refs.statusNote) return;
+        this.refs.statusNote.textContent = message;
+        this.refs.statusNote.classList.add('show');
+    }
+
+    _hideStatus() {
+        if (!this.refs.statusNote) return;
+        this.refs.statusNote.textContent = '';
+        this.refs.statusNote.classList.remove('show');
     }
 
     _openModal(keyId) {

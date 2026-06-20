@@ -10,6 +10,19 @@ export class PanelRateLimits extends KeelElement {
         return `
             <style>
                 .panel-layout { display: flex; flex-direction: column; gap: 28px; }
+                .panel-notice {
+                    display: none;
+                    padding: 12px 14px;
+                    border: 2px solid var(--red);
+                    background: var(--red-soft);
+                    color: var(--ink);
+                    font-family: var(--font-mono);
+                    font-size: 11px;
+                    font-weight: 800;
+                    letter-spacing: 0.08em;
+                    text-transform: uppercase;
+                }
+                .panel-notice.show { display: block; }
                 .section-card {
                     background: var(--panel-strong);
                     border-radius: var(--radius-lg);
@@ -81,13 +94,17 @@ export class PanelRateLimits extends KeelElement {
             </style>
             <div class="panel-layout">
                 <keel-hero data-ref="hero"></keel-hero>
+                <div class="panel-notice" data-ref="panelNotice"></div>
                 <div class="summary-grid" data-ref="summary"></div>
                 <div class="section-card">
                     <div class="toolbar">
-                        <h3 class="section-title" style="margin:0;">Rules</h3>
+                        <div>
+                            <h3 class="section-title" style="margin:0;">Runtime Rules</h3>
+                            <div style="font-family:var(--font-mono);font-size:10px;color:var(--muted);margin-top:4px;">Token-bucket throttling matched against incoming relay requests by dimension + path. Not billing budget or routing.</div>
+                        </div>
                         <div style="display:flex;gap:10px;">
                             <button class="btn-primary" data-ref="addRuleBtn">Add Rule</button>
-                            <button class="btn-danger-ghost" data-ref="resetAllBtn">Reset All Buckets</button>
+                            <button class="btn-danger-ghost" data-ref="resetAllBtn" title="Clears runtime counters only — does not delete rules">Reset Buckets</button>
                         </div>
                     </div>
                     <div class="section-card" data-ref="ruleForm" hidden style="background:var(--color-surface-container-lowest,#fff);margin-bottom:20px;">
@@ -110,7 +127,8 @@ export class PanelRateLimits extends KeelElement {
                     <keel-data-table data-ref="rulesTable"></keel-data-table>
                 </div>
                 <div class="section-card">
-                    <h3 class="section-title">Active Buckets (Top 20)</h3>
+                    <h3 class="section-title">Active Buckets — Currently Matched Traffic (Top 20)</h3>
+                    <div style="font-family:var(--font-mono);font-size:10px;color:var(--muted);margin:-12px 0 16px;">Observed bucket state, not configuration. Reset Buckets clears these runtime counters.</div>
                     <keel-data-table data-ref="bucketsTable"></keel-data-table>
                 </div>
             </div>
@@ -118,10 +136,15 @@ export class PanelRateLimits extends KeelElement {
     }
 
     afterMount() {
-        this.refs.hero.render({ label: 'Traffic Control', title: 'Rate Limits', metaHtml: '' });
+        this.refs.hero.render({ label: 'Runtime Traffic Protection', title: 'Rate Limits', metaHtml: '' });
         this.refs.addRuleBtn.addEventListener('click', () => { this.refs.ruleForm.hidden = false; });
         this.refs.cancelRuleBtn.addEventListener('click', () => { this.refs.ruleForm.hidden = true; });
         this.refs.submitRuleBtn.addEventListener('click', async () => {
+            const btn = this.refs.submitRuleBtn;
+            this._hideNotice();
+            btn.disabled = true;
+            const originalText = btn.textContent;
+            btn.textContent = 'Creating…';
             try {
                 await postJson(`${API.riskcontrol}/v1/rules`, {
                     name: this.refs.fName.value || 'Rule',
@@ -132,13 +155,30 @@ export class PanelRateLimits extends KeelElement {
                     priority: parseInt(this.refs.fPriority.value) || 0,
                 });
                 this.refs.ruleForm.hidden = true;
-                this.refresh();
-            } catch (e) { alert(e.message); }
+                await this.refresh();
+            } catch (e) {
+                this._showNotice(e.message);
+            } finally {
+                btn.disabled = false;
+                btn.textContent = originalText;
+            }
         });
         this.refs.resetAllBtn.addEventListener('click', async () => {
             if (!confirm('Reset all rate limit buckets?')) return;
-            try { await postJson(`${API.riskcontrol}/v1/reset`, {}); this.refresh(); }
-            catch (e) { alert(e.message); }
+            const btn = this.refs.resetAllBtn;
+            this._hideNotice();
+            btn.disabled = true;
+            const originalText = btn.textContent;
+            btn.textContent = 'Resetting…';
+            try {
+                await postJson(`${API.riskcontrol}/v1/reset`, {});
+                await this.refresh();
+            } catch (e) {
+                this._showNotice(e.message);
+            } finally {
+                btn.disabled = false;
+                btn.textContent = originalText;
+            }
         });
     }
 
@@ -150,6 +190,7 @@ export class PanelRateLimits extends KeelElement {
             ]);
             this._render(rules.rules || [], snap);
         } catch (e) {
+            this._showNotice(e.message);
             this.refs.rulesTable.render({ headers: [], rows: [], emptyHtml: `<div class="empty">Failed: ${e.message}</div>` });
         }
     }
@@ -188,8 +229,18 @@ export class PanelRateLimits extends KeelElement {
         this.refs.rulesTable.shadowRoot.querySelectorAll('[data-del-rule]').forEach(btn => {
             btn.addEventListener('click', async () => {
                 if (!confirm('Delete this rule?')) return;
-                try { await deleteJson(`${API.riskcontrol}/v1/rules/${btn.dataset.delRule}`); this.refresh(); }
-                catch (e) { alert(e.message); }
+                this._hideNotice();
+                btn.disabled = true;
+                const originalText = btn.textContent;
+                btn.textContent = 'Deleting…';
+                try {
+                    await deleteJson(`${API.riskcontrol}/v1/rules/${btn.dataset.delRule}`);
+                    await this.refresh();
+                } catch (e) {
+                    btn.disabled = false;
+                    btn.textContent = originalText;
+                    this._showNotice(e.message);
+                }
             });
         });
 
@@ -209,6 +260,16 @@ export class PanelRateLimits extends KeelElement {
             emptyHtml: '<div class="empty">No active buckets.</div>'
         });
         this._hasRendered = true;
+    }
+
+    _showNotice(message) {
+        this.refs.panelNotice.textContent = message;
+        this.refs.panelNotice.classList.add('show');
+    }
+
+    _hideNotice() {
+        this.refs.panelNotice.textContent = '';
+        this.refs.panelNotice.classList.remove('show');
     }
 }
 

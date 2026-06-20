@@ -3,6 +3,7 @@ package com.keel.test.kernel
 import com.keel.samples.aigateway.airelay.protocol.WireProtocol
 import com.keel.samples.aigateway.airelay.protocol.openai.responses.OpenAIResponsesCodec
 import com.keel.samples.aigateway.airelay.protocol.anthropic.AnthropicMessagesCodec
+import com.keel.samples.aigateway.airelay.protocol.openai.chat.OpenAIChatCodec
 import com.keel.samples.aigateway.airelay.protocol.IrContentPart
 import com.keel.samples.aigateway.airelay.protocol.IrItem
 import com.keel.samples.aigateway.airelay.protocol.IrRequest
@@ -32,7 +33,8 @@ import kotlin.test.assertTrue
 class TranscodingBugfixTest {
     private val anthropicCodec = AnthropicMessagesCodec()
     private val responsesCodec = OpenAIResponsesCodec()
-    private val transcoder = ProtocolTranscoder(listOf(anthropicCodec, responsesCodec))
+    private val chatCodec = OpenAIChatCodec()
+    private val transcoder = ProtocolTranscoder(listOf(anthropicCodec, responsesCodec, chatCodec))
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
 
     @Test
@@ -215,6 +217,40 @@ class TranscodingBugfixTest {
 
         assertNull(responsesRequest["parallel_tool_calls"],
             "Without disable_parallel_tool_use, parallel_tool_calls should not be set")
+    }
+
+    @Test
+    fun openAiChatAssistantToolCallDoesNotBecomeEmptyAnthropicTextBlock() {
+        val openAiChatRequest = json.parseToJsonElement("""
+            {
+                "model": "claude-opus-4-8",
+                "messages": [
+                    {"role":"user","content":"Read README.md"},
+                    {
+                        "role":"assistant",
+                        "content": null,
+                        "tool_calls": [
+                            {
+                                "id":"call_1",
+                                "type":"function",
+                                "function":{"name":"Read","arguments":"{\"file_path\":\"README.md\"}"}
+                            }
+                        ]
+                    },
+                    {"role":"tool","tool_call_id":"call_1","content":"file contents"}
+                ]
+            }
+        """.trimIndent()).jsonObject
+
+        val ir = chatCodec.decodeRequest(openAiChatRequest)
+        val anthropicRequest = anthropicCodec.encodeRequest(ir)
+        val assistantContent = anthropicRequest["messages"]!!
+            .jsonArray[1]
+            .jsonObject["content"]!!
+            .jsonArray
+
+        assertEquals(1, assistantContent.size, "assistant tool call turn should not include an empty text block")
+        assertEquals("tool_use", assistantContent.single().jsonObject["type"]!!.jsonPrimitive.content)
     }
 
     @Test

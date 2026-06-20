@@ -69,17 +69,23 @@ class AnthropicMessagesCodec : ProtocolCodec {
     override fun encodeRequest(ir: IrRequest): JsonObject = buildJsonObject {
         put("model", JsonPrimitive(ir.model))
         put("max_tokens", JsonPrimitive(ir.maxOutputTokens ?: 1024))
+        val encodedSystemBlocks = encodeContent(ir.systemBlocks)
         when {
-            ir.systemBlocks.isNotEmpty() -> put("system", encodeContent(ir.systemBlocks))
+            encodedSystemBlocks.isNotEmpty() -> put("system", encodedSystemBlocks)
             ir.instructions != null -> put("system", JsonPrimitive(ir.instructions))
         }
         put("messages", buildJsonArray {
             ir.items.forEach { item ->
                 when (item) {
-                    is IrItem.Message -> add(buildJsonObject {
-                        put("role", JsonPrimitive(if (item.role == "assistant") "assistant" else "user"))
-                        put("content", encodeContent(item.content))
-                    })
+                    is IrItem.Message -> {
+                        val encodedContent = encodeContent(item.content)
+                        if (encodedContent.isNotEmpty()) {
+                            add(buildJsonObject {
+                                put("role", JsonPrimitive(if (item.role == "assistant") "assistant" else "user"))
+                                put("content", encodedContent)
+                            })
+                        }
+                    }
                     is IrItem.ToolResult -> add(buildJsonObject {
                         put("role", JsonPrimitive("user"))
                         put("content", buildJsonArray {
@@ -452,7 +458,10 @@ class AnthropicMessagesCodec : ProtocolCodec {
     }
 
     private fun encodeContent(parts: List<IrContentPart>): JsonArray = buildJsonArray {
-        parts.forEach { part -> add(encodePart(part)) }
+        parts.forEach { part ->
+            if (part is IrContentPart.Text && part.text.isEmpty()) return@forEach
+            add(encodePart(part))
+        }
     }
 
     private fun encodePart(part: IrContentPart): JsonObject = buildJsonObject {

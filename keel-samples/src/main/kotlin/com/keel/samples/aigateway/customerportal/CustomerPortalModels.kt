@@ -67,7 +67,7 @@ data class CreditLedgerEntry(
 data class CreditLedgerResponse(
     val entries: List<CreditLedgerEntry>,
     val total: Int,
-    val nextCursor: String,
+    val nextCursor: String? = null,
 )
 
 @Serializable
@@ -92,6 +92,7 @@ data class CustomerUsageView(
     val groupId: String,
     val providerId: String,
     val wireProtocol: String,
+    val status: Int = 200,
     val inputTokens: Long,
     val outputTokens: Long,
     val cacheReadInputTokens: Long,
@@ -113,6 +114,7 @@ data class CustomerUsageView(
 data class CustomerUsageListResponse(
     val records: List<CustomerUsageView>,
     val total: Int,
+    val nextCursor: String? = null,
 )
 
 // ---- model pricing (customer-facing) ----

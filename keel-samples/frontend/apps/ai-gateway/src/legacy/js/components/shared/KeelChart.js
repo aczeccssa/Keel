@@ -40,6 +40,12 @@ export class KeelChart extends KeelElement {
                     position: relative;
                 }
                 .bar-chart .bar:hover { opacity: 0.8; }
+                .bar-chart .bar-empty {
+                    height: 1px;
+                    min-height: 1px;
+                    background: var(--muted, #6b6b66);
+                    opacity: 0.25;
+                }
                 .bar-chart .bar-label {
                     font-family: var(--font-mono, monospace);
                     font-size: 9px;
@@ -138,29 +144,41 @@ export class KeelChart extends KeelElement {
      * @param {number[]} opts.data - Values
      * @param {string[]} [opts.labels] - Labels for each data point
      * @param {string[]} [opts.colors] - Per-segment colors (donut/bar)
+     * @param {string} [opts.color] - Single color for all bars (time-series trends)
      * @param {number} [opts.height=120] - Bar chart height in px
      * @param {string} [opts.emptyText] - Text to show when data is empty
      */
     render(opts) {
-        const { type, data = [], labels = [], colors, height = 120, emptyText } = opts;
+        const { type, data = [], labels = [], colors, color, height = 120, emptyText } = opts;
         if (!data.length || data.every(v => !v)) {
             this.refs.container.innerHTML = `<div class="chart-empty">${emptyText || 'No data yet'}</div>`;
             return;
         }
         switch (type) {
-            case 'bar': this._renderBar(data, labels, colors, height); break;
+            case 'bar': this._renderBar(data, labels, colors, height, color); break;
             case 'donut': this._renderDonut(data, labels, colors); break;
             case 'sparkline': this._renderSparkline(data); break;
         }
     }
 
-    _renderBar(data, labels, colors, height) {
+    _renderBar(data, labels, colors, height, singleColor) {
         const max = Math.max(1, ...data);
         const palette = colors || this._defaultColors();
         const cols = data.map((v, i) => {
-            const h = Math.max(2, Math.round((height - 20) * v / max));
-            const color = palette[i % palette.length];
             const label = labels[i] || '';
+            // Empty buckets recede to a faint baseline track instead of drawing a
+            // full-color 2px dash, which otherwise litters dense trends with marks.
+            if (!v) {
+                return `
+                <div class="bar-col">
+                    <span class="bar-value">&nbsp;</span>
+                    <div class="bar bar-empty" title="${label}: 0"></div>
+                    <span class="bar-label">${this._escHtml(label)}</span>
+                </div>
+            `;
+            }
+            const h = Math.max(3, Math.round((height - 20) * v / max));
+            const color = singleColor || palette[i % palette.length];
             return `
                 <div class="bar-col">
                     <span class="bar-value">${this._fmtNum(v)}</span>

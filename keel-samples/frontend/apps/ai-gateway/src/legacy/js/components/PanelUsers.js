@@ -1,5 +1,5 @@
 import { KeelElement } from './base/KeelElement.js';
-import { requestJson, postJson } from '../api.js';
+import { requestJson, postJson, putJson } from '../api.js';
 import { API } from '../config.js';
 import { escapeHtml } from '../utils.js';
 
@@ -10,6 +10,19 @@ export class PanelUsers extends KeelElement {
         return `
             <style>
                 .panel-layout { display: flex; flex-direction: column; gap: 28px; }
+                .panel-notice {
+                    display: none;
+                    padding: 12px 14px;
+                    border: 2px solid var(--red);
+                    background: var(--red-soft);
+                    color: var(--ink);
+                    font-family: var(--font-mono);
+                    font-size: 11px;
+                    font-weight: 800;
+                    letter-spacing: 0.08em;
+                    text-transform: uppercase;
+                }
+                .panel-notice.show { display: block; }
                 .section-card {
                     background: var(--panel-strong);
                     border-radius: var(--radius-lg);
@@ -65,13 +78,18 @@ export class PanelUsers extends KeelElement {
             </style>
             <div class="panel-layout">
                 <keel-hero data-ref="hero"></keel-hero>
+                <div class="panel-notice" data-ref="panelNotice"></div>
                 <div class="section-card">
-                    <h3 class="section-title">Users</h3>
+                    <h3 class="section-title">Admin Users</h3>
+                    <div style="font-family:var(--font-mono);font-size:10px;color:var(--muted);margin:-12px 0 16px;">B-end accounts that sign into this admin UI. Not routing groups and not end-customers.</div>
                     <keel-data-table data-ref="usersTable"></keel-data-table>
                 </div>
                 <div class="section-card">
                     <div class="toolbar">
-                        <h3 class="section-title" style="margin:0;">User Groups</h3>
+                        <div>
+                            <h3 class="section-title" style="margin:0;">Account Groups</h3>
+                            <div style="font-family:var(--font-mono);font-size:10px;color:var(--muted);margin-top:4px;">Account-level defaults & permissions for admin users (RPM/TPM/budget).</div>
+                        </div>
                         <button class="btn-primary" data-ref="addGroupBtn">Create Group</button>
                     </div>
                     <div class="section-card" data-ref="groupForm" hidden style="background:var(--color-surface-container-lowest,#fff);margin-bottom:20px;">
@@ -94,10 +112,15 @@ export class PanelUsers extends KeelElement {
     }
 
     afterMount() {
-        this.refs.hero.render({ label: 'Access Control', title: 'Users & Groups', metaHtml: '' });
+        this.refs.hero.render({ label: 'B-End Account Administration', title: 'Admin Users', metaHtml: '' });
         this.refs.addGroupBtn.addEventListener('click', () => { this.refs.groupForm.hidden = false; });
         this.refs.cancelGroupBtn.addEventListener('click', () => { this.refs.groupForm.hidden = true; });
         this.refs.submitGroupBtn.addEventListener('click', async () => {
+            const btn = this.refs.submitGroupBtn;
+            this._hideNotice();
+            btn.disabled = true;
+            const originalText = btn.textContent;
+            btn.textContent = 'Creating…';
             try {
                 await postJson(`${API.account}/admin/groups`, {
                     groupId: this.refs.gId.value,
@@ -106,8 +129,13 @@ export class PanelUsers extends KeelElement {
                     defaultBudgetUsd: parseFloat(this.refs.gBudget.value) || 10,
                 });
                 this.refs.groupForm.hidden = true;
-                this.refresh();
-            } catch (e) { alert(e.message); }
+                await this.refresh();
+            } catch (e) {
+                this._showNotice(e.message);
+            } finally {
+                btn.disabled = false;
+                btn.textContent = originalText;
+            }
         });
     }
 
@@ -117,9 +145,11 @@ export class PanelUsers extends KeelElement {
                 requestJson(`${API.account}/admin/users`),
                 requestJson(`${API.account}/admin/groups`),
             ]);
+            this._groups = groups.groups || [];
             this._renderUsers(users.users || []);
-            this._renderGroups(groups.groups || []);
+            this._renderGroups(this._groups);
         } catch (e) {
+            this._showNotice(e.message);
             this.refs.usersTable.render({ headers: [], rows: [], emptyHtml: `<div class="empty">Failed: ${e.message}</div>` });
         }
     }
@@ -127,35 +157,30 @@ export class PanelUsers extends KeelElement {
     _renderUsers(users) {
         this.refs.usersTable.render({
             silent: !!this._hasUsersRendered,
-            headers: ['User ID', 'Email', 'Display Name', 'Role', 'Group', 'Status', 'Action'],
+            headers: ['User ID', 'Email', 'Display Name', 'Role', 'Account Group', 'Status', 'Action'],
             rows: users.map(u => [
                 `<code style="font-size:11px;">${u.userId}</code>`,
                 escapeHtml(u.email),
                 escapeHtml(u.displayName),
-                u.role === 'admin'
-                    ? '<span style="color:var(--navy);font-weight:700;font-size:10px;text-transform:uppercase;">Admin</span>'
-                    : '<span style="color:var(--muted);font-weight:700;font-size:10px;text-transform:uppercase;">User</span>',
-                u.groupId,
-                u.status === 'active'
-                    ? '<span style="color:var(--green);font-weight:700;font-size:10px;text-transform:uppercase;">Active</span>'
-                    : '<span style="color:var(--red);font-weight:700;font-size:10px;text-transform:uppercase;">Suspended</span>',
-                u.status === 'active'
-                    ? `<button class="btn-action danger" data-suspend="${u.userId}">Suspend</button>`
-                    : `<button class="btn-action success" data-activate="${u.userId}">Activate</button>`
+                `<select class="btn-action" data-user-role="${u.userId}">
+                    ${this._option('user', 'User', u.role)}
+                    ${this._option('admin', 'Admin', u.role)}
+                </select>`,
+                `<select class="btn-action" data-user-group="${u.userId}">
+                    ${(this._groups || []).map(group => this._option(group.groupId, group.name || group.groupId, u.groupId)).join('')}
+                </select>`,
+                `<select class="btn-action" data-user-status="${u.userId}">
+                    ${this._option('active', 'Active', u.status)}
+                    ${this._option('suspended', 'Suspended', u.status)}
+                </select>`,
+                `<button class="btn-action success" data-save-user="${u.userId}">Save</button>`
             ]),
             emptyHtml: '<div class="empty">No users found.</div>'
         });
         this._hasUsersRendered = true;
-        this.refs.usersTable.shadowRoot.querySelectorAll('[data-suspend]').forEach(btn => {
+        this.refs.usersTable.shadowRoot.querySelectorAll('[data-save-user]').forEach(btn => {
             btn.addEventListener('click', async () => {
-                try { await postJson(`${API.account}/admin/users/${btn.dataset.suspend}/suspend`, {}); this.refresh(); }
-                catch (e) { alert(e.message); }
-            });
-        });
-        this.refs.usersTable.shadowRoot.querySelectorAll('[data-activate]').forEach(btn => {
-            btn.addEventListener('click', async () => {
-                try { await postJson(`${API.account}/admin/users/${btn.dataset.activate}/activate`, {}); this.refresh(); }
-                catch (e) { alert(e.message); }
+                await this._saveUser(btn.dataset.saveUser, btn);
             });
         });
     }
@@ -163,7 +188,7 @@ export class PanelUsers extends KeelElement {
     _renderGroups(groups) {
         this.refs.groupsTable.render({
             silent: !!this._hasGroupsRendered,
-            headers: ['Group ID', 'Name', 'Cost Multiplier', 'Default RPM', 'Default TPM', 'Budget'],
+            headers: ['Account Group ID', 'Name', 'Cost Multiplier', 'Default RPM', 'Default TPM', 'Default Budget'],
             rows: groups.map(g => [
                 `<code>${g.groupId}</code>`,
                 escapeHtml(g.name),
@@ -174,6 +199,39 @@ export class PanelUsers extends KeelElement {
             ]),
             emptyHtml: '<div class="empty">No groups configured.</div>'
         });
+    }
+
+    async _saveUser(userId, button) {
+        if (!userId) return;
+        const role = this.refs.usersTable.shadowRoot.querySelector(`[data-user-role="${userId}"]`)?.value;
+        const groupId = this.refs.usersTable.shadowRoot.querySelector(`[data-user-group="${userId}"]`)?.value;
+        const status = this.refs.usersTable.shadowRoot.querySelector(`[data-user-status="${userId}"]`)?.value;
+        this._hideNotice();
+        button.disabled = true;
+        const originalText = button.textContent;
+        button.textContent = 'Saving…';
+        try {
+            await putJson(`${API.account}/admin/users/${userId}`, { role, groupId, status });
+            await this.refresh();
+        } catch (e) {
+            this._showNotice(e.message);
+            button.disabled = false;
+            button.textContent = originalText;
+        }
+    }
+
+    _option(value, label, selectedValue) {
+        return `<option value="${escapeHtml(value)}" ${value === selectedValue ? 'selected' : ''}>${escapeHtml(label)}</option>`;
+    }
+
+    _showNotice(message) {
+        this.refs.panelNotice.textContent = message;
+        this.refs.panelNotice.classList.add('show');
+    }
+
+    _hideNotice() {
+        this.refs.panelNotice.textContent = '';
+        this.refs.panelNotice.classList.remove('show');
     }
 }
 

@@ -52,6 +52,7 @@ data class CustomerUsageRow(
     val groupId: String,
     val providerId: String,
     val wireProtocol: String,
+    val status: Int = 200,
     val inputTokens: Long,
     val outputTokens: Long,
     val cacheReadInputTokens: Long,

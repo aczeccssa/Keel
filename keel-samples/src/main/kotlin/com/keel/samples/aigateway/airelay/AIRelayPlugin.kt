@@ -167,6 +167,7 @@ class AIRelayPlugin : StandardKeelPlugin {
             listOf(
                 module {
                     single<PoolChainSnapshotProvider> { activeManager() }
+                    single { repo }
                     single<ModelPricingDirectory> {
                         object : ModelPricingDirectory {
                             override fun listActive(): List<ModelPricingSummary> {
@@ -533,7 +534,15 @@ class AIRelayPlugin : StandardKeelPlugin {
                 ) {
                     val repo = channelRepository ?: throw PluginApiException(503, "Channel store unavailable")
                     val groupId = pathParameters["groupId"] ?: throw PluginApiException(400, "Missing groupId")
-                    if (!repo.deleteGroup(groupId)) throw PluginApiException(409, "Group cannot be deleted; remove channels first")
+                    when (repo.deleteGroupDetailed(groupId)) {
+                        com.keel.samples.aigateway.airelay.config.GroupDeleteResult.DEFAULT_PROTECTED ->
+                            throw PluginApiException(400, "The default group cannot be deleted")
+                        com.keel.samples.aigateway.airelay.config.GroupDeleteResult.NOT_FOUND ->
+                            throw PluginApiException(404, "Group not found")
+                        com.keel.samples.aigateway.airelay.config.GroupDeleteResult.HAS_CHANNELS ->
+                            throw PluginApiException(409, "Detach channels from this group before deleting it")
+                        com.keel.samples.aigateway.airelay.config.GroupDeleteResult.DELETED -> {}
+                    }
                     configService?.reload()
                     PluginResult(body = DeleteGroupResponse("Group deleted"))
                 }
@@ -1049,6 +1058,16 @@ class AIRelayPlugin : StandardKeelPlugin {
         }.reversed()
 
         val trends = DashboardTrends(
+            bucketGranularity = when (normalizedWindow) {
+                "1h" -> "5m"
+                "24h" -> "1h"
+                "7d", "30d" -> "1d"
+                else -> "1h"
+            },
+            bucketLabelMode = if (normalizedWindow == "7d" || normalizedWindow == "30d") "day" else "time",
+            requests = hourlyBuckets,
+            tokens = tokensByHour,
+            latency = latencyByHour,
             requestsByHour = hourlyBuckets,
             tokensByHour = tokensByHour,
             latencyByHour = latencyByHour
@@ -1067,12 +1086,15 @@ class AIRelayPlugin : StandardKeelPlugin {
             .sortedByDescending { it.requests }
             .take(10)
 
+        val channelNamesById = runCatching { channelRepository?.listChannels()?.associate { it.channelId to it.name } }.getOrNull() ?: emptyMap()
+        val groupNamesById = runCatching { channelRepository?.listGroups()?.associate { it.groupId to it.name } }.getOrNull() ?: emptyMap()
+
         val channelDistribution = records.groupBy { it.upstreamKeyId ?: "unknown" }
             .map { (channelId, channelRecords) ->
                 val successCount = channelRecords.count { it.status < 400 }
                 ChannelDistribution(
                     channelId = channelId,
-                    channelName = channelId, // TODO: map to actual name
+                    channelName = channelNamesById[channelId] ?: channelId,
                     requests = channelRecords.size.toLong(),
                     successRate = if (channelRecords.isNotEmpty()) successCount.toDouble() / channelRecords.size else 0.0,
                     avgLatencyMs = if (channelRecords.isNotEmpty()) channelRecords.map { it.latencyMs }.average().toLong() else 0L
@@ -1081,7 +1103,7 @@ class AIRelayPlugin : StandardKeelPlugin {
             .sortedByDescending { it.requests }
             .take(10)
 
-        val groupDistribution = records.groupBy { it.poolLevelId ?: "unknown" }
+        val groupDistribution = records.groupBy { it.routingGroupId ?: it.poolLevelId ?: "unknown" }
             .map { (groupId, groupRecords) ->
                 val topModels = groupRecords.groupBy { it.model }
                     .entries.sortedByDescending { it.value.size }
@@ -1089,7 +1111,7 @@ class AIRelayPlugin : StandardKeelPlugin {
                     .map { it.key }
                 GroupDistribution(
                     groupId = groupId,
-                    groupName = groupId, // TODO: map to actual name
+                    groupName = groupNamesById[groupId] ?: groupId,
                     requests = groupRecords.size.toLong(),
                     totalCostUsd = groupRecords.sumOf { it.totalCostUsd },
                     topModels = topModels
@@ -1402,6 +1424,11 @@ data class DashboardOverview(
 
 @Serializable
 data class DashboardTrends(
+    val bucketGranularity: String,
+    val bucketLabelMode: String,
+    val requests: List<TimeSeriesPoint>,
+    val tokens: List<TokenTimeSeriesPoint>,
+    val latency: List<LatencyTimeSeriesPoint>,
     val requestsByHour: List<TimeSeriesPoint>,
     val tokensByHour: List<TokenTimeSeriesPoint>,
     val latencyByHour: List<LatencyTimeSeriesPoint>

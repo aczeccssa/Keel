@@ -3,6 +3,7 @@ export const API = {
     token: '/api/plugins/token',
     airelay: '/api/plugins/airelay',
     riskcontrol: '/api/plugins/riskcontrol',
+    customerportal: '/api/plugins/customer-portal',
 };
 
 export const TABS = [
@@ -16,8 +17,8 @@ export const TABS = [
     { id: 'pricing',      label: 'Pricing',         icon: 'pricing',   hint: 'Model rate cards',         section: 'BILLING', badge: 'customers' },
     { id: 'customers',    label: 'Customers',       icon: 'group',     hint: 'End-customer directory',   section: 'BILLING', badge: 'customers' },
     { id: 'codes',        label: 'Redemption',      icon: 'gift',      hint: 'Credit top-up codes',      section: 'BILLING' },
-    { id: 'ratelimits',   label: 'Rate Limits',     icon: 'speed',     hint: 'Token bucket rules',       section: 'SYSTEM' },
-    { id: 'users',        label: 'Users',           icon: 'group',     hint: 'Account management',       section: 'SYSTEM' },
+    { id: 'ratelimits',   label: 'Rate Limits',     icon: 'speed',     hint: 'Runtime throttling',       section: 'SYSTEM' },
+    { id: 'users',        label: 'Admin Users',     icon: 'group',     hint: 'B-end accounts',           section: 'SYSTEM' },
 ];
 
 export const DEMO_MODELS = [

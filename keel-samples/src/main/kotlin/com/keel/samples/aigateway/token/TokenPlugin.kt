@@ -4,6 +4,7 @@ import com.keel.contract.ai.ApiKeyVerifier
 import com.keel.contract.ai.JwtPrincipalVerifier
 import com.keel.contract.ai.UsageRecorder
 import com.keel.contract.ai.UserDirectory
+import com.keel.contract.customer.CustomerDirectory
 import com.keel.db.database.DatabaseFactory
 import com.keel.db.database.KeelDatabase
 import com.keel.kernel.plugin.PluginApiException
@@ -17,6 +18,11 @@ import com.keel.kernel.plugin.StandardKeelPlugin
 import com.keel.openapi.annotations.KeelApiPlugin
 import com.keel.openapi.runtime.OpenApiDoc
 import com.keel.samples.aigateway.GatewayDataPaths
+import com.keel.samples.aigateway.airelay.config.ChannelRepository
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import org.koin.core.Koin
 import org.koin.dsl.module
 
 @KeelApiPlugin(
@@ -36,6 +42,8 @@ class TokenPlugin : StandardKeelPlugin {
     private lateinit var database: KeelDatabase
     private lateinit var repository: TokenRepository
     private lateinit var jwtVerifier: JwtPrincipalVerifier
+    private lateinit var kernelKoin: Koin
+    private lateinit var userDirectory: UserDirectory
 
     override fun modules() = listOf(
         module {
@@ -46,7 +54,8 @@ class TokenPlugin : StandardKeelPlugin {
     )
 
     override suspend fun onInit(context: PluginInitContext) {
-        val userDirectory = context.kernelKoin.get<UserDirectory>()
+        kernelKoin = context.kernelKoin
+        userDirectory = context.kernelKoin.get<UserDirectory>()
         jwtVerifier = context.kernelKoin.get<JwtPrincipalVerifier>()
         dbFactory = DatabaseFactory.h2File(
             filePath = GatewayDataPaths.databasePath("aigateway_token"),
@@ -108,7 +117,7 @@ class TokenPlugin : StandardKeelPlugin {
                         "/usage",
                         doc = OpenApiDoc(summary = "List usage records for a key", tags = listOf("ai-gateway", "token"), errorStatuses = setOf(401, 403, 404))
                     ) {
-                        PluginResult(body = repository.usageForKey(requireAiPrincipal().userId, requireKeyId(), includeAll = false))
+                        PluginResult(body = enrichUsageResponse(repository.usageForKey(requireAiPrincipal().userId, requireKeyId(), includeAll = false)))
                     }
                 }
             }
@@ -122,6 +131,24 @@ class TokenPlugin : StandardKeelPlugin {
             ) {
                 PluginResult(body = repository.listKeys(requireAiPrincipal().userId, includeAll = true))
             }
+            route("/keys/{keyId}") {
+                put<UpdateApiKeyRequest, ApiKeyView>(
+                    doc = OpenApiDoc(summary = "Admin update any virtual API key", tags = listOf("ai-gateway", "token", "admin"), errorStatuses = setOf(400, 401, 403, 404))
+                ) { request ->
+                    PluginResult(body = repository.updateKey(requireAiPrincipal().userId, requireKeyId(), request, includeAll = true))
+                }
+                delete<ApiKeyView>(
+                    doc = OpenApiDoc(summary = "Admin soft-delete any virtual API key", tags = listOf("ai-gateway", "token", "admin"), errorStatuses = setOf(401, 403, 404))
+                ) {
+                    PluginResult(body = repository.deleteKey(requireAiPrincipal().userId, requireKeyId(), includeAll = true))
+                }
+                post<ApiKeyView>(
+                    "/revoke",
+                    doc = OpenApiDoc(summary = "Admin revoke any virtual API key", tags = listOf("ai-gateway", "token", "admin"), errorStatuses = setOf(401, 403, 404))
+                ) {
+                    PluginResult(body = repository.revokeKey(requireAiPrincipal().userId, requireKeyId(), includeAll = true))
+                }
+            }
             get<com.keel.contract.ai.UsageSnapshot>(
                 "/usage/global",
                 doc = OpenApiDoc(summary = "Get global AI Gateway usage summary", tags = listOf("ai-gateway", "token", "admin"), errorStatuses = setOf(401, 403))
@@ -132,13 +159,37 @@ class TokenPlugin : StandardKeelPlugin {
                 "/usage/records",
                 doc = OpenApiDoc(summary = "List recent usage records with full token + cost breakdown", tags = listOf("ai-gateway", "token", "admin"), errorStatuses = setOf(401, 403))
             ) {
-                val limit = queryParameters["limit"]?.firstOrNull()?.toIntOrNull() ?: 50
+                val limit = (queryParameters["limit"]?.firstOrNull()?.toIntOrNull() ?: 50).coerceIn(1, 200)
+                val offset = queryParameters["offset"]?.firstOrNull()?.toIntOrNull()
+                    ?: queryParameters["cursor"]?.firstOrNull()?.toIntOrNull()
+                    ?: 0
                 val status = queryParameters["status"]?.firstOrNull()?.toIntOrNull()
-                val groupId = queryParameters["groupId"]?.firstOrNull()
-                val channelId = queryParameters["channelId"]?.firstOrNull()
-                val model = queryParameters["model"]?.firstOrNull()
-                val statusFilter = queryParameters["statusFilter"]?.firstOrNull()
-                PluginResult(body = repository.recentRecords(limit, status, groupId, channelId, model, statusFilter))
+                val routingGroupId = (queryParameters["routingGroupId"]?.firstOrNull()
+                    ?: queryParameters["groupId"]?.firstOrNull())?.takeIf { it.isNotBlank() }
+                val poolLevelId = queryParameters["poolLevelId"]?.firstOrNull()?.takeIf { it.isNotBlank() }
+                val channelId = queryParameters["channelId"]?.firstOrNull()?.takeIf { it.isNotBlank() }
+                val model = queryParameters["model"]?.firstOrNull()?.takeIf { it.isNotBlank() }
+                val statusFilter = queryParameters["statusFilter"]?.firstOrNull()?.takeIf { it.isNotBlank() }
+                val userId = queryParameters["userId"]?.firstOrNull()?.takeIf { it.isNotBlank() }
+                val keyId = queryParameters["keyId"]?.firstOrNull()?.takeIf { it.isNotBlank() }
+                val customerId = queryParameters["customerId"]?.firstOrNull()?.takeIf { it.isNotBlank() }
+                val from = queryParameters["from"]?.firstOrNull()?.takeIf { it.isNotBlank() }?.let { runCatching { kotlinx.datetime.Instant.parse(it) }.getOrNull() }
+                val to = queryParameters["to"]?.firstOrNull()?.takeIf { it.isNotBlank() }?.let { runCatching { kotlinx.datetime.Instant.parse(it) }.getOrNull() }
+                PluginResult(body = enrichUsageResponse(repository.recentRecords(
+                    limit = limit,
+                    offset = offset,
+                    status = status,
+                    routingGroupId = routingGroupId,
+                    poolLevelId = poolLevelId,
+                    channelId = channelId,
+                    model = model,
+                    statusFilter = statusFilter,
+                    userId = userId,
+                    keyId = keyId,
+                    customerId = customerId,
+                    from = from,
+                    to = to
+                )))
             }
         }
     }
@@ -149,4 +200,51 @@ class TokenPlugin : StandardKeelPlugin {
 
     private fun com.keel.kernel.plugin.KeelRequestContext.requireKeyId(): String =
         pathParameters["keyId"] ?: throw PluginApiException(400, "Missing keyId")
+
+    private suspend fun enrichUsageResponse(response: UsageListResponse): UsageListResponse {
+        if (response.records.isEmpty()) return response
+
+        val channelRepository = kernelKoin.getOrNull<ChannelRepository>()
+        val customerDirectory = kernelKoin.getOrNull<CustomerDirectory>()
+
+        val uniqueUserIds = response.records.map { it.userId }.toSet()
+        val uniqueCustomerLikeIds = response.records
+            .filter { it.userGroupId == "customer" || !it.customerId.isNullOrBlank() }
+            .map { it.customerId ?: it.userId }
+            .toSet()
+
+        val userEmailsById = coroutineScope {
+            uniqueUserIds.map { userId ->
+                async { userId to runCatching { userDirectory.findById(userId)?.email }.getOrNull() }
+            }.awaitAll()
+                .mapNotNull { (userId, email) -> email?.let { userId to it } }
+                .toMap()
+        }
+
+        val customerSummariesById = if (customerDirectory != null) {
+            runCatching { customerDirectory.listAll() }
+                .getOrDefault(emptyList())
+                .filter { it.customerId in uniqueCustomerLikeIds || it.customerId in uniqueUserIds }
+                .associate { it.customerId to CustomerSummarySnapshot(it.customerId, it.email) }
+        } else {
+            emptyMap()
+        }
+
+        val channelNamesById = channelRepository?.listChannels()
+            ?.associate { it.channelId to it.name }
+            .orEmpty()
+        val groupNamesById = channelRepository?.listGroups()
+            ?.associate { it.groupId to it.name }
+            .orEmpty()
+
+        return response.copy(
+            records = enrichUsageRecords(
+                records = response.records,
+                userEmailsById = userEmailsById,
+                customerSummariesById = customerSummariesById,
+                channelNamesById = channelNamesById,
+                groupNamesById = groupNamesById,
+            )
+        )
+    }
 }

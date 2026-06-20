@@ -44,6 +44,7 @@ object UsageRecordsTable : AuditPluginTable("token", "usage_records") {
     val model: Column<String> = varchar("model", 120).index()
     val provider: Column<String> = varchar("provider", 64)
     val poolLevelId: Column<String?> = varchar("pool_level_id", 64).nullable()
+    val routingGroupId: Column<String?> = varchar("routing_group_id", 64).nullable()
     val upstreamKeyId: Column<String?> = varchar("upstream_key_id", 64).nullable()
     val promptTokens: Column<Int> = integer("prompt_tokens")
     val completionTokens: Column<Int> = integer("completion_tokens")

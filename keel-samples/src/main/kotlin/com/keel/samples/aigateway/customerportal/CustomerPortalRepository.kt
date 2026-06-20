@@ -7,6 +7,7 @@ import com.keel.samples.aigateway.customerportal.auth.*
 import com.keel.samples.aigateway.customerportal.credits.*
 import com.keel.samples.aigateway.customerportal.keys.CustomerKeysTable
 import kotlinx.datetime.Clock
+import kotlinx.datetime.Instant
 import org.jetbrains.exposed.sql.*
 import java.security.MessageDigest
 import java.security.SecureRandom
@@ -49,6 +50,7 @@ class CustomerPortalRepository(
         // touched by the previous broken migration before the real table name was fixed.
         val usageTables = listOf("\"CUSTOMER-PORTAL_USAGE_RECORDS\"", "customer_portal_usage_records")
         val usageColumns = listOf(
+            "status INT NOT NULL DEFAULT 200",
             "cached_prompt_tokens BIGINT NOT NULL DEFAULT 0",
             "reasoning_tokens BIGINT NOT NULL DEFAULT 0",
             "input_cost_micros BIGINT NOT NULL DEFAULT 0",
@@ -284,18 +286,27 @@ class CustomerPortalRepository(
     }
 
     fun customerLedger(customerId: String, cursor: String?, limit: Int): CreditLedgerResponse = database.transaction {
-        val query = CreditLedgerTable.selectAll().where { CreditLedgerTable.customerId eq customerId }
-        val cursorLong = cursor?.toLongOrNull()
-        val filtered = if (cursorLong != null) query.andWhere { CreditLedgerTable.createdAt lessEq kotlinx.datetime.Instant.fromEpochSeconds(cursorLong) } else query
-        val rows = filtered.orderBy(CreditLedgerTable.createdAt to SortOrder.DESC).limit(limit.coerceIn(1, 200)).map { it.toLedgerEntry() }
-        val nextCursor = rows.lastOrNull()?.let { r ->
-            CreditLedgerTable.selectAll().where { CreditLedgerTable.customerId eq customerId }
-                .orderBy(CreditLedgerTable.createdAt to SortOrder.DESC)
-                .limit(limit.coerceIn(1, 200))
-                .map { kotlinx.datetime.Instant.parse(it[CreditLedgerTable.createdAt].toString()).epochSeconds.toString() }
-                .lastOrNull()
+        val pageSize = limit.coerceIn(1, 200)
+        val baseQuery = CreditLedgerTable.selectAll().where { CreditLedgerTable.customerId eq customerId }
+        val total = baseQuery.count().toInt()
+        val pageCursor = decodePageCursor(cursor)
+        val filtered = if (pageCursor != null) {
+            baseQuery.andWhere {
+                (CreditLedgerTable.createdAt less pageCursor.createdAt) or
+                    ((CreditLedgerTable.createdAt eq pageCursor.createdAt) and (CreditLedgerTable.entryId less pageCursor.recordId))
+            }
+        } else {
+            baseQuery
         }
-        CreditLedgerResponse(rows, rows.size, nextCursor ?: "")
+        val pageRows = filtered
+            .orderBy(CreditLedgerTable.createdAt to SortOrder.DESC, CreditLedgerTable.entryId to SortOrder.DESC)
+            .limit(pageSize + 1)
+            .map { it.toLedgerEntry() }
+        val entries = pageRows.take(pageSize)
+        val nextCursor = entries.lastOrNull()?.takeIf { pageRows.size > pageSize }?.let { entry ->
+            encodePageCursor(entry.createdAt, entry.entryId)
+        }
+        CreditLedgerResponse(entries = entries, total = total, nextCursor = nextCursor)
     }
 
     fun redeemCode(customerId: String, request: RedeemCodeRequest): RedeemCodeResponse = database.transaction {
@@ -324,11 +335,27 @@ class CustomerPortalRepository(
 
     fun customerUsage(customerId: String, cursor: String?, limit: Int): CustomerUsageListResponse = database.transaction {
         try {
-            val query = CustomerUsageTable.selectAll().where { CustomerUsageTable.customerId eq customerId }
-            val cursorLong = cursor?.toLongOrNull()
-            val filtered = if (cursorLong != null) query.andWhere { CustomerUsageTable.createdAt lessEq kotlinx.datetime.Instant.fromEpochSeconds(cursorLong) } else query
-            val rows = filtered.orderBy(CustomerUsageTable.createdAt to SortOrder.DESC).limit(limit.coerceIn(1, 200)).map { it.toUsageView() }
-            CustomerUsageListResponse(rows, rows.size)
+            val pageSize = limit.coerceIn(1, 200)
+            val baseQuery = CustomerUsageTable.selectAll().where { CustomerUsageTable.customerId eq customerId }
+            val total = baseQuery.count().toInt()
+            val pageCursor = decodePageCursor(cursor)
+            val filtered = if (pageCursor != null) {
+                baseQuery.andWhere {
+                    (CustomerUsageTable.createdAt less pageCursor.createdAt) or
+                        ((CustomerUsageTable.createdAt eq pageCursor.createdAt) and (CustomerUsageTable.recordId less pageCursor.recordId))
+                }
+            } else {
+                baseQuery
+            }
+            val pageRows = filtered
+                .orderBy(CustomerUsageTable.createdAt to SortOrder.DESC, CustomerUsageTable.recordId to SortOrder.DESC)
+                .limit(pageSize + 1)
+                .map { it.toUsageView() }
+            val records = pageRows.take(pageSize)
+            val nextCursor = records.lastOrNull()?.takeIf { pageRows.size > pageSize }?.let { record ->
+                encodePageCursor(record.createdAt, record.recordId)
+            }
+            CustomerUsageListResponse(records = records, total = total, nextCursor = nextCursor)
         } catch (e: org.jetbrains.exposed.exceptions.ExposedSQLException) {
             // Schema drift: a column the code expects is missing. Try to migrate on the fly
             // and retry once. The most common cause is a new column being added after the
@@ -343,8 +370,10 @@ class CustomerPortalRepository(
                 if (missing != null) {
                     try {
                         val snaked = missing.lowercase().split("_").mapIndexed { i, s -> if (i == 0) s else s }.joinToString("_")
-                        database.transaction { exec("ALTER TABLE customer_portal_usage_records ADD COLUMN IF NOT EXISTS $snaked BIGINT NOT NULL DEFAULT 0") }
+                        val columnType = if (snaked == "status") "INT NOT NULL DEFAULT 200" else "BIGINT NOT NULL DEFAULT 0"
+                        database.transaction { exec("ALTER TABLE customer_portal_usage_records ADD COLUMN IF NOT EXISTS $snaked $columnType") }
                     } catch (_: Exception) { /* best-effort */ }
+                    val total = CustomerUsageTable.selectAll().where { CustomerUsageTable.customerId eq customerId }.count().toInt()
                     // Retry with minimal projection
                     val fallbackQuery = CustomerUsageTable
                         .select(
@@ -354,6 +383,7 @@ class CustomerPortalRepository(
                             CustomerUsageTable.groupId,
                             CustomerUsageTable.providerId,
                             CustomerUsageTable.wireProtocol,
+                            CustomerUsageTable.status,
                             CustomerUsageTable.inputTokens,
                             CustomerUsageTable.outputTokens,
                             CustomerUsageTable.cacheReadInputTokens,
@@ -374,6 +404,7 @@ class CustomerPortalRepository(
                                 groupId = row[CustomerUsageTable.groupId],
                                 providerId = row[CustomerUsageTable.providerId],
                                 wireProtocol = row[CustomerUsageTable.wireProtocol],
+                                status = row[CustomerUsageTable.status],
                                 inputTokens = row[CustomerUsageTable.inputTokens],
                                 outputTokens = row[CustomerUsageTable.outputTokens],
                                 cacheReadInputTokens = row[CustomerUsageTable.cacheReadInputTokens],
@@ -391,7 +422,7 @@ class CustomerPortalRepository(
                                 createdAt = row[CustomerUsageTable.createdAt].toString(),
                             )
                         }
-                    return@transaction CustomerUsageListResponse(rows, rows.size)
+                    return@transaction CustomerUsageListResponse(records = rows, total = total, nextCursor = null)
                 }
             }
             throw e
@@ -483,6 +514,7 @@ class CustomerPortalRepository(
             it[groupId] = usageRow.groupId
             it[providerId] = usageRow.providerId
             it[wireProtocol] = usageRow.wireProtocol
+            it[status] = usageRow.status
             it[inputTokens] = usageRow.inputTokens
             it[outputTokens] = usageRow.outputTokens
             it[cacheReadInputTokens] = usageRow.cacheReadInputTokens
@@ -566,10 +598,14 @@ class CustomerPortalRepository(
         CustomersTable.update({ CustomersTable.customerId eq customerId }) {
             request.displayName?.trim()?.takeIf(String::isNotBlank)?.let { value -> it[displayName] = value }
             request.status?.trim()?.lowercase()?.let { value ->
-                if (value !in setOf(CustomerStatuses.ACTIVE, CustomerStatuses.LOCKED, CustomerStatuses.DELETED)) {
+                val normalized = when (value) {
+                    "suspended" -> CustomerStatuses.LOCKED
+                    else -> value
+                }
+                if (normalized !in setOf(CustomerStatuses.ACTIVE, CustomerStatuses.LOCKED, CustomerStatuses.DELETED)) {
                     throw PluginApiException(400, "Invalid status $value")
                 }
-                it[status] = value
+                it[status] = normalized
             }
             it[updatedAt] = Clock.System.now()
         }
@@ -759,6 +795,26 @@ class CustomerPortalRepository(
         return String(chars)
     }
 
+    private data class PageCursor(
+        val createdAt: Instant,
+        val recordId: String,
+    )
+
+    private fun encodePageCursor(createdAt: String, recordId: String): String =
+        encodePageCursor(Instant.parse(createdAt), recordId)
+
+    private fun encodePageCursor(createdAt: Instant, recordId: String): String =
+        "${createdAt.toEpochMilliseconds()}|$recordId"
+
+    private fun decodePageCursor(cursor: String?): PageCursor? {
+        val raw = cursor?.trim().orEmpty()
+        if (raw.isBlank()) return null
+        val parts = raw.split('|', limit = 2)
+        if (parts.size != 2) return null
+        val createdAt = parts[0].toLongOrNull()?.let(Instant::fromEpochMilliseconds) ?: return null
+        return PageCursor(createdAt = createdAt, recordId = parts[1])
+    }
+
     private fun sha256(input: String): String {
         val digest = MessageDigest.getInstance("SHA-256")
         return digest.digest(input.toByteArray(Charsets.UTF_8)).toHex()
@@ -834,6 +890,7 @@ private fun ResultRow.toUsageView(): CustomerUsageView = CustomerUsageView(
     groupId = this[CustomerUsageTable.groupId],
     providerId = this[CustomerUsageTable.providerId],
     wireProtocol = this[CustomerUsageTable.wireProtocol],
+    status = this[CustomerUsageTable.status],
     inputTokens = this[CustomerUsageTable.inputTokens],
     outputTokens = this[CustomerUsageTable.outputTokens],
     cacheReadInputTokens = this[CustomerUsageTable.cacheReadInputTokens],

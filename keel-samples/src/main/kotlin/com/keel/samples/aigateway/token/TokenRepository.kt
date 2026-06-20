@@ -47,6 +47,7 @@ class TokenRepository(
     private fun migrateUsageRecordOutcomeColumns() {
         database.transaction {
             exec("ALTER TABLE token_usage_records ADD COLUMN IF NOT EXISTS transport_status INT NOT NULL DEFAULT 200")
+            exec("ALTER TABLE token_usage_records ADD COLUMN IF NOT EXISTS routing_group_id VARCHAR(64)")
             exec("ALTER TABLE token_usage_records ADD COLUMN IF NOT EXISTS outcome VARCHAR(16) NOT NULL DEFAULT 'SUCCESS'")
             exec("ALTER TABLE token_usage_records ADD COLUMN IF NOT EXISTS usage_source VARCHAR(16) NOT NULL DEFAULT 'PROVIDER'")
             exec("ALTER TABLE token_usage_records ALTER COLUMN error_code VARCHAR(128)")
@@ -271,6 +272,7 @@ class TokenRepository(
                 it[model] = record.model
                 it[provider] = record.provider
                 it[poolLevelId] = record.poolLevelId
+                it[routingGroupId] = record.routingGroupId
                 it[upstreamKeyId] = record.upstreamKeyId
                 it[promptTokens] = record.usage.promptTokens
                 it[completionTokens] = record.usage.completionTokens
@@ -315,7 +317,7 @@ class TokenRepository(
 
     override suspend fun snapshot(): UsageSnapshot = database.suspendTransaction {
         val rows = UsageRecordsTable.selectAll().where { UsageRecordsTable.deletedAt.isNull() }.toList()
-        val recent = rows.sortedByDescending { it[UsageRecordsTable.createdAt] }.take(20).map { it.toUsageView() }
+        val recent = rows.sortedByDescending { it[UsageRecordsTable.createdAt] }.take(2000).map { it.toUsageView() }
         val topModels = rows.groupBy { it[UsageRecordsTable.model] }.map { (model, modelRows) ->
             ModelUsageSummary(
                 model = model,
@@ -344,41 +346,82 @@ class TokenRepository(
 
     fun recentRecords(
         limit: Int,
+        offset: Int = 0,
         status: Int? = null,
-        groupId: String? = null,
+        routingGroupId: String? = null,
+        poolLevelId: String? = null,
         channelId: String? = null,
         model: String? = null,
-        statusFilter: String? = null
+        statusFilter: String? = null,
+        userId: String? = null,
+        keyId: String? = null,
+        customerId: String? = null,
+        from: Instant? = null,
+        to: Instant? = null
     ): UsageListResponse = database.transaction {
         val n = limit.coerceIn(1, 200)
+        val start = offset.coerceAtLeast(0)
+        val filtersApplied = buildMap<String, String> {
+            if (status != null) put("status", status.toString())
+            if (routingGroupId != null) put("routingGroupId", routingGroupId)
+            if (poolLevelId != null) put("poolLevelId", poolLevelId)
+            if (channelId != null) put("channelId", channelId)
+            if (model != null) put("model", model)
+            if (statusFilter != null) put("statusFilter", statusFilter)
+            if (userId != null) put("userId", userId)
+            if (keyId != null) put("keyId", keyId)
+            if (customerId != null) put("customerId", customerId)
+            if (from != null) put("from", from.toString())
+            if (to != null) put("to", to.toString())
+        }
 
-        val rows = UsageRecordsTable.selectAll()
-            .where {
-                var condition = UsageRecordsTable.deletedAt.isNull()
-                if (status != null) {
-                    condition = condition and (UsageRecordsTable.status eq status)
-                }
-                if (groupId != null) {
-                    condition = condition and (UsageRecordsTable.poolLevelId eq groupId)
-                }
-                if (channelId != null) {
-                    condition = condition and (UsageRecordsTable.upstreamKeyId eq channelId)
-                }
-                if (model != null) {
-                    condition = condition and (UsageRecordsTable.model eq model)
-                }
-                if (statusFilter != null) {
-                    when (statusFilter.lowercase()) {
-                        "success" -> condition = condition and ((UsageRecordsTable.status greaterEq 200) and (UsageRecordsTable.status less 300))
-                        "error" -> condition = condition and (UsageRecordsTable.status greaterEq 400)
-                    }
-                }
-                condition
+        val predicate: org.jetbrains.exposed.sql.SqlExpressionBuilder.() -> org.jetbrains.exposed.sql.Op<Boolean> = {
+            var condition = UsageRecordsTable.deletedAt.isNull()
+            if (status != null) condition = condition and (UsageRecordsTable.status eq status)
+            if (routingGroupId != null) condition = condition and (UsageRecordsTable.routingGroupId eq routingGroupId)
+            if (poolLevelId != null) condition = condition and (UsageRecordsTable.poolLevelId eq poolLevelId)
+            if (channelId != null) condition = condition and (UsageRecordsTable.upstreamKeyId eq channelId)
+            if (model != null) condition = condition and (UsageRecordsTable.model eq model)
+            if (userId != null) condition = condition and (UsageRecordsTable.userId eq userId)
+            if (keyId != null) condition = condition and (UsageRecordsTable.keyId eq keyId)
+            if (customerId != null) {
+                condition = condition and (UsageRecordsTable.userGroupId eq "customer") and (UsageRecordsTable.userId eq customerId)
             }
+            if (from != null) condition = condition and (UsageRecordsTable.createdAt greaterEq from)
+            if (to != null) condition = condition and (UsageRecordsTable.createdAt less to)
+            if (statusFilter != null) {
+                when (statusFilter.lowercase()) {
+                    "success" -> condition = condition and ((UsageRecordsTable.status greaterEq 200) and (UsageRecordsTable.status less 300))
+                    "error" -> condition = condition and (UsageRecordsTable.status greaterEq 400)
+                }
+            }
+            condition
+        }
+
+        val total = UsageRecordsTable.selectAll().where(predicate).count().toInt()
+        val rows = UsageRecordsTable.selectAll()
+            .where(predicate)
             .orderBy(UsageRecordsTable.createdAt to SortOrder.DESC)
-            .limit(n)
-            .map { it.toUsageRecordView() }
-        UsageListResponse(records = rows, total = rows.size)
+            .limit(n).offset(start.toLong())
+            .toList()
+        val keyNames = keyDisplayNames(rows.mapNotNull { it[UsageRecordsTable.keyId] }.toSet())
+        val views = rows.map { it.toUsageRecordView(keyNames) }
+        val nextOffset = start + views.size
+        UsageListResponse(
+            records = views,
+            total = total,
+            pageSize = n,
+            offset = start,
+            nextCursor = if (nextOffset < total) nextOffset.toString() else null,
+            filtersApplied = filtersApplied
+        )
+    }
+
+    private fun keyDisplayNames(keyIds: Set<String>): Map<String, String> {
+        if (keyIds.isEmpty()) return emptyMap()
+        return ApiKeysTable.selectAll()
+            .where { ApiKeysTable.keyId inList keyIds }
+            .associate { it[ApiKeysTable.keyId] to it[ApiKeysTable.displayName] }
     }
 
     private data class VerifiedKeyPartial(
@@ -461,10 +504,13 @@ class TokenRepository(
         )
     }
 
-    private fun ResultRow.toUsageRecordView(): TokenUsageRecordView = TokenUsageRecordView(
+    private fun ResultRow.toUsageRecordView(keyNames: Map<String, String> = emptyMap()): TokenUsageRecordView = TokenUsageRecordView(
         recordId = this[UsageRecordsTable.recordId],
+        requestId = this[UsageRecordsTable.recordId],
         keyId = this[UsageRecordsTable.keyId],
+        keyDisplayName = keyNames[this[UsageRecordsTable.keyId]],
         userId = this[UsageRecordsTable.userId],
+        userGroupId = this[UsageRecordsTable.userGroupId],
         model = this[UsageRecordsTable.model],
         provider = this[UsageRecordsTable.provider],
         status = this[UsageRecordsTable.status],
@@ -475,6 +521,8 @@ class TokenRepository(
         usageSource = this[UsageRecordsTable.usageSource],
         upstreamKeyId = this[UsageRecordsTable.upstreamKeyId],
         poolLevelId = this[UsageRecordsTable.poolLevelId],
+        routingGroupId = this[UsageRecordsTable.routingGroupId],
+        channelId = this[UsageRecordsTable.upstreamKeyId],
         streamed = this[UsageRecordsTable.streamed],
         failoverCount = this[UsageRecordsTable.failoverCount],
         usage = usage(),
@@ -489,6 +537,7 @@ class TokenRepository(
         userId = this[UsageRecordsTable.userId],
         keyId = this[UsageRecordsTable.keyId],
         groupId = this[UsageRecordsTable.poolLevelId],
+        routingGroupId = this[UsageRecordsTable.routingGroupId],
         channelId = this[UsageRecordsTable.upstreamKeyId],
         channelName = null, // Enriched by controller if needed
         model = this[UsageRecordsTable.model],

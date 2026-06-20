@@ -1,6 +1,7 @@
 import { KeelElement } from './base/KeelElement.js';
 import { requestJson } from '../api.js';
 import { API } from '../config.js';
+import { state, setTab } from '../state.js';
 import { escapeHtml } from '../utils.js';
 
 /**
@@ -22,6 +23,11 @@ export class PanelUsage extends KeelElement {
                     letter-spacing: 0.08em; text-transform: uppercase;
                 }
                 .toolbar { display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; }
+                .pager { display: flex; gap: 10px; align-items: center; justify-content: space-between; flex-wrap: wrap; padding: 12px 14px; background: var(--paper); border: 2px solid var(--ink); }
+                .pager .range { font-family: var(--font-mono); font-size: 11px; font-weight: 800; color: var(--muted); }
+                .pager-actions { display: flex; gap: 8px; align-items: center; }
+                .pager button { padding: 8px 12px; border: 2px solid var(--ink); background: var(--panel-strong); color: var(--ink); font-family: var(--font-mono); font-size: 10px; font-weight: 800; text-transform: uppercase; cursor: pointer; }
+                .pager button:disabled { opacity: .38; cursor: not-allowed; }
                 .toolbar .field { display: flex; flex-direction: column; gap: 4px; }
                 .toolbar label {
                     font-family: var(--font-mono); font-size: 9px; font-weight: 800;
@@ -103,15 +109,23 @@ export class PanelUsage extends KeelElement {
                         </select>
                     </div>
                     <div class="field">
-                        <label>Limit</label>
+                        <label>Page Size</label>
                         <select data-ref="limitFilter">
-                            <option>50</option>
-                            <option selected>200</option>
+                            <option selected>50</option>
+                            <option>100</option>
+                            <option>200</option>
                         </select>
                     </div>
                     <button class="clear-btn" data-ref="clearBtn">Clear</button>
                 </div>
                 <div class="summary" data-ref="summary"></div>
+                <div class="pager">
+                    <div class="range" data-ref="pageRange">0 records</div>
+                    <div class="pager-actions">
+                        <button data-ref="prevBtn" disabled>Prev</button>
+                        <button data-ref="nextBtn" disabled>Next</button>
+                    </div>
+                </div>
                 <div class="table-card">
                     <div class="table-scroll" data-ref="tableWrap"></div>
                 </div>
@@ -125,19 +139,37 @@ export class PanelUsage extends KeelElement {
     afterMount() {
         this._records = [];
         this._channelNameById = {};
+        this._groupNameById = {};
+        this._offset = 0;
+        this._total = 0;
+        this._pageSize = 50;
         this._hasRendered = false;
         this._optionsLoaded = false;
         this.refs.hero.render({ label: 'Request Ledger', title: 'Usage', metaHtml: '' });
-        this.refs.groupFilter.addEventListener('change', () => this.refresh());
-        this.refs.channelFilter.addEventListener('change', () => this.refresh());
-        this.refs.modelFilter.addEventListener('change', () => this.refresh());
-        this.refs.statusFilter.addEventListener('change', () => this.refresh());
-        this.refs.limitFilter.addEventListener('change', () => this.refresh());
+        const onFilterChange = () => { this._offset = 0; this.refresh(); };
+        this.refs.groupFilter.addEventListener('change', onFilterChange);
+        this.refs.channelFilter.addEventListener('change', onFilterChange);
+        this.refs.modelFilter.addEventListener('change', onFilterChange);
+        this.refs.statusFilter.addEventListener('change', onFilterChange);
+        this.refs.limitFilter.addEventListener('change', onFilterChange);
+        this.refs.prevBtn.addEventListener('click', () => {
+            this._offset = Math.max(0, this._offset - this._pageSize);
+            this.refresh();
+        });
+        this.refs.nextBtn.addEventListener('click', () => {
+            this._offset = this._offset + this._pageSize;
+            this.refresh();
+        });
         this.refs.clearBtn.addEventListener('click', () => {
             this.refs.groupFilter.value = '';
             this.refs.channelFilter.value = '';
             this.refs.modelFilter.value = '';
             this.refs.statusFilter.value = '';
+            this._offset = 0;
+            if (Object.keys(this._contextQuery()).length) {
+                setTab('usage');
+                return;
+            }
             this.refresh();
         });
         this.refs.tableWrap.addEventListener('click', (event) => {
@@ -162,6 +194,8 @@ export class PanelUsage extends KeelElement {
             const channelList = channels.channels || [];
             this._channelNameById = {};
             channelList.forEach(c => { if (c.channelId) this._channelNameById[c.channelId] = c.name || c.channelId; });
+            this._groupNameById = {};
+            groupList.forEach(g => { if (g.groupId) this._groupNameById[g.groupId] = g.name || g.groupId; });
             const models = Array.from(new Set(channelList.flatMap(c => (c.models || []).map(m => m.publicModelName)).filter(Boolean))).sort();
 
             this._fillSelect(this.refs.groupFilter, groupList.map(g => [g.groupId, g.name || g.groupId]));
@@ -187,26 +221,76 @@ export class PanelUsage extends KeelElement {
         if (current) select.value = current;
     }
 
+    _buildQuery() {
+        this._pageSize = parseInt(this.refs.limitFilter.value) || 50;
+        const params = new URLSearchParams({
+            limit: String(this._pageSize),
+            offset: String(this._offset),
+        });
+        const group = this.refs.groupFilter.value;
+        const channel = this.refs.channelFilter.value;
+        const model = this.refs.modelFilter.value;
+        const status = this.refs.statusFilter.value;
+        const context = this._contextQuery();
+        if (group) params.set('routingGroupId', group);
+        if (channel) params.set('channelId', channel);
+        if (model) params.set('model', model);
+        if (status) params.set('statusFilter', status);
+        if (context.keyId) params.set('keyId', context.keyId);
+        if (context.customerId) params.set('customerId', context.customerId);
+        return params;
+    }
+
+    _contextQuery() {
+        if (state.activeTab !== 'usage') return {};
+        const { keyId, customerId } = state.tabQuery || {};
+        return {
+            ...(keyId ? { keyId } : {}),
+            ...(customerId ? { customerId } : {}),
+        };
+    }
+
     async refresh() {
         await this._loadFilterOptions();
         try {
-            const limit = parseInt(this.refs.limitFilter.value) || 200;
-            const params = new URLSearchParams({ limit: String(limit) });
-            const group = this.refs.groupFilter.value;
-            const channel = this.refs.channelFilter.value;
-            const model = this.refs.modelFilter.value;
-            const status = this.refs.statusFilter.value;
-            if (group) params.set('groupId', group);
-            if (channel) params.set('channelId', channel);
-            if (model) params.set('model', model);
-            if (status) params.set('statusFilter', status);
+            const params = this._buildQuery();
             const data = await requestJson(`${API.token}/admin/usage/records?${params}`);
             this._records = data.records || [];
+            this._total = data.total != null ? data.total : this._records.length;
+            this._offset = data.offset != null ? data.offset : this._offset;
             this._renderTable(this._hasRendered);
+            this._renderPager();
             this._hasRendered = true;
         } catch (e) {
             this.refs.tableWrap.innerHTML = `<div class="empty">Error: ${escapeHtml(e.message)}</div>`;
         }
+    }
+
+    _renderPager() {
+        const start = this._records.length === 0 ? 0 : this._offset + 1;
+        const end = this._offset + this._records.length;
+        const context = this._contextQuery();
+        const hasFilters = this.refs.groupFilter.value || this.refs.channelFilter.value
+            || this.refs.modelFilter.value || this.refs.statusFilter.value
+            || context.keyId || context.customerId;
+        const suffix = hasFilters ? ` (filtered${this._contextSummary(context)})` : '';
+        this.refs.pageRange.textContent = `${start}–${end} of ${this._total} records${suffix}`;
+        this.refs.prevBtn.disabled = this._offset <= 0;
+        this.refs.nextBtn.disabled = end >= this._total;
+    }
+
+    _contextSummary(context = this._contextQuery()) {
+        const parts = [];
+        if (context.keyId) parts.push(`key ${context.keyId}`);
+        if (context.customerId) parts.push(`customer ${context.customerId}`);
+        return parts.length ? `: ${parts.join(' · ')}` : '';
+    }
+
+    _groupLabel(r) {
+        if (r.routingGroupName) return r.routingGroupName;
+        const id = r.routingGroupId || r.groupId;
+        if (id && this._groupNameById[id]) return this._groupNameById[id];
+        return id || r.poolLevelId || 'unknown';
     }
 
     _channelLabel(r) {
@@ -234,7 +318,7 @@ export class PanelUsage extends KeelElement {
         this.refs.hero.render({
             label: 'Request Ledger',
             title: 'Usage',
-            metaHtml: `<div class="hero-meta"><span class="hero-chip">${filtered.length} records</span><span class="hero-chip">${hit} cache hit</span></div>`
+            metaHtml: `<div class="hero-meta"><span class="hero-chip">${this._total} records</span><span class="hero-chip">${hit} cache hit</span></div>`
         });
         this.refs.summary.innerHTML = [
             this._sumCell('Records', filtered.length.toString()),
@@ -247,19 +331,22 @@ export class PanelUsage extends KeelElement {
         ].join('');
 
         if (filtered.length === 0) {
-            this.refs.tableWrap.innerHTML = '<div class="empty">// NO RECORDS MATCH FILTERS</div>';
+            const context = this._contextQuery();
+            const hasFilters = this.refs.groupFilter.value || this.refs.channelFilter.value || this.refs.modelFilter.value || this.refs.statusFilter.value
+                || context.keyId || context.customerId;
+            this.refs.tableWrap.innerHTML = `<div class="empty">${hasFilters ? '// NO RECORDS MATCH FILTERS' : '// NO USAGE RECORDS YET'}</div>`;
             return;
         }
 
         const headers = ['Model', 'Time', 'Group', 'Channel', 'In', 'Out', 'CR', 'CW', 'CP', 'Reason', 'In$', 'Out$', 'CW$', 'CR$', 'Total$', 'Hit', 'Status', 'Latency', 'Detail'];
-        const rows = filtered.slice(0, 200).map(r => {
+        const rows = filtered.map(r => {
             const u = r.usage || {};
             const c = r.cost || {};
             const id = r.requestId || r.recordId || '';
             return `<tr>
                 <td>${this._modelCell(r.model)}</td>
                 <td>${escapeHtml((r.createdAt || '').replace('T', ' ').slice(0, 19))}</td>
-                <td><code>${escapeHtml(r.groupId || r.poolLevelId || '—')}</code></td>
+                <td><code>${escapeHtml(this._groupLabel(r))}</code></td>
                 <td><code>${escapeHtml(this._channelLabel(r))}</code></td>
                 <td>${this._fmt(u.promptTokens)}</td>
                 <td>${this._fmt(u.completionTokens)}</td>
@@ -287,22 +374,43 @@ export class PanelUsage extends KeelElement {
         const c = record.cost || {};
         const hit = (record.cacheHitRate != null ? record.cacheHitRate : c.cacheHitRate);
         const kv = (k, v) => `<div class="kv"><span class="k">${k}</span><span class="v">${v == null || v === '' ? '—' : escapeHtml(String(v))}</span></div>`;
+        const navButtons = [
+            record.keyId ? `<button class="detail-btn" data-filter-key="${escapeHtml(record.keyId)}">Usage For Key</button>` : '',
+            record.customerId ? `<button class="detail-btn" data-open-customer="${escapeHtml(record.customerId)}">Open Customer</button>` : '',
+        ].filter(Boolean).join('');
         this.refs.drawer.innerHTML = `
             <div class="drawer-head">
                 <div>
                     <h3>Request detail</h3>
                     <div style="color:var(--muted);font-family:var(--font-mono);font-size:11px;">Full token, cost, routing and error context.</div>
                 </div>
-                <button class="detail-btn" data-ref="drawerClose">Close</button>
+                <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;">
+                    ${navButtons}
+                    <button class="detail-btn" data-ref="drawerClose">Close</button>
+                </div>
             </div>
             <section>
                 <h4>Basic</h4>
                 ${kv('Request ID', record.requestId || record.recordId)}
                 ${kv('Timestamp', record.createdAt)}
                 ${kv('Model', record.model)}
-                ${kv('Group', record.groupId || record.poolLevelId)}
+                ${kv('Routing Group', this._groupLabel(record))}
                 ${kv('Channel', this._channelLabel(record))}
                 ${kv('Status', `${record.status ?? '—'} (${record.outcome || '—'})`)}
+            </section>
+            <section>
+                <h4>Identity & Routing</h4>
+                ${kv('User ID', record.userId)}
+                ${kv('User Email', record.userEmail)}
+                ${kv('Key ID', record.keyId)}
+                ${kv('Key Name', record.keyDisplayName)}
+                ${kv('Customer ID', record.customerId)}
+                ${kv('Customer Email', record.customerEmail)}
+                ${kv('Routing Group ID', record.routingGroupId || record.groupId)}
+                ${kv('Routing Group Name', record.routingGroupName || this._groupNameById[record.routingGroupId || record.groupId])}
+                ${kv('Pool Level ID', record.poolLevelId)}
+                ${kv('Channel ID', record.channelId || record.upstreamKeyId)}
+                ${kv('Channel Name', this._channelLabel(record))}
             </section>
             <section>
                 <h4>Tokens</h4>
@@ -330,6 +438,18 @@ export class PanelUsage extends KeelElement {
             </section>
         `;
         this.refs.drawer.querySelector('[data-ref="drawerClose"]').addEventListener('click', () => this._closeDetail());
+        this.refs.drawer.querySelector('[data-filter-key]')?.addEventListener('click', () => {
+            setTab('usage', {
+                ...this._contextQuery(),
+                keyId: record.keyId,
+                customerId: record.customerId || undefined,
+            });
+            this._closeDetail();
+        });
+        this.refs.drawer.querySelector('[data-open-customer]')?.addEventListener('click', () => {
+            setTab('customers', { customerId: record.customerId });
+            this._closeDetail();
+        });
         this.refs.drawerBackdrop.classList.add('open');
     }
 

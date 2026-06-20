@@ -324,6 +324,26 @@ class CustomerPortalPlugin : StandardKeelPlugin {
                 val keyId = pathParameters["keyId"] ?: throw PluginApiException(400, "Missing keyId")
                 PluginResult(body = repository.adminRevokeCustomerKey(customerId, keyId))
             }
+
+            get<CustomerUsageListResponse>(
+                "/customers/{customerId}/usage",
+                doc = OpenApiDoc(summary = "List a customer's usage records (admin)", tags = listOf("customer-portal", "admin"), errorStatuses = setOf(401, 403, 404)),
+            ) {
+                val customerId = pathParameters["customerId"] ?: throw PluginApiException(400, "Missing customerId")
+                val cursor = queryParameters["cursor"]?.firstOrNull()?.takeIf { it.isNotBlank() }
+                val limit = (queryParameters["limit"]?.firstOrNull()?.toIntOrNull() ?: 50).coerceIn(1, 200)
+                PluginResult(body = repository.customerUsage(customerId, cursor, limit))
+            }
+
+            get<CreditLedgerResponse>(
+                "/customers/{customerId}/ledger",
+                doc = OpenApiDoc(summary = "List a customer's credit ledger (admin)", tags = listOf("customer-portal", "admin"), errorStatuses = setOf(401, 403, 404)),
+            ) {
+                val customerId = pathParameters["customerId"] ?: throw PluginApiException(400, "Missing customerId")
+                val cursor = queryParameters["cursor"]?.firstOrNull()?.takeIf { it.isNotBlank() }
+                val limit = (queryParameters["limit"]?.firstOrNull()?.toIntOrNull() ?: 50).coerceIn(1, 200)
+                PluginResult(body = repository.customerLedger(customerId, cursor, limit))
+            }
         }
 
         // ---- C-end UI ----

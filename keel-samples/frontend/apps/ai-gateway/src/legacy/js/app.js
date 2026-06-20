@@ -487,13 +487,13 @@ class AiProxyApp extends KeelElement {
         this._setupUserPopover();
         this._setupLiveIndicator();
         this._renderState();
-        this.refs.refreshBtn.addEventListener('click', () => this._refreshActive());
+        this.refs.refreshBtn.addEventListener('click', () => this._refreshActive('manual'));
         window.addEventListener('hashchange', () => { hydrateHash(); this._renderState(); });
         this._reveal();
-        // Silent auto-refresh of the active panel every 15s.
+        // Global Live loop: refresh the active panel every 15s unless Live is paused.
         this._autoRefresh = setInterval(() => {
-            if (!state.loggedIn) return;
-            this._refreshActive();
+            if (!state.loggedIn || this._livePaused) return;
+            this._refreshActive('live');
         }, 15000);
     }
 
@@ -684,7 +684,7 @@ class AiProxyApp extends KeelElement {
         }
     }
 
-    _refreshActive() {
+    _refreshActive(reason = 'manual') {
         const panels = {
             overview: this.refs.panelOverview,
             dashboard: this.refs.panelDashboard,
@@ -700,7 +700,7 @@ class AiProxyApp extends KeelElement {
             users: this.refs.panelUsers,
         };
         const active = panels[state.activeTab];
-        if (active && typeof active.refresh === 'function') active.refresh();
+        if (active && typeof active.refresh === 'function') active.refresh({ reason });
     }
 
     /* ── Sidebar collapse ─────────────────────────────────────────────── */
@@ -819,12 +819,30 @@ class AiProxyApp extends KeelElement {
             this._livePaused = !this._livePaused;
             this.refs.liveIndicator.classList.toggle('paused', this._livePaused);
             this.refs.liveIndicator.querySelector('.live-dot').nextSibling.textContent = this._livePaused ? ' PAUSED' : ' LIVE';
-            // Notify dashboard panel
-            const dashboard = this.refs.panelDashboard;
-            if (dashboard && typeof dashboard.setLiveMode === 'function') {
-                dashboard.setLiveMode(!this._livePaused);
+            // Notify the active panel (only some panels react visually to live mode).
+            const active = this._activePanel();
+            if (active && typeof active.setLiveMode === 'function') {
+                active.setLiveMode(!this._livePaused);
             }
         });
+    }
+
+    _activePanel() {
+        const panels = {
+            overview: this.refs.panelOverview,
+            dashboard: this.refs.panelDashboard,
+            usage: this.refs.panelUsage,
+            availability: this.refs.panelAvailability,
+            channels: this.refs.panelChannels,
+            groups: this.refs.panelGroups,
+            keys: this.refs.panelKeys,
+            pricing: this.refs.panelPricing,
+            ratelimits: this.refs.panelRateLimits,
+            customers: this.refs.panelCustomers,
+            codes: this.refs.panelCodes,
+            users: this.refs.panelUsers,
+        };
+        return panels[state.activeTab];
     }
 }
 

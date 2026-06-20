@@ -221,6 +221,7 @@ class AIRelayService(
                             clientProtocol = clientProtocol.name, upstreamProtocol = selection.provider.protocol.name,
                             model = operatorModelLabel(selection), provider = selection.provider.providerId,
                             poolLevelId = selection.level.levelId, upstreamKeyId = selection.keyState.key.keyId,
+                            routingGroupId = keyContext.verified.routingGroupId,
                             usage = effectiveUsage, cost = cost, latencyMs = elapsedMs(started),
                             status = upstream.status, errorCode = null, streamed = false, failoverCount = failoverCount,
                             transportStatus = upstream.status,
@@ -259,6 +260,10 @@ class AIRelayService(
                             errorDetail = error.message,
                             started = started,
                             failoverCount = failoverCount,
+                            upstreamProtocol = selection.provider.protocol.name,
+                            provider = selection.provider.providerId,
+                            poolLevelId = selection.level.levelId,
+                            upstreamKeyId = selection.keyState.key.keyId,
                         )
                     )
                     return protocolError(clientProtocol, error.status, "upstream_error", error.message)
@@ -384,6 +389,10 @@ class AIRelayService(
                             started = started,
                             streamed = true,
                             failoverCount = failoverCount,
+                            upstreamProtocol = selection.provider.protocol.name,
+                            provider = selection.provider.providerId,
+                            poolLevelId = selection.level.levelId,
+                            upstreamKeyId = selection.keyState.key.keyId,
                         )
                     )
                     return protocolError(clientProtocol, error.status, "upstream_error", error.message)
@@ -517,6 +526,7 @@ class AIRelayService(
                         provider = selection.provider.providerId,
                         poolLevelId = selection.level.levelId,
                         upstreamKeyId = selection.keyState.key.keyId,
+                        routingGroupId = keyContext.verified.routingGroupId,
                         usage = effectiveUsage,
                         cost = effectiveCost,
                         latencyMs = elapsedMs(started),
@@ -584,6 +594,7 @@ class AIRelayService(
             groupId = groupId,
             providerId = providerId,
             wireProtocol = clientProtocol.name,
+            status = 200,
             inputTokens = usage.promptTokens.toLong(),
             outputTokens = usage.completionTokens.toLong(),
             cacheReadInputTokens = usage.cacheReadInputTokens.toLong(),
@@ -812,6 +823,7 @@ class AIRelayService(
         keyId = key.keyId, userId = key.userId, userGroupId = key.userGroupId,
         clientProtocol = clientProtocol.name, upstreamProtocol = upstreamProtocol,
         model = ir.model, provider = provider, poolLevelId = poolLevelId, upstreamKeyId = upstreamKeyId,
+        routingGroupId = key.routingGroupId,
         usage = TokenUsage(), cost = CostBreakdown(), latencyMs = elapsedMs(started),
         status = status,
         errorCode = errorCode?.take(64),

@@ -153,7 +153,17 @@ class CustomerPortalTest {
         val balanceBefore = repo.snapshotBalance(auth.customerId)
 
         val result = repo.chargeForUsage(auth.customerId, key.key.keyId, 100L, 50L,
-            CustomerUsageRow("gpt-4o", "default", "p1", "ANTHROPIC_MESSAGES", 100, 50, 0, 0, requestId = "req-1"))
+            CustomerUsageRow(
+                model = "gpt-4o",
+                groupId = "default",
+                providerId = "p1",
+                wireProtocol = "ANTHROPIC_MESSAGES",
+                inputTokens = 100,
+                outputTokens = 50,
+                cacheReadInputTokens = 0,
+                cacheCreationInputTokens = 0,
+                requestId = "req-1",
+            ))
         assertTrue(result is ChargeResult.Ok)
         val ok = result as ChargeResult.Ok
         assertEquals(balanceBefore - 100L, ok.newBalanceCredits)
@@ -173,7 +183,17 @@ class CustomerPortalTest {
         val auth = repo.register(CustomerRegisterRequest("u@x.com", "correct1", "U"))
         val key = repo.createKey(auth.customerId, CreateCustomerKeyRequest("K1"))
         val result = repo.chargeForUsage(auth.customerId, key.key.keyId, 0L, 0L,
-            CustomerUsageRow("m1", "default", "p1", "ANTHROPIC_MESSAGES", 0, 0, 0, 0, requestId = "req-1"))
+            CustomerUsageRow(
+                model = "m1",
+                groupId = "default",
+                providerId = "p1",
+                wireProtocol = "ANTHROPIC_MESSAGES",
+                inputTokens = 0,
+                outputTokens = 0,
+                cacheReadInputTokens = 0,
+                cacheCreationInputTokens = 0,
+                requestId = "req-1",
+            ))
         assertTrue(result is ChargeResult.Ok)
     }
 
@@ -185,7 +205,17 @@ class CustomerPortalTest {
         // Charge more than the signup bonus
         val result = repo.chargeForUsage(auth.customerId, key.key.keyId,
             CustomerPortalRepository.SIGNUP_BONUS_CREDITS + 5000L, 0L,
-            CustomerUsageRow("m1", "default", "p1", "ANTHROPIC_MESSAGES", 1000, 500, 0, 0, requestId = "req-1"))
+            CustomerUsageRow(
+                model = "m1",
+                groupId = "default",
+                providerId = "p1",
+                wireProtocol = "ANTHROPIC_MESSAGES",
+                inputTokens = 1000,
+                outputTokens = 500,
+                cacheReadInputTokens = 0,
+                cacheCreationInputTokens = 0,
+                requestId = "req-1",
+            ))
         assertTrue(result is ChargeResult.Ok)
         val ok = result as ChargeResult.Ok
         assertTrue(ok.newBalanceCredits < 0)
@@ -257,7 +287,17 @@ class CustomerPortalTest {
         runBlocking {
             val key = repo.createKey(user.customerId, CreateCustomerKeyRequest("K1"))
             repo.chargeForUsage(user.customerId, key.key.keyId, 300L, 10L,
-                CustomerUsageRow("m1", "default", "p1", "ANTHROPIC_MESSAGES", 100, 50, 0, 0, requestId = "r1"))
+                CustomerUsageRow(
+                    model = "m1",
+                    groupId = "default",
+                    providerId = "p1",
+                    wireProtocol = "ANTHROPIC_MESSAGES",
+                    inputTokens = 100,
+                    outputTokens = 50,
+                    cacheReadInputTokens = 0,
+                    cacheCreationInputTokens = 0,
+                    requestId = "r1",
+                ))
         }
         val ledger = repo.customerLedger(user.customerId, null, 50)
         assertTrue(ledger.entries.size >= 3) // signup_bonus + redemption + usage

@@ -95,10 +95,12 @@ class AiGatewayPluginIntegrationTest {
                 setBody("""{"displayName":"Matrix test key","maxBudgetUsd":100}""")
             }
             assertEquals(HttpStatusCode.OK, keyResponse.status)
-            val rawKey = json.parseToJsonElement(keyResponse.bodyAsText()).jsonObject["rawKey"]!!.jsonPrimitive.content
+            val keyBody = json.parseToJsonElement(keyResponse.bodyAsText()).jsonObject
+            val keyId = keyBody["key"]!!.jsonObject["keyId"]!!.jsonPrimitive.content
+            val rawKey = keyBody["rawKey"]!!.jsonPrimitive.content
             assertTrue(rawKey.startsWith("sk-keel-"))
 
-            with(TestContext(client, accessToken, rawKey, json, relayPlugin)) {
+            with(TestContext(client, accessToken, rawKey, keyId, json, relayPlugin)) {
                 block()
             }
         } finally {
@@ -120,6 +122,7 @@ class AiGatewayPluginIntegrationTest {
         val client: io.ktor.client.HttpClient,
         val accessToken: String,
         val rawKey: String,
+        val keyId: String,
         private val json: Json,
         val relayPlugin: AIRelayPlugin,
     ) {
@@ -163,6 +166,38 @@ class AiGatewayPluginIntegrationTest {
         assertTrue(content.contains("Mock response"))
         assertTrue((chatResponse.headers["X-Upstream-Protocol"] ?: "").isNotBlank())
         assertTrue((chatResponse.headers["X-Cost-USD"] ?: "0.0").toDouble() >= 0.0)
+    }
+
+    @Test
+    fun dashboardStatsExposeCanonicalTrendFieldsAlongsideCompatibilityAliases() = setupApp {
+        val chatResponse = client.post("/api/plugins/airelay/v1/chat/completions") {
+            header("Authorization", "Bearer $rawKey")
+            contentType(ContentType.Application.Json)
+            setBody(
+                """
+                {
+                  "model": "gpt-4o-mini",
+                  "messages": [{"role":"user","content":"Trend contract"}]
+                }
+                """.trimIndent()
+            )
+        }
+        assertEquals(HttpStatusCode.OK, chatResponse.status)
+
+        val response = client.get("/api/plugins/airelay/admin/stats/dashboard?window=7d") {
+            header("Authorization", "Bearer $accessToken")
+        }
+        assertEquals(HttpStatusCode.OK, response.status, response.bodyAsText())
+
+        val trends = json.parseToJsonElement(response.bodyAsText()).jsonObject["trends"]!!.jsonObject
+        assertEquals("1d", trends["bucketGranularity"]!!.jsonPrimitive.content)
+        assertEquals("day", trends["bucketLabelMode"]!!.jsonPrimitive.content)
+        assertTrue(trends["requests"]!!.jsonArray.isNotEmpty())
+        assertTrue(trends["tokens"]!!.jsonArray.isNotEmpty())
+        assertTrue(trends["latency"]!!.jsonArray.isNotEmpty())
+        assertTrue(trends["requestsByHour"]!!.jsonArray.isNotEmpty())
+        assertTrue(trends["tokensByHour"]!!.jsonArray.isNotEmpty())
+        assertTrue(trends["latencyByHour"]!!.jsonArray.isNotEmpty())
     }
 
     @Test
@@ -626,6 +661,31 @@ class AiGatewayPluginIntegrationTest {
 
         assertEquals(HttpStatusCode.Unauthorized, response.status)
         assertTrue(response.bodyAsText().contains("invalid upstream credential"))
+    }
+
+    @Test
+    fun nonRetryableUpstream400UsageRecordKeepsSelectedChannelMetadata() = setupApp {
+        relayPlugin.upstreamClient.failKey("mock-default-1", MockFailure.Http(400, "bad request"))
+
+        val relayResponse = client.post("/api/plugins/airelay/v1/chat/completions") {
+            header("Authorization", "Bearer $rawKey")
+            contentType(ContentType.Application.Json)
+            setBody("""{"model":"gpt-4o-mini","messages":[{"role":"user","content":"Hello"}]}""")
+        }
+        assertEquals(HttpStatusCode.BadRequest, relayResponse.status)
+
+        val usageResponse = client.get("/api/plugins/token/v1/keys/$keyId/usage") {
+            header("Authorization", "Bearer $accessToken")
+        }
+        assertEquals(HttpStatusCode.OK, usageResponse.status)
+        val records = json.parseToJsonElement(usageResponse.bodyAsText()).jsonObject["records"]!!.jsonArray
+        val failedRecord = records.first().jsonObject
+
+        assertEquals(400, failedRecord["status"]!!.jsonPrimitive.content.toInt())
+        assertEquals("mock-default-1", failedRecord["channelId"]!!.jsonPrimitive.content)
+        assertEquals("default", failedRecord["routingGroupId"]!!.jsonPrimitive.content)
+        assertEquals("l1-default-responses", failedRecord["poolLevelId"]!!.jsonPrimitive.content)
+        assertEquals("mock-openai-default", failedRecord["provider"]!!.jsonPrimitive.content)
     }
 
     @Test
