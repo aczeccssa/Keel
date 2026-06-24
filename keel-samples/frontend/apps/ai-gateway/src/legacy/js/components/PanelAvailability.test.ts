@@ -46,11 +46,26 @@ describe('legacy availability panel', () => {
   it('keeps the most severe runtime status when a channel appears in multiple pools', () => {
     const runtime = new PanelAvailability()._runtimeStatusByChannel({
       chains: [
-        { levels: [{ keys: [{ keyId: 'ch-1', status: 'COOLDOWN' }] }] },
-        { levels: [{ keys: [{ keyId: 'ch-1', status: 'HEALTHY' }] }] },
+        { chainId: 'critical', levels: [{ keys: [{ keyId: 'ch-1', status: 'COOLDOWN' }] }] },
+        { chainId: 'healthy', levels: [{ keys: [{ keyId: 'ch-1', status: 'HEALTHY' }] }] },
       ],
     });
 
     expect(runtime.get('ch-1')?.status).toBe('COOLDOWN');
+    expect(runtime.get('ch-1')?.chainId).toBe('critical');
+  });
+
+  it('offers a reset action when runtime disabled the channel', () => {
+    const action = new PanelAvailability()._recoveryAction(
+      { enabled: true, channelId: 'ch-1' },
+      { status: 'DISABLED', chainId: 'group-a' }
+    );
+
+    expect(action).toEqual({
+      visible: true,
+      label: 'Unseal',
+      channelId: 'ch-1',
+      chainId: 'group-a',
+    });
   });
 });

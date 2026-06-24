@@ -643,7 +643,7 @@ class AIRelayPlugin : StandardKeelPlugin {
                     doc = OpenApiDoc(summary = "List configured provider channels", tags = listOf("ai-gateway", "airelay", "admin"))
                 ) {
                     val repo = channelRepository ?: throw PluginApiException(503, "Channel store unavailable")
-                    PluginResult(body = ChannelListResponse(repo.listChannels()))
+                    PluginResult(body = ChannelListResponse(enrichChannels(repo.listChannels())))
                 }
                 post<DiscoverModelsRequest, DiscoverModelsResponse>(
                     "/discover-models",
@@ -670,7 +670,7 @@ class AIRelayPlugin : StandardKeelPlugin {
                     validateChannel(request)
                     val created = repo.createChannel(request)
                     configService?.reload()
-                    PluginResult(body = created)
+                    PluginResult(body = enrichChannel(created))
                 }
                 put<UpsertChannelRequest, ChannelView>(
                     "/{channelId}",
@@ -681,7 +681,8 @@ class AIRelayPlugin : StandardKeelPlugin {
                     validateChannel(request)
                     val updated = repo.updateChannel(channelId, request) ?: throw PluginApiException(404, "Channel not found")
                     configService?.reload()
-                    PluginResult(body = updated)
+                    configService?.resetChannelRuntimeState(channelId)
+                    PluginResult(body = enrichChannel(updated))
                 }
                 delete<DeleteChannelResponse>(
                     "/{channelId}",
@@ -703,7 +704,16 @@ class AIRelayPlugin : StandardKeelPlugin {
                         ?: throw PluginApiException(400, "enabled must be true or false")
                     if (!repo.setEnabled(channelId, enabled)) throw PluginApiException(404, "Channel not found")
                     configService?.reload()
+                    if (enabled) configService?.resetChannelRuntimeState(channelId)
                     PluginResult(body = ToggleChannelResponse(channelId, enabled))
+                }
+                post<PoolResetResponse>(
+                    "/{channelId}/reset",
+                    doc = OpenApiDoc(summary = "Reset runtime state for one channel across all groups", tags = listOf("ai-gateway", "airelay", "admin"), errorStatuses = setOf(404))
+                ) {
+                    val channelId = pathParameters["channelId"] ?: throw PluginApiException(400, "Missing channelId")
+                    if (!resetChannelRuntimeState(channelId)) throw PluginApiException(404, "Channel not found")
+                    PluginResult(body = PoolResetResponse("Channel reset"))
                 }
                 post<ChannelTestResponse>(
                     "/{channelId}/test",
@@ -715,6 +725,7 @@ class AIRelayPlugin : StandardKeelPlugin {
                     val channel = repo.getChannel(channelId) ?: throw PluginApiException(404, "Channel not found")
                     val result = testChannel(channel)
                     repo.recordTestResult(channelId, result.latencyMs, result.error)
+                    if (result.ok) configService?.resetChannelRuntimeState(channelId)
                     PluginResult(body = result)
                 }
                 post<DiscoverModelsResponse>(
@@ -748,7 +759,7 @@ class AIRelayPlugin : StandardKeelPlugin {
                         enabled = request.enabled
                     ) ?: throw PluginApiException(404, "Channel not found")
                     configService?.reload()
-                    PluginResult(body = updated)
+                    PluginResult(body = enrichChannel(updated))
                 }
                 delete<ChannelView>(
                     "/{channelId}/memberships/{groupId}",
@@ -759,7 +770,7 @@ class AIRelayPlugin : StandardKeelPlugin {
                     val groupId = pathParameters["groupId"] ?: throw PluginApiException(400, "Missing groupId")
                     val updated = repo.detachChannelFromGroup(channelId, groupId) ?: throw PluginApiException(404, "Channel not found")
                     configService?.reload()
-                    PluginResult(body = updated)
+                    PluginResult(body = enrichChannel(updated))
                 }
                 post<ChannelModelTestRequest, ChannelTestResponse>(
                     "/{channelId}/test-model",
@@ -779,6 +790,7 @@ class AIRelayPlugin : StandardKeelPlugin {
                         apiKeyEnv = channel.apiKeyEnv,
                         model = upstreamModel
                     )
+                    if (result.ok) configService?.resetChannelRuntimeState(channelId)
                     PluginResult(body = ChannelTestResponse(result.ok, result.latencyMs, result.error, result.sample))
                 }
                 get<ChannelStatsResponse>(
@@ -862,6 +874,51 @@ class AIRelayPlugin : StandardKeelPlugin {
         if (request.groupId.isBlank()) throw PluginApiException(400, "groupId is required")
         runCatching { WireProtocol.valueOf(request.protocol) }
             .getOrElse { throw PluginApiException(400, "protocol must be one of ${WireProtocol.entries.joinToString()}") }
+    }
+
+    private fun enrichChannels(channels: List<ChannelView>): List<ChannelView> {
+        val runtimeStatuses = runtimeStatusByChannel()
+        return channels.map { enrichChannel(it, runtimeStatuses) }
+    }
+
+    private fun enrichChannel(channel: ChannelView, runtimeStatuses: Map<String, com.keel.contract.ai.PoolKeyHealth> = runtimeStatusByChannel()): ChannelView {
+        val runtime = runtimeStatuses[channel.channelId] ?: return channel
+        return channel.copy(status = runtime.status)
+    }
+
+    private fun runtimeStatusByChannel(): Map<String, com.keel.contract.ai.PoolKeyHealth> {
+        val statuses = linkedMapOf<String, com.keel.contract.ai.PoolKeyHealth>()
+        activeManager().snapshot().chains.forEach { chain ->
+            chain.levels.forEach { level ->
+                level.keys.forEach { key ->
+                    val current = statuses[key.keyId]
+                    if (current == null || statusRank(key.status) > statusRank(current.status)) {
+                        statuses[key.keyId] = key
+                    }
+                }
+            }
+        }
+        return statuses
+    }
+
+    private fun statusRank(status: String?): Int = when (status?.uppercase()) {
+        "HEALTHY" -> 0
+        "DEGRADED" -> 1
+        "COOLDOWN" -> 2
+        "DISABLED" -> 3
+        else -> 1
+    }
+
+    private fun resetChannelRuntimeState(channelId: String): Boolean {
+        val manager = activeManager()
+        val chainIds = manager.snapshot().chains
+            .filter { chain -> chain.levels.any { level -> level.keys.any { key -> key.keyId == channelId } } }
+            .map { it.chainId }
+        var reset = false
+        chainIds.forEach { chainId ->
+            reset = manager.reset(chainId, channelId) || reset
+        }
+        return reset
     }
 
     /** Fire one tiny live request through the channel and report status/latency. */

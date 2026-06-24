@@ -275,6 +275,7 @@ export class PanelGroups extends KeelElement {
         if (!channel.enabled) return '<span class="status bad">Disabled</span>';
         if (channel.status === 'HEALTHY') return '<span class="status ok">Healthy</span>';
         if (channel.status === 'DEGRADED') return '<span class="status warn">Degraded</span>';
+        if (channel.status === 'COOLDOWN') return '<span class="status warn">Cooldown</span>';
         return `<span class="status bad">${escapeHtml(channel.status || 'Unknown')}</span>`;
     }
 

@@ -135,6 +135,7 @@ export class PanelPricing extends KeelElement {
         if (!table) { table = document.createElement('keel-data-table'); this.refs.tableWrap.innerHTML = ''; this.refs.tableWrap.appendChild(table); }
         table.render({ silent, headers, rows, emptyHtml: '<div class="empty">// NO PRICING</div>' });
         const actionRoot = table.shadowRoot || table;
+        actionRoot.classList.style.display = 'flex'; // Not wrap allowed
         actionRoot.querySelectorAll('[data-edit]').forEach(b => b.addEventListener('click', () => this._openModal(b.dataset.edit)));
         actionRoot.querySelectorAll('[data-del]').forEach(b => b.addEventListener('click', () => this._delete(b.dataset.del)));
     }

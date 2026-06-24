@@ -19,6 +19,7 @@ import io.ktor.client.request.get
 import io.ktor.client.request.prepareGet
 import io.ktor.client.request.header
 import io.ktor.client.request.post
+import io.ktor.client.request.put
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.bodyAsChannel
 import io.ktor.client.statement.bodyAsText
@@ -661,6 +662,161 @@ class AiGatewayPluginIntegrationTest {
 
         assertEquals(HttpStatusCode.Unauthorized, response.status)
         assertTrue(response.bodyAsText().contains("invalid upstream credential"))
+    }
+
+    @Test
+    fun updatingAChannelClearsDisabledRuntimeState() = setupApp {
+        val groupResponse = client.post("/api/plugins/airelay/admin/groups") {
+            contentType(ContentType.Application.Json)
+            setBody("""{"groupId":"recoverable","name":"Recoverable","enabled":true}""")
+        }
+        assertEquals(HttpStatusCode.OK, groupResponse.status, groupResponse.bodyAsText())
+
+        val channelResponse = client.post("/api/plugins/airelay/admin/channels") {
+            contentType(ContentType.Application.Json)
+            setBody(
+                """
+                {
+                  "name":"Recoverable Channel",
+                  "protocol":"OPENAI_CHAT",
+                  "baseUrl":"mock://recoverable-openai",
+                  "apiKey":"mock-key",
+                  "groupId":"recoverable",
+                  "priority":100,
+                  "weight":100,
+                  "maxConcurrency":10,
+                  "timeoutMs":30000,
+                  "models":[
+                    {"publicModelName":"gpt-4o-mini","upstreamModelName":"gpt-4o-mini","enabled":true}
+                  ]
+                }
+                """.trimIndent()
+            )
+        }
+        assertEquals(HttpStatusCode.OK, channelResponse.status, channelResponse.bodyAsText())
+        val channelId = json.parseToJsonElement(channelResponse.bodyAsText()).jsonObject["channelId"]!!.jsonPrimitive.content
+
+        val routedKeyResponse = client.post("/api/plugins/token/v1/keys") {
+            header("Authorization", "Bearer $accessToken")
+            contentType(ContentType.Application.Json)
+            setBody("""{"displayName":"Recoverable key","groupId":"recoverable","maxBudgetUsd":100}""")
+        }
+        assertEquals(HttpStatusCode.OK, routedKeyResponse.status, routedKeyResponse.bodyAsText())
+        val routedRawKey = json.parseToJsonElement(routedKeyResponse.bodyAsText()).jsonObject["rawKey"]!!.jsonPrimitive.content
+
+        relayPlugin.upstreamClient.failKey(channelId, MockFailure.Http(401, "invalid upstream credential"))
+
+        val failed = client.post("/api/plugins/airelay/v1/chat/completions") {
+            header("Authorization", "Bearer $routedRawKey")
+            contentType(ContentType.Application.Json)
+            setBody("""{"model":"gpt-4o-mini","messages":[{"role":"user","content":"Hello"}]}""")
+        }
+        assertEquals(HttpStatusCode.Unauthorized, failed.status)
+
+        relayPlugin.upstreamClient.clearFailures()
+
+        val update = client.put("/api/plugins/airelay/admin/channels/$channelId") {
+            contentType(ContentType.Application.Json)
+            setBody(
+                """
+                {
+                  "name":"Recoverable Channel",
+                  "protocol":"OPENAI_CHAT",
+                  "baseUrl":"mock://recoverable-openai",
+                  "apiKey":"",
+                  "enabled":true,
+                  "priority":100,
+                  "weight":100,
+                  "maxConcurrency":10,
+                  "timeoutMs":30000,
+                  "groupId":"recoverable",
+                  "models":[
+                    {"publicModelName":"gpt-4o-mini","upstreamModelName":"gpt-4o-mini","enabled":true}
+                  ]
+                }
+                """.trimIndent()
+            )
+        }
+        assertEquals(HttpStatusCode.OK, update.status, update.bodyAsText())
+
+        val recovered = client.post("/api/plugins/airelay/v1/chat/completions") {
+            header("Authorization", "Bearer $routedRawKey")
+            contentType(ContentType.Application.Json)
+            setBody("""{"model":"gpt-4o-mini","messages":[{"role":"user","content":"Hello again"}]}""")
+        }
+        assertEquals(HttpStatusCode.OK, recovered.status, recovered.bodyAsText())
+    }
+
+    @Test
+    fun adminChannelListReflectsRuntimeStatusAndSupportsResetByChannelId() = setupApp {
+        val groupResponse = client.post("/api/plugins/airelay/admin/groups") {
+            contentType(ContentType.Application.Json)
+            setBody("""{"groupId":"status-sync","name":"Status Sync","enabled":true}""")
+        }
+        assertEquals(HttpStatusCode.OK, groupResponse.status, groupResponse.bodyAsText())
+
+        val channelResponse = client.post("/api/plugins/airelay/admin/channels") {
+            contentType(ContentType.Application.Json)
+            setBody(
+                """
+                {
+                  "name":"Status Sync Channel",
+                  "protocol":"OPENAI_CHAT",
+                  "baseUrl":"mock://status-sync-openai",
+                  "apiKey":"mock-key",
+                  "groupId":"status-sync",
+                  "priority":100,
+                  "weight":100,
+                  "maxConcurrency":10,
+                  "timeoutMs":30000,
+                  "models":[
+                    {"publicModelName":"gpt-4o-mini","upstreamModelName":"gpt-4o-mini","enabled":true}
+                  ]
+                }
+                """.trimIndent()
+            )
+        }
+        assertEquals(HttpStatusCode.OK, channelResponse.status, channelResponse.bodyAsText())
+        val channelId = json.parseToJsonElement(channelResponse.bodyAsText()).jsonObject["channelId"]!!.jsonPrimitive.content
+
+        val routedKeyResponse = client.post("/api/plugins/token/v1/keys") {
+            header("Authorization", "Bearer $accessToken")
+            contentType(ContentType.Application.Json)
+            setBody("""{"displayName":"Status sync key","groupId":"status-sync","maxBudgetUsd":100}""")
+        }
+        assertEquals(HttpStatusCode.OK, routedKeyResponse.status, routedKeyResponse.bodyAsText())
+        val routedRawKey = json.parseToJsonElement(routedKeyResponse.bodyAsText()).jsonObject["rawKey"]!!.jsonPrimitive.content
+
+        relayPlugin.upstreamClient.failKey(channelId, MockFailure.Http(401, "invalid upstream credential"))
+
+        val failed = client.post("/api/plugins/airelay/v1/chat/completions") {
+            header("Authorization", "Bearer $routedRawKey")
+            contentType(ContentType.Application.Json)
+            setBody("""{"model":"gpt-4o-mini","messages":[{"role":"user","content":"Hello"}]}""")
+        }
+        assertEquals(HttpStatusCode.Unauthorized, failed.status)
+
+        val listed = client.get("/api/plugins/airelay/admin/channels")
+        assertEquals(HttpStatusCode.OK, listed.status, listed.bodyAsText())
+        val listedChannel = json.parseToJsonElement(listed.bodyAsText()).jsonObject["channels"]!!.jsonArray
+            .map { it.jsonObject }
+            .first { it["channelId"]!!.jsonPrimitive.content == channelId }
+        assertEquals("DISABLED", listedChannel["status"]!!.jsonPrimitive.content)
+
+        relayPlugin.upstreamClient.clearFailures()
+
+        val reset = client.post("/api/plugins/airelay/admin/channels/$channelId/reset") {
+            contentType(ContentType.Application.Json)
+            setBody("{}")
+        }
+        assertEquals(HttpStatusCode.OK, reset.status, reset.bodyAsText())
+
+        val relisted = client.get("/api/plugins/airelay/admin/channels")
+        assertEquals(HttpStatusCode.OK, relisted.status, relisted.bodyAsText())
+        val relistedChannel = json.parseToJsonElement(relisted.bodyAsText()).jsonObject["channels"]!!.jsonArray
+            .map { it.jsonObject }
+            .first { it["channelId"]!!.jsonPrimitive.content == channelId }
+        assertEquals("HEALTHY", relistedChannel["status"]!!.jsonPrimitive.content)
     }
 
     @Test

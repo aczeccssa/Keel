@@ -1,5 +1,5 @@
 import { KeelElement } from './base/KeelElement.js';
-import { requestJson } from '../api.js';
+import { postJson, requestJson } from '../api.js';
 import { API } from '../config.js';
 import { escapeHtml } from '../utils.js';
 
@@ -223,6 +223,24 @@ export class PanelAvailability extends KeelElement {
                     text-transform:uppercase;
                     letter-spacing:.16em;
                 }
+                .recovery-row {
+                    display:flex;
+                    justify-content:flex-end;
+                }
+                .recover-btn {
+                    padding:8px 12px;
+                    border:2px solid var(--red);
+                    background:var(--red-soft);
+                    color:var(--red);
+                    font-family:var(--font-mono);
+                    font-size:10px;
+                    font-weight:800;
+                    letter-spacing:.08em;
+                    text-transform:uppercase;
+                    cursor:pointer;
+                }
+                .recover-btn:hover { background:var(--red); color:var(--on-accent); }
+                .recover-btn[hidden] { display:none; }
                 .empty {
                     background:var(--panel-strong);
                     border:2px solid var(--ink);
@@ -254,6 +272,7 @@ export class PanelAvailability extends KeelElement {
         this._layoutKey = '';
         this._heroCount = null;
         this.refs.hero.render({ label: 'Reliability', title: 'Availability', metaHtml: '' });
+        this.refs.grid.addEventListener('click', (event) => this._handleGridAction(event));
     }
 
     async refresh() {
@@ -340,6 +359,10 @@ export class PanelAvailability extends KeelElement {
                         <div class="spark" data-field="spark"></div>
                         <div class="spark-foot"><span>Past</span><span>Now</span></div>
                     </div>
+
+                    <div class="recovery-row">
+                        <button class="recover-btn" data-field="recoverBtn" data-action="recover" hidden></button>
+                    </div>
                 </div>
             </div>
         `;
@@ -367,6 +390,14 @@ export class PanelAvailability extends KeelElement {
         this._setHidden(field('extraModels'), !state.extraModels);
         this._setText(field('sparkCount'), state.sparkCountLabel);
         this._setHtml(field('spark'), state.sparkHtml);
+        const recoverBtn = field('recoverBtn');
+        const recovery = this._recoveryAction(c, runtime);
+        if (recoverBtn) {
+            this._setText(recoverBtn, recovery.label);
+            this._setHidden(recoverBtn, !recovery.visible);
+            recoverBtn.dataset.channelId = recovery.channelId || '';
+            recoverBtn.dataset.chainId = recovery.chainId || '';
+        }
     }
 
     _cardState(c, stats, runtime = null) {
@@ -411,12 +442,25 @@ export class PanelAvailability extends KeelElement {
                     if (!key.keyId) return;
                     const current = map.get(key.keyId);
                     if (!current || this._statusRank(key.status) > this._statusRank(current.status)) {
-                        map.set(key.keyId, key);
+                        map.set(key.keyId, { ...key, chainId: chain.chainId });
                     }
                 });
             });
         });
         return map;
+    }
+
+    _recoveryAction(channel, runtime = null) {
+        if (channel?.enabled === false) return { visible: false, label: '', channelId: '', chainId: '' };
+        if (String(runtime?.status || '').toUpperCase() !== 'DISABLED') {
+            return { visible: false, label: '', channelId: '', chainId: '' };
+        }
+        return {
+            visible: true,
+            label: 'Unseal',
+            channelId: channel?.channelId || '',
+            chainId: runtime?.chainId || '',
+        };
     }
 
     _statusRank(status) {
@@ -471,6 +515,21 @@ export class PanelAvailability extends KeelElement {
 
     _channelKey(channel, index) {
         return channel.channelId || channel.name || `channel-${index}`;
+    }
+
+    async _handleGridAction(event) {
+        const button = event.target.closest('[data-action="recover"]');
+        if (!button || !button.dataset.channelId) return;
+        button.disabled = true;
+        const previousLabel = button.textContent;
+        button.textContent = 'Resetting';
+        try {
+            await postJson(`${API.airelay}/admin/channels/${button.dataset.channelId}/reset`, {});
+            await this.refresh();
+        } finally {
+            button.disabled = false;
+            button.textContent = previousLabel;
+        }
     }
 
     _setText(el, value) {

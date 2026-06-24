@@ -100,6 +100,23 @@ class ConfigService(
         pricingRef.set(pricing)
     }
 
+    /**
+     * Operators can recover a previously bad credential by updating the channel or
+     * re-testing it successfully. Clear the shared runtime state in those explicit
+     * recovery flows so the pool can admit the channel again without a manual reset.
+     */
+    fun resetChannelRuntimeState(channelId: String): Boolean {
+        val manager = managerRef.get()
+        val chainIds = chainsRef.get()
+            .filter { chain -> chain.levels.any { level -> level.keys.any { key -> key.keyId == channelId } } }
+            .map { it.chainId }
+        var reset = false
+        chainIds.forEach { chainId ->
+            reset = manager.reset(chainId, channelId) || reset
+        }
+        return reset
+    }
+
     private fun List<Pair<ChannelView, ChannelMembershipView>>.toGroupChain(group: GroupView): PoolChainConfig {
         val groupId = group.groupId
         val directModels = flatMap { (channel, _) -> channel.models.filter { it.enabled }.map { it.publicModelName } }

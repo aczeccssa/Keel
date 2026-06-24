@@ -12,6 +12,7 @@ const PROTOCOLS = [
 const STATUS_STYLE = {
     HEALTHY: { bg: 'var(--green-soft)', color: 'var(--green)', label: 'Healthy' },
     DEGRADED: { bg: 'var(--amber-soft)', color: 'var(--amber)', label: 'Degraded' },
+    COOLDOWN: { bg: 'var(--amber-soft)', color: 'var(--amber)', label: 'Cooldown' },
     DISABLED: { bg: 'var(--red-soft)', color: 'var(--red)', label: 'Disabled' },
 };
 
