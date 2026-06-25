@@ -52,6 +52,11 @@ class TokenRepository(
             exec("ALTER TABLE token_usage_records ADD COLUMN IF NOT EXISTS usage_source VARCHAR(16) NOT NULL DEFAULT 'PROVIDER'")
             exec("ALTER TABLE token_usage_records ALTER COLUMN error_code VARCHAR(128)")
             exec("ALTER TABLE token_usage_records ADD COLUMN IF NOT EXISTS error_detail CLOB")
+            exec("ALTER TABLE token_usage_records ADD COLUMN IF NOT EXISTS error_detail_json CLOB")
+            exec("ALTER TABLE token_usage_records ADD COLUMN IF NOT EXISTS route_trace_json CLOB")
+            exec("ALTER TABLE token_usage_records ADD COLUMN IF NOT EXISTS failure_scope VARCHAR(32)")
+            exec("ALTER TABLE token_usage_records ADD COLUMN IF NOT EXISTS failure_kind VARCHAR(32)")
+            exec("ALTER TABLE token_usage_records ADD COLUMN IF NOT EXISTS selected_channel_id VARCHAR(64)")
         }
     }
 
@@ -274,6 +279,7 @@ class TokenRepository(
                 it[poolLevelId] = record.poolLevelId
                 it[routingGroupId] = record.routingGroupId
                 it[upstreamKeyId] = record.upstreamKeyId
+                it[selectedChannelId] = record.selectedChannelId
                 it[promptTokens] = record.usage.promptTokens
                 it[completionTokens] = record.usage.completionTokens
                 it[cacheCreationInputTokens] = record.usage.cacheCreationInputTokens
@@ -293,6 +299,10 @@ class TokenRepository(
                 it[usageSource] = record.usageSource.name
                 it[errorCode] = record.errorCode?.take(128)
                 it[errorDetail] = record.errorDetail?.take(4_000)
+                it[errorDetailJson] = record.errorDetailJson?.take(12_000)
+                it[routeTraceJson] = record.routeTraceJson?.take(12_000)
+                it[failureScope] = record.failureScope?.take(32)
+                it[failureKind] = record.failureKind?.take(32)
                 it[streamed] = record.streamed
                 it[failoverCount] = record.failoverCount
                 it[createdAt] = now
@@ -518,11 +528,16 @@ class TokenRepository(
         outcome = this[UsageRecordsTable.outcome],
         errorCode = this[UsageRecordsTable.errorCode],
         errorDetail = this[UsageRecordsTable.errorDetail],
+        errorDetailJson = this[UsageRecordsTable.errorDetailJson],
+        routeTraceJson = this[UsageRecordsTable.routeTraceJson],
+        failureScope = this[UsageRecordsTable.failureScope],
+        failureKind = this[UsageRecordsTable.failureKind],
         usageSource = this[UsageRecordsTable.usageSource],
         upstreamKeyId = this[UsageRecordsTable.upstreamKeyId],
+        selectedChannelId = this[UsageRecordsTable.selectedChannelId],
         poolLevelId = this[UsageRecordsTable.poolLevelId],
         routingGroupId = this[UsageRecordsTable.routingGroupId],
-        channelId = this[UsageRecordsTable.upstreamKeyId],
+        channelId = this[UsageRecordsTable.selectedChannelId] ?: this[UsageRecordsTable.upstreamKeyId],
         streamed = this[UsageRecordsTable.streamed],
         failoverCount = this[UsageRecordsTable.failoverCount],
         usage = usage(),
@@ -538,8 +553,8 @@ class TokenRepository(
         keyId = this[UsageRecordsTable.keyId],
         groupId = this[UsageRecordsTable.poolLevelId],
         routingGroupId = this[UsageRecordsTable.routingGroupId],
-        channelId = this[UsageRecordsTable.upstreamKeyId],
-        channelName = null, // Enriched by controller if needed
+        channelId = this[UsageRecordsTable.selectedChannelId] ?: this[UsageRecordsTable.upstreamKeyId],
+        channelName = null,
         model = this[UsageRecordsTable.model],
         provider = this[UsageRecordsTable.provider],
         status = this[UsageRecordsTable.status],
@@ -547,6 +562,11 @@ class TokenRepository(
         outcome = this[UsageRecordsTable.outcome],
         errorCode = this[UsageRecordsTable.errorCode],
         errorDetail = this[UsageRecordsTable.errorDetail],
+        errorDetailJson = this[UsageRecordsTable.errorDetailJson],
+        routeTraceJson = this[UsageRecordsTable.routeTraceJson],
+        failureScope = this[UsageRecordsTable.failureScope],
+        failureKind = this[UsageRecordsTable.failureKind],
+        selectedChannelId = this[UsageRecordsTable.selectedChannelId],
         upstreamKeyId = this[UsageRecordsTable.upstreamKeyId],
         poolLevelId = this[UsageRecordsTable.poolLevelId],
         streamed = this[UsageRecordsTable.streamed],

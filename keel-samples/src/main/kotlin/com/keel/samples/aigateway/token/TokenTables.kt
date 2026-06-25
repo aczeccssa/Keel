@@ -46,6 +46,9 @@ object UsageRecordsTable : AuditPluginTable("token", "usage_records") {
     val poolLevelId: Column<String?> = varchar("pool_level_id", 64).nullable()
     val routingGroupId: Column<String?> = varchar("routing_group_id", 64).nullable()
     val upstreamKeyId: Column<String?> = varchar("upstream_key_id", 64).nullable()
+    val selectedChannelId: Column<String?> = varchar("selected_channel_id", 64).nullable()
+    val failureScope: Column<String?> = varchar("failure_scope", 32).nullable()
+    val failureKind: Column<String?> = varchar("failure_kind", 32).nullable()
     val promptTokens: Column<Int> = integer("prompt_tokens")
     val completionTokens: Column<Int> = integer("completion_tokens")
     val cacheCreationInputTokens: Column<Int> = integer("cache_creation_input_tokens").default(0)
@@ -65,6 +68,8 @@ object UsageRecordsTable : AuditPluginTable("token", "usage_records") {
     val usageSource: Column<String> = varchar("usage_source", 16).default("PROVIDER")
     val errorCode: Column<String?> = varchar("error_code", 128).nullable()
     val errorDetail: Column<String?> = text("error_detail").nullable()
+    val errorDetailJson: Column<String?> = text("error_detail_json").nullable()
+    val routeTraceJson: Column<String?> = text("route_trace_json").nullable()
     val streamed: Column<Boolean> = bool("streamed")
     val failoverCount: Column<Int> = integer("failover_count")
 

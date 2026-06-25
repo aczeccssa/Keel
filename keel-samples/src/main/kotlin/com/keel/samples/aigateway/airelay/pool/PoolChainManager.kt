@@ -22,8 +22,17 @@ import java.util.concurrent.atomic.AtomicLong
 import kotlin.math.max
 
 const val DEFAULT_ROUTING_GROUP_ID: String = "default"
+private const val TRANSIENT_HTTP_FAILURES_BEFORE_COOLDOWN = 3
+private const val TRANSIENT_TRANSPORT_FAILURES_BEFORE_COOLDOWN = 2
+private const val TRANSIENT_HTTP_COOLDOWN_MS = 5_000L
+private const val TRANSIENT_TRANSPORT_COOLDOWN_MS = 3_000L
+private const val HALF_OPEN_SUCCESSES_BEFORE_CLOSE = 2
+private const val HALF_OPEN_PROBE_CONCURRENCY = 1
 
 enum class KeyStatus { HEALTHY, COOLDOWN, DEGRADED, DISABLED }
+enum class BreakerState { CLOSED, OPEN, HALF_OPEN }
+enum class FailureScope { CHANNEL_GLOBAL, CHANNEL_MODEL }
+enum class FailureKind { AUTH, RATE_LIMIT, SERVER_5XX, TIMEOUT, NETWORK, CLIENT, UNKNOWN }
 
 data class UpstreamKeyState(
     val chain: PoolChainConfig,
@@ -38,7 +47,12 @@ data class UpstreamKeyState(
 ) {
     @Volatile private var localCooldownUntilEpochMs: Long = 0L
     @Volatile private var localLastError: String? = null
+    @Volatile private var localLastStatus: Int? = null
     @Volatile private var localLastSelectedAt: Long? = null
+    @Volatile private var localLastAttemptAtEpochMs: Long? = null
+    @Volatile private var localLastSuccessAtEpochMs: Long? = null
+    @Volatile private var localFailureScope: FailureScope? = null
+    @Volatile private var localFailureKind: FailureKind? = null
 
     var cooldownUntilEpochMs: Long
         get() = sharedState?.cooldownUntilEpochMs ?: localCooldownUntilEpochMs
@@ -52,10 +66,40 @@ data class UpstreamKeyState(
             if (sharedState != null) sharedState.lastError = value else localLastError = value
         }
 
+    var lastStatus: Int?
+        get() = sharedState?.lastStatus ?: localLastStatus
+        set(value) {
+            if (sharedState != null) sharedState.lastStatus = value else localLastStatus = value
+        }
+
     var lastSelectedAt: Long?
         get() = sharedState?.lastSelectedAt ?: localLastSelectedAt
         set(value) {
             if (sharedState != null) sharedState.lastSelectedAt = value else localLastSelectedAt = value
+        }
+
+    var lastAttemptAtEpochMs: Long?
+        get() = sharedState?.lastAttemptAtEpochMs ?: localLastAttemptAtEpochMs
+        set(value) {
+            if (sharedState != null) sharedState.lastAttemptAtEpochMs = value else localLastAttemptAtEpochMs = value
+        }
+
+    var lastSuccessAtEpochMs: Long?
+        get() = sharedState?.lastSuccessAtEpochMs ?: localLastSuccessAtEpochMs
+        set(value) {
+            if (sharedState != null) sharedState.lastSuccessAtEpochMs = value else localLastSuccessAtEpochMs = value
+        }
+
+    var failureScope: FailureScope?
+        get() = sharedState?.failureScope ?: localFailureScope
+        set(value) {
+            if (sharedState != null) sharedState.failureScope = value else localFailureScope = value
+        }
+
+    var failureKind: FailureKind?
+        get() = sharedState?.failureKind ?: localFailureKind
+        set(value) {
+            if (sharedState != null) sharedState.failureKind = value else localFailureKind = value
         }
 }
 
@@ -72,6 +116,7 @@ data class PoolSelection(
     val level: PoolLevelConfig,
     val provider: UpstreamProviderConfig,
     val keyState: UpstreamKeyState,
+    val routeModelKey: String,
     val resolvedModel: String,
     val upstreamModel: String,
     val requestedModel: String,
@@ -99,12 +144,13 @@ private data class PoolCandidate(
 
 class PoolChainManager(
     chains: List<PoolChainConfig>,
-    private val runtimeRegistry: PoolRuntimeRegistry = PoolRuntimeRegistry(),
+    internal val runtimeRegistry: PoolRuntimeRegistry = PoolRuntimeRegistry(),
 ) : PoolChainSnapshotProvider {
     private val allChains = chains
     private val chainByGroup = chains.associateBy { it.chainId }.toMutableMap().apply {
         if (DEFAULT_ROUTING_GROUP_ID !in this) {
             this["default-chain"]?.let { put(DEFAULT_ROUTING_GROUP_ID, it) }
+                ?: chains.singleOrNull()?.let { put(DEFAULT_ROUTING_GROUP_ID, it) }
         }
     }
     private val states = chains.associateWith { chain ->
@@ -174,26 +220,38 @@ class PoolChainManager(
             }
             keyStates.forEach { state ->
                 val target = poolCandidates.firstOrNull { it.keyState.key.keyId == state.key.keyId }?.target
-                val effectiveStatus = effectiveStatus(state, state.key.maxConcurrency, now)
                 val provider = providerFor(level, state.key)
+                val routeModelKey = target?.model ?: route.targets.firstOrNull()?.model.orEmpty()
+                val routeState = runtimeRegistry.routeSnapshot(state.key.keyId, routeModelKey)
+                val effectiveStatus = routeEffectiveStatus(state, routeModelKey, state.key.maxConcurrency, now)
                 val base = PoolExplainCandidateView(
                     channelId = state.key.keyId,
                     channelName = provider.providerId,
                     priority = priorityForLevel(level),
                     weight = state.key.weight,
                     effectiveStatus = effectiveStatus,
+                    breakerState = routeState.breakerState.name,
+                    failureScope = routeState.failureScope?.name,
+                    failureKind = routeState.failureKind?.name,
                     currentConcurrency = state.currentConcurrency.get(),
                     maxConcurrency = state.key.maxConcurrency,
-                    score = ordered.firstOrNull { it.keyState.key.keyId == state.key.keyId }?.let {
+                    score = ordered.firstOrNull { it.keyState.key.keyId == state.key.keyId && it.target.model == routeModelKey }?.let {
                         scoreCandidate(route, level, ordered.map { candidate -> candidate.keyState }, state)
                     },
-                    targetModel = target?.model ?: route.targets.firstOrNull()?.model.orEmpty(),
+                    probeEligible = routeState.breakerState == BreakerState.HALF_OPEN,
+                    targetModel = routeModelKey,
                     resolvedModel = target?.let { resolvePublicModel(state.key, it.model) } ?: route.routedModel,
                     upstreamModel = target?.let {
                         resolveUpstreamModel(state.key, it.model, resolvePublicModel(state.key, it.model))
                     } ?: route.routedModel,
+                    cooldownUntilEpochMs = routeState.cooldownUntilEpochMs.takeIf { it > 0L },
+                    cooldownRemainingMs = routeState.cooldownUntilEpochMs.takeIf { it > now }?.minus(now),
+                    lastStatus = routeState.lastStatus,
+                    lastError = routeState.lastError,
+                    lastAttemptAtEpochMs = routeState.lastAttemptAtEpochMs,
+                    lastSuccessAtEpochMs = routeState.lastSuccessAtEpochMs,
                 )
-                if (state.status.get() == KeyStatus.HEALTHY && state.currentConcurrency.get() < state.key.maxConcurrency && target != null) {
+                if (target != null && effectiveStatus == KeyStatus.HEALTHY.name) {
                     eligible += base
                 } else {
                     ineligible += base.copy(reason = exclusionReason(state, target))
@@ -212,6 +270,7 @@ class PoolChainManager(
             routedModel = route.routedModel,
             routingPolicy = route.routingPolicy.name,
             selectedChannelId = selected,
+            result = if (selected != null) "SELECTED" else "EXHAUSTED",
             priorityTiers = tiers,
             requestTrace = runtimeRegistry.trace(traceId, route.chain.chainId, model),
         )
@@ -261,6 +320,7 @@ class PoolChainManager(
                     level = level,
                     provider = provider,
                     keyState = state,
+                    routeModelKey = chain.modelAliases.firstOrNull().orEmpty(),
                     resolvedModel = chain.modelAliases.firstOrNull().orEmpty(),
                     upstreamModel = chain.modelAliases.firstOrNull().orEmpty(),
                     requestedModel = chain.modelAliases.firstOrNull().orEmpty(),
@@ -270,10 +330,32 @@ class PoolChainManager(
     }
 
     fun markSuccess(selection: PoolSelection, latencyMs: Long = 0L) {
+        val routeState = runtimeRegistry.routeState(selection.keyState.key.keyId, selection.routeModelKey)
+        val now = System.currentTimeMillis()
         selection.keyState.consecutiveFailures.set(0)
         selection.keyState.lastError = null
-        if (selection.keyState.status.get() == KeyStatus.DEGRADED) {
+        selection.keyState.lastStatus = 200
+        selection.keyState.lastSuccessAtEpochMs = now
+        selection.keyState.failureScope = null
+        selection.keyState.failureKind = null
+        if (selection.keyState.status.get() != KeyStatus.DISABLED) {
             selection.keyState.status.set(KeyStatus.HEALTHY)
+            selection.keyState.cooldownUntilEpochMs = 0L
+        }
+        routeState.consecutiveTransientFailures.set(0)
+        routeState.lastError = null
+        routeState.lastStatus = 200
+        routeState.lastSuccessAtEpochMs = now
+        routeState.failureScope = null
+        routeState.failureKind = null
+        routeState.cooldownUntilEpochMs = 0L
+        if (routeState.breakerState.get() == BreakerState.HALF_OPEN) {
+            val successes = routeState.halfOpenSuccesses.incrementAndGet()
+            if (successes >= HALF_OPEN_SUCCESSES_BEFORE_CLOSE) {
+                closeRouteBreaker(routeState)
+            }
+        } else {
+            closeRouteBreaker(routeState)
         }
         runtimeRegistry.recordOutcome(selection, success = true, status = 200, reason = null, latencyMs = latencyMs)
         syncSharedState(selection.keyState)
@@ -287,33 +369,95 @@ class PoolChainManager(
         latencyMs: Long = 0L,
     ) {
         val state = selection.keyState
-        val previousStatus = state.status.get()
+        val routeState = runtimeRegistry.routeState(state.key.keyId, selection.routeModelKey)
+        val previousBreakerState = routeState.breakerState.get()
+        val now = System.currentTimeMillis()
         state.totalFailures.incrementAndGet()
-        val consecutiveFailures = state.consecutiveFailures.incrementAndGet()
+        state.consecutiveFailures.incrementAndGet()
         state.lastError = message ?: status?.toString()
-        when (status) {
-            401, 403 -> state.status.set(KeyStatus.DISABLED)
-            408, 429 -> {
-                state.status.set(KeyStatus.COOLDOWN)
-                state.cooldownUntilEpochMs = System.currentTimeMillis() +
-                    (retryAfterSeconds?.times(1000)
-                        ?: cooldownBackoffMs(30_000L, consecutiveFailures, selection.level.cooldownMs))
+        state.lastStatus = status
+        state.lastAttemptAtEpochMs = now
+
+        val failureKind = failureKindFor(status)
+        when (failureKind) {
+            FailureKind.AUTH -> {
+                state.status.set(KeyStatus.DISABLED)
+                state.cooldownUntilEpochMs = 0L
+                state.failureScope = FailureScope.CHANNEL_GLOBAL
+                state.failureKind = failureKind
+                routeState.failureScope = FailureScope.CHANNEL_GLOBAL
+                routeState.failureKind = failureKind
+                routeState.lastError = state.lastError
+                routeState.lastStatus = status
+                routeState.lastAttemptAtEpochMs = now
+                routeState.cooldownUntilEpochMs = 0L
+                routeState.breakerState.set(BreakerState.CLOSED)
             }
-            in 500..599, null -> {
-                state.status.set(KeyStatus.COOLDOWN)
-                val baseMs = if (status == null) 30_000L else 10_000L
-                state.cooldownUntilEpochMs = System.currentTimeMillis() + cooldownBackoffMs(baseMs, consecutiveFailures, selection.level.cooldownMs)
+            FailureKind.RATE_LIMIT -> {
+                val cooldown = retryAfterSeconds?.times(1000)
+                    ?: cooldownBackoffMs(30_000L, routeState.consecutiveTransientFailures.incrementAndGet(), selection.level.cooldownMs)
+                openRouteBreaker(routeState, cooldown, failureKind, message, status, now)
+                state.status.set(KeyStatus.HEALTHY)
+                state.cooldownUntilEpochMs = 0L
+                state.failureScope = FailureScope.CHANNEL_MODEL
+                state.failureKind = failureKind
             }
-            in 400..499 -> {
-                if (state.status.get() == KeyStatus.COOLDOWN && System.currentTimeMillis() >= state.cooldownUntilEpochMs) {
-                    state.status.set(KeyStatus.HEALTHY)
-                    state.cooldownUntilEpochMs = 0L
+            FailureKind.SERVER_5XX -> {
+                val failures = routeState.consecutiveTransientFailures.incrementAndGet()
+                if (failures >= TRANSIENT_HTTP_FAILURES_BEFORE_COOLDOWN) {
+                    openRouteBreaker(
+                        routeState,
+                        cooldownBackoffMs(
+                            TRANSIENT_HTTP_COOLDOWN_MS,
+                            failures - TRANSIENT_HTTP_FAILURES_BEFORE_COOLDOWN + 1,
+                            selection.level.cooldownMs,
+                        ),
+                        failureKind,
+                        message,
+                        status,
+                        now,
+                    )
+                } else {
+                    keepRouteClosed(routeState, failureKind, message, status, now)
                 }
+                state.status.set(KeyStatus.HEALTHY)
+                state.cooldownUntilEpochMs = 0L
+                state.failureScope = FailureScope.CHANNEL_MODEL
+                state.failureKind = failureKind
             }
-            else -> state.status.set(KeyStatus.DEGRADED)
+            FailureKind.TIMEOUT,
+            FailureKind.NETWORK,
+            FailureKind.UNKNOWN -> {
+                val failures = routeState.consecutiveTransientFailures.incrementAndGet()
+                if (failures >= TRANSIENT_TRANSPORT_FAILURES_BEFORE_COOLDOWN) {
+                    openRouteBreaker(
+                        routeState,
+                        cooldownBackoffMs(
+                            TRANSIENT_TRANSPORT_COOLDOWN_MS,
+                            failures - TRANSIENT_TRANSPORT_FAILURES_BEFORE_COOLDOWN + 1,
+                            selection.level.cooldownMs,
+                        ),
+                        failureKind,
+                        message,
+                        status,
+                        now,
+                    )
+                } else {
+                    keepRouteClosed(routeState, failureKind, message, status, now)
+                }
+                state.status.set(KeyStatus.HEALTHY)
+                state.cooldownUntilEpochMs = 0L
+                state.failureScope = FailureScope.CHANNEL_MODEL
+                state.failureKind = failureKind
+            }
+            FailureKind.CLIENT -> {
+                keepRouteClosed(routeState, failureKind, message, status, now)
+                state.failureScope = FailureScope.CHANNEL_MODEL
+                state.failureKind = failureKind
+            }
         }
-        if (state.status.get() == KeyStatus.COOLDOWN && previousStatus != KeyStatus.COOLDOWN) {
-            runtimeRegistry.channelState(state.key.keyId).cooldownCount.incrementAndGet()
+        if (routeState.breakerState.get() == BreakerState.OPEN && previousBreakerState != BreakerState.OPEN) {
+            routeState.cooldownCount.incrementAndGet()
         }
         runtimeRegistry.recordOutcome(selection, success = false, status = status, reason = message, latencyMs = latencyMs)
         syncSharedState(state)
@@ -324,17 +468,23 @@ class PoolChainManager(
     fun completeTrace(traceId: String, outcome: String) = runtimeRegistry.completeTrace(traceId, outcome)
 
     fun reset(chainId: String, keyId: String): Boolean {
-        val state = states.entries.firstOrNull { it.key.chainId == chainId }
-            ?.value
-            ?.values
-            ?.flatten()
-            ?.firstOrNull { it.key.keyId == keyId }
-            ?: return false
-        state.status.set(KeyStatus.HEALTHY)
-        state.consecutiveFailures.set(0)
-        state.cooldownUntilEpochMs = 0L
-        state.lastError = null
-        syncSharedState(state)
+        val chain = states.keys.firstOrNull { it.chainId == chainId } ?: return false
+        val keyStates = states.getValue(chain).values.flatten().filter { it.key.keyId == keyId }
+        if (keyStates.isEmpty()) return false
+        keyStates.forEach { state ->
+            state.status.set(KeyStatus.HEALTHY)
+            state.consecutiveFailures.set(0)
+            state.cooldownUntilEpochMs = 0L
+            state.lastError = null
+            state.lastStatus = null
+            state.failureScope = null
+            state.failureKind = null
+            syncSharedState(state)
+        }
+        chain.levels.flatMap { level -> level.keys.filter { it.keyId == keyId } }
+            .flatMap { key -> chain.modelAliases.mapNotNull { model -> model.takeIf { supportsTargetModel(key, it) } } }
+            .distinct()
+            .forEach { model -> runtimeRegistry.resetRouteState(keyId, model) }
         return true
     }
 
@@ -356,19 +506,30 @@ class PoolChainManager(
                             providerId = providerId.ifBlank { level.provider.providerId },
                             protocol = protocol.ifBlank { level.provider.protocol.name },
                             healthyKeys = keyStates.count { effectiveStatus(it, it.key.maxConcurrency, now) == "HEALTHY" },
-                            cooldownKeys = keyStates.count { it.status.get() == KeyStatus.COOLDOWN },
-                            degradedKeys = keyStates.count { it.status.get() == KeyStatus.DEGRADED },
+                            cooldownKeys = keyStates.count { effectiveStatus(it, it.key.maxConcurrency, now) == "COOLDOWN" },
+                            degradedKeys = keyStates.count { effectiveStatus(it, it.key.maxConcurrency, now) == "DEGRADED" },
                             disabledKeys = keyStates.count { effectiveStatus(it, it.key.maxConcurrency, now) == "SATURATED" || it.status.get() == KeyStatus.DISABLED },
                             keys = keyStates.map { state ->
+                                val routeModelKey = chain.modelAliases.firstOrNull { supportsTargetModel(state.key, it) } ?: chain.modelAliases.firstOrNull().orEmpty()
+                                val routeState = runtimeRegistry.routeSnapshot(state.key.keyId, routeModelKey)
+                                val status = routeEffectiveStatus(state, routeModelKey, state.key.maxConcurrency, now)
                                 PoolKeyHealth(
                                     keyId = state.key.keyId,
-                                    status = effectiveStatus(state, state.key.maxConcurrency, now),
+                                    status = status,
+                                    breakerState = routeState.breakerState.name,
+                                    failureScope = routeState.failureScope?.name,
+                                    failureKind = routeState.failureKind?.name,
                                     totalRequests = state.totalRequests.get(),
                                     totalFailures = state.totalFailures.get(),
                                     currentConcurrency = state.currentConcurrency.get(),
                                     maxConcurrency = state.key.maxConcurrency,
-                                    cooldownUntilEpochMs = state.cooldownUntilEpochMs.takeIf { it > 0L },
-                                    lastError = state.lastError
+                                    cooldownUntilEpochMs = routeState.cooldownUntilEpochMs.takeIf { it > 0L },
+                                    cooldownRemainingMs = routeState.cooldownUntilEpochMs.takeIf { it > now }?.minus(now),
+                                    lastStatus = routeState.lastStatus,
+                                    lastError = routeState.lastError,
+                                    lastAttemptAtEpochMs = routeState.lastAttemptAtEpochMs,
+                                    lastSuccessAtEpochMs = routeState.lastSuccessAtEpochMs,
+                                    probeEligible = routeState.breakerState == BreakerState.HALF_OPEN,
                                 )
                             }
                         )
@@ -441,7 +602,10 @@ class PoolChainManager(
             states.getValue(route.chain).entries.sortedBy { it.key.levelIndex }.flatMap { (level, keyStates) ->
                 keyStates.forEach { maybeRecover(it, now) }
                 val available = keyStates.filter {
-                    it.status.get() == KeyStatus.HEALTHY &&
+                    maybeRecoverRoute(it.key.keyId, target.model, now)
+                    val routeState = runtimeRegistry.routeSnapshot(it.key.keyId, target.model)
+                    it.status.get() != KeyStatus.DISABLED &&
+                        routeState.breakerState != BreakerState.OPEN &&
                         it.currentConcurrency.get() < it.key.maxConcurrency &&
                         (target.channelId == null || it.key.keyId == target.channelId) &&
                         supportsTargetModel(it.key, target.model)
@@ -453,6 +617,7 @@ class PoolChainManager(
                         level = level,
                         provider = providerFor(level, state.key),
                         keyState = state,
+                        routeModelKey = target.model,
                         resolvedModel = resolvedModel,
                         upstreamModel = resolveUpstreamModel(state.key, target.model, resolvedModel),
                         requestedModel = route.requestedModel,
@@ -476,6 +641,7 @@ class PoolChainManager(
                     level = level,
                     provider = providerFor(level, candidate.keyState.key),
                     keyState = candidate.keyState,
+                    routeModelKey = candidate.target.model,
                     resolvedModel = resolvedModel,
                     upstreamModel = resolveUpstreamModel(candidate.keyState.key, candidate.target.model, resolvedModel),
                     requestedModel = route.requestedModel,
@@ -490,6 +656,12 @@ class PoolChainManager(
     private fun acquireOrderedFailover(route: ResolvedRoute, excludedKeyIds: Set<String>, traceId: String?): PoolLease? {
         previewOrderedFailover(route).forEach { selection ->
             if (selection.keyState.key.keyId in excludedKeyIds) return@forEach
+            val routeState = runtimeRegistry.routeState(selection.keyState.key.keyId, selection.routeModelKey)
+            val isHalfOpen = routeState.breakerState.get() == BreakerState.HALF_OPEN
+            if (isHalfOpen && routeState.probeInFlight.incrementAndGet() > HALF_OPEN_PROBE_CONCURRENCY) {
+                routeState.probeInFlight.decrementAndGet()
+                return@forEach
+            }
             if (tryAcquire(selection.keyState)) {
                 val tracedSelection = selection.copy(
                     poolId = tierId(route, selection.level),
@@ -501,9 +673,11 @@ class PoolChainManager(
                 syncSharedState(selection.keyState)
                 return PoolLease(tracedSelection) {
                     selection.keyState.currentConcurrency.decrementAndGet()
+                    if (isHalfOpen) routeState.probeInFlight.decrementAndGet()
                     syncSharedState(selection.keyState)
                 }
             }
+            if (isHalfOpen) routeState.probeInFlight.decrementAndGet()
         }
         return null
     }
@@ -519,10 +693,7 @@ class PoolChainManager(
             val tierState = runtimeRegistry.tierState(tierId)
             var lease: PoolLease? = null
             tierState.withLock {
-                val active = candidates.filter {
-                    it.keyState.status.get() == KeyStatus.HEALTHY &&
-                        it.keyState.currentConcurrency.get() < it.keyState.key.maxConcurrency
-                }.toMutableList()
+                val active = orderPoolCandidates(route, level, candidates).toMutableList()
                 if (active.isEmpty()) return@withLock
                 while (active.isNotEmpty() && lease == null) {
                     val totalWeight = active.sumOf { max(it.keyState.key.weight, 1) }
@@ -532,11 +703,29 @@ class PoolChainManager(
                         val nextWeight = base + max(candidate.keyState.key.weight, 1)
                         val saturation = candidate.keyState.currentConcurrency.get().toDouble() /
                             max(candidate.keyState.key.maxConcurrency, 1).toDouble()
-                        ScoredCandidate(candidate, nextWeight - saturation * totalWeight, nextWeight)
+                        val routeState = runtimeRegistry.routeSnapshot(candidate.keyState.key.keyId, candidate.target.model)
+                        val breakerPenalty = when (routeState.breakerState) {
+                            BreakerState.CLOSED -> 0.0
+                            BreakerState.HALF_OPEN -> totalWeight.toDouble()
+                            BreakerState.OPEN -> totalWeight.toDouble() * 2
+                        }
+                        ScoredCandidate(candidate, nextWeight - saturation * totalWeight - breakerPenalty, nextWeight)
                     }
                     val selected = chooseScoredCandidate(scored, tierState.tieCursor.get())
-                    if (selected != null && tryAcquire(selected.candidate.keyState)) {
-                        val selectedKeyId = selected.candidate.keyState.key.keyId
+                    val candidate = selected?.candidate
+                    if (candidate == null) {
+                        active.clear()
+                        return@withLock
+                    }
+                    val routeState = runtimeRegistry.routeState(candidate.keyState.key.keyId, candidate.target.model)
+                    val isHalfOpen = routeState.breakerState.get() == BreakerState.HALF_OPEN
+                    if (isHalfOpen && routeState.probeInFlight.incrementAndGet() > HALF_OPEN_PROBE_CONCURRENCY) {
+                        routeState.probeInFlight.decrementAndGet()
+                        active.removeAll { it.keyState.key.keyId == candidate.keyState.key.keyId && it.target.model == candidate.target.model }
+                        return@withLock
+                    }
+                    if (tryAcquire(candidate.keyState)) {
+                        val selectedKeyId = candidate.keyState.key.keyId
                         scored.forEach { score ->
                             val keyId = score.candidate.keyState.key.keyId
                             tierState.currentWeights[keyId] = if (keyId == selectedKeyId) {
@@ -546,18 +735,19 @@ class PoolChainManager(
                             }
                         }
                         tierState.tieCursor.incrementAndGet()
-                        val keyState = selected.candidate.keyState
+                        val keyState = candidate.keyState
                         keyState.totalRequests.incrementAndGet()
                         keyState.lastSelectedAt = System.currentTimeMillis()
                         syncSharedState(keyState)
-                        val resolvedModel = resolvePublicModel(keyState.key, selected.candidate.target.model)
+                        val resolvedModel = resolvePublicModel(keyState.key, candidate.target.model)
                         val selection = PoolSelection(
                             chain = route.chain,
                             level = level,
                             provider = providerFor(level, keyState.key),
                             keyState = keyState,
+                            routeModelKey = candidate.target.model,
                             resolvedModel = resolvedModel,
-                            upstreamModel = resolveUpstreamModel(keyState.key, selected.candidate.target.model, resolvedModel),
+                            upstreamModel = resolveUpstreamModel(keyState.key, candidate.target.model, resolvedModel),
                             requestedModel = route.requestedModel,
                             routingPolicy = route.routingPolicy,
                             poolId = tierId,
@@ -568,10 +758,12 @@ class PoolChainManager(
                         )
                         lease = PoolLease(selection) {
                             keyState.currentConcurrency.decrementAndGet()
+                            if (isHalfOpen) routeState.probeInFlight.decrementAndGet()
                             syncSharedState(keyState)
                         }
                     } else {
-                        active.removeAll { it.keyState.key.keyId == selected?.candidate?.keyState?.key?.keyId }
+                        if (isHalfOpen) routeState.probeInFlight.decrementAndGet()
+                        active.removeAll { it.keyState.key.keyId == candidate.keyState.key.keyId && it.target.model == candidate.target.model }
                     }
                 }
             }
@@ -598,8 +790,10 @@ class PoolChainManager(
             val channels = candidates.map { candidate ->
                 val provider = providerFor(level, candidate.keyState.key)
                 val poolId = tierId(route, level)
+                val routeKey = PoolRuntimeRegistry.routeKey(candidate.keyState.key.keyId, candidate.target.model)
+                val routeState = runtimeRegistry.routeSnapshot(candidate.keyState.key.keyId, candidate.target.model)
                 val poolMetrics1m = runtimeRegistry.metrics(poolId, windowMs = 60_000L)
-                val channelMetrics1m = runtimeRegistry.metrics(poolId, candidate.keyState.key.keyId, 60_000L)
+                val channelMetrics1m = runtimeRegistry.metrics(poolId, routeKey, 60_000L)
                 val totalWeight = candidates.sumOf { max(it.keyState.key.weight, 1) }.toDouble()
                 val expectedShare = max(candidate.keyState.key.weight, 1).toDouble() / totalWeight
                 val trafficShare = if (poolMetrics1m.selectedRequests == 0L) 0.0 else {
@@ -608,7 +802,11 @@ class PoolChainManager(
                 PoolChannelRuntimeView(
                     channelId = candidate.keyState.key.keyId,
                     channelName = provider.providerId,
+                    routeModelKey = candidate.target.model,
                     effectiveStatus = effectiveStatus(candidate.keyState, candidate.keyState.key.maxConcurrency, now),
+                    breakerState = routeState.breakerState.name,
+                    failureScope = routeState.failureScope?.name,
+                    failureKind = routeState.failureKind?.name,
                     priority = priorityForLevel(level),
                     weight = candidate.keyState.key.weight,
                     currentConcurrency = candidate.keyState.currentConcurrency.get(),
@@ -624,15 +822,20 @@ class PoolChainManager(
                     p95Latency1m = channelMetrics1m.p95LatencyMs,
                     p99Latency1m = channelMetrics1m.p99LatencyMs,
                     metrics1m = channelMetrics1m,
-                    metrics5m = runtimeRegistry.metrics(poolId, candidate.keyState.key.keyId, 5 * 60_000L),
-                    metrics15m = runtimeRegistry.metrics(poolId, candidate.keyState.key.keyId, 15 * 60_000L),
+                    metrics5m = runtimeRegistry.metrics(poolId, routeKey, 5 * 60_000L),
+                    metrics15m = runtimeRegistry.metrics(poolId, routeKey, 15 * 60_000L),
                     trafficShare1m = trafficShare,
                     expectedShare = expectedShare,
                     shareDeviation = trafficShare - expectedShare,
-                    cooldownCount = runtimeRegistry.channelState(candidate.keyState.key.keyId).cooldownCount.get(),
-                    cooldownUntilEpochMs = candidate.keyState.cooldownUntilEpochMs.takeIf { it > 0L },
-                    lastError = candidate.keyState.lastError,
-                    lastSelectedAt = candidate.keyState.lastSelectedAt,
+                    cooldownCount = routeState.cooldownCount,
+                    cooldownUntilEpochMs = routeState.cooldownUntilEpochMs.takeIf { it > 0L },
+                    cooldownRemainingMs = routeState.cooldownUntilEpochMs.takeIf { it > now }?.minus(now),
+                    lastStatus = routeState.lastStatus,
+                    lastError = routeState.lastError,
+                    lastSelectedAt = routeState.lastSelectedAt,
+                    lastAttemptAtEpochMs = routeState.lastAttemptAtEpochMs,
+                    lastSuccessAtEpochMs = routeState.lastSuccessAtEpochMs,
+                    probeEligible = routeState.breakerState == BreakerState.HALF_OPEN,
                 )
             }
             val poolId = tierId(route, level)
@@ -656,6 +859,7 @@ class PoolChainManager(
                 degradedChannels = statuses["DEGRADED"] ?: 0,
                 disabledChannels = statuses["DISABLED"] ?: 0,
                 saturatedChannels = statuses["SATURATED"] ?: 0,
+                halfOpenChannels = channels.count { it.breakerState == BreakerState.HALF_OPEN.name },
                 failoverCount1m = runtimeRegistry.failoverCount(poolId, 60_000L),
                 channels = channels,
             )
@@ -663,9 +867,14 @@ class PoolChainManager(
     }
 
     private fun orderPoolCandidates(route: ResolvedRoute, level: PoolLevelConfig, candidates: List<PoolCandidate>): List<PoolCandidate> {
-        val eligible = candidates.filter {
-            it.keyState.status.get() == KeyStatus.HEALTHY &&
-                it.keyState.currentConcurrency.get() < it.keyState.key.maxConcurrency
+        val now = System.currentTimeMillis()
+        val eligible = candidates.filter { candidate ->
+            maybeRecoverRoute(candidate.keyState.key.keyId, candidate.target.model, now)
+            val routeState = runtimeRegistry.routeSnapshot(candidate.keyState.key.keyId, candidate.target.model)
+            candidate.keyState.status.get() != KeyStatus.DISABLED &&
+                routeState.breakerState != BreakerState.OPEN &&
+                !(routeState.breakerState == BreakerState.HALF_OPEN && routeState.probeInFlight >= HALF_OPEN_PROBE_CONCURRENCY) &&
+                candidate.keyState.currentConcurrency.get() < candidate.keyState.key.maxConcurrency
         }
         if (eligible.isEmpty()) return emptyList()
         val tierState = runtimeRegistry.tierState(tierId(route, level))
@@ -675,7 +884,13 @@ class PoolChainManager(
             val nextWeight = base + max(candidate.keyState.key.weight, 1)
             val saturation = candidate.keyState.currentConcurrency.get().toDouble() /
                 max(candidate.keyState.key.maxConcurrency, 1).toDouble()
-            ScoredCandidate(candidate, nextWeight - saturation * totalWeight, nextWeight)
+            val routeState = runtimeRegistry.routeSnapshot(candidate.keyState.key.keyId, candidate.target.model)
+            val breakerPenalty = when (routeState.breakerState) {
+                BreakerState.CLOSED -> 0.0
+                BreakerState.HALF_OPEN -> totalWeight.toDouble()
+                BreakerState.OPEN -> totalWeight.toDouble() * 2
+            }
+            ScoredCandidate(candidate, nextWeight - saturation * totalWeight - breakerPenalty, nextWeight)
         }
         return scored.sortedWith(
             compareByDescending<ScoredCandidate> { it.score }
@@ -731,11 +946,16 @@ class PoolChainManager(
         }
     }
 
-    private fun exclusionReason(state: UpstreamKeyState, target: AliasTargetConfig?): String = when {
-        target == null -> "UNSUPPORTED_MODEL"
-        state.status.get() != KeyStatus.HEALTHY -> state.status.get().name
-        state.currentConcurrency.get() >= state.key.maxConcurrency -> "SATURATED"
-        else -> "INELIGIBLE"
+    private fun exclusionReason(state: UpstreamKeyState, target: AliasTargetConfig?): String {
+        if (target == null) return "UNSUPPORTED_MODEL"
+        val routeState = runtimeRegistry.routeSnapshot(state.key.keyId, target.model)
+        return when {
+            state.status.get() == KeyStatus.DISABLED -> KeyStatus.DISABLED.name
+            routeState.breakerState == BreakerState.OPEN -> "BREAKER_OPEN"
+            routeState.breakerState == BreakerState.HALF_OPEN && routeState.probeInFlight >= HALF_OPEN_PROBE_CONCURRENCY -> "PROBE_BUSY"
+            state.currentConcurrency.get() >= state.key.maxConcurrency -> "SATURATED"
+            else -> "INELIGIBLE"
+        }
     }
 
     private fun maybeRecover(state: UpstreamKeyState, now: Long) {
@@ -746,9 +966,89 @@ class PoolChainManager(
         }
     }
 
+    private fun maybeRecoverRoute(channelId: String, routeModelKey: String, now: Long) {
+        val routeState = runtimeRegistry.routeState(channelId, routeModelKey)
+        if (routeState.breakerState.get() == BreakerState.OPEN && now >= routeState.cooldownUntilEpochMs) {
+            routeState.breakerState.set(BreakerState.HALF_OPEN)
+            routeState.halfOpenSuccesses.set(0)
+            routeState.probeInFlight.set(0)
+        }
+    }
+
     private fun cooldownBackoffMs(baseMs: Long, consecutiveFailures: Int, maxMs: Long): Long {
         val multiplier = 1L shl (consecutiveFailures - 1).coerceIn(0, 10)
         return (baseMs * multiplier).coerceAtMost(maxMs)
+    }
+
+    private fun failureKindFor(status: Int?): FailureKind = when (status) {
+        401, 403 -> FailureKind.AUTH
+        408, 429 -> FailureKind.RATE_LIMIT
+        null -> FailureKind.NETWORK
+        in 500..599 -> FailureKind.SERVER_5XX
+        in 400..499 -> FailureKind.CLIENT
+        else -> FailureKind.UNKNOWN
+    }
+
+    private fun openRouteBreaker(
+        routeState: SharedRouteRuntimeState,
+        cooldownMs: Long,
+        failureKind: FailureKind,
+        message: String?,
+        status: Int?,
+        now: Long,
+    ) {
+        routeState.breakerState.set(BreakerState.OPEN)
+        routeState.cooldownUntilEpochMs = now + cooldownMs
+        routeState.halfOpenSuccesses.set(0)
+        routeState.probeInFlight.set(0)
+        routeState.failureScope = FailureScope.CHANNEL_MODEL
+        routeState.failureKind = failureKind
+        routeState.lastError = message ?: status?.toString()
+        routeState.lastStatus = status
+        routeState.lastAttemptAtEpochMs = now
+    }
+
+    private fun keepRouteClosed(
+        routeState: SharedRouteRuntimeState,
+        failureKind: FailureKind,
+        message: String?,
+        status: Int?,
+        now: Long,
+    ) {
+        routeState.breakerState.set(BreakerState.CLOSED)
+        routeState.cooldownUntilEpochMs = 0L
+        routeState.halfOpenSuccesses.set(0)
+        routeState.probeInFlight.set(0)
+        routeState.failureScope = FailureScope.CHANNEL_MODEL
+        routeState.failureKind = failureKind
+        routeState.lastError = message ?: status?.toString()
+        routeState.lastStatus = status
+        routeState.lastAttemptAtEpochMs = now
+    }
+
+    private fun closeRouteBreaker(routeState: SharedRouteRuntimeState) {
+        routeState.breakerState.set(BreakerState.CLOSED)
+        routeState.cooldownUntilEpochMs = 0L
+        routeState.consecutiveTransientFailures.set(0)
+        routeState.halfOpenSuccesses.set(0)
+        routeState.probeInFlight.set(0)
+    }
+
+    private fun effectiveStatus(state: UpstreamKeyState, maxConcurrency: Int, now: Long): String {
+        if (state.status.get() == KeyStatus.DISABLED) return KeyStatus.DISABLED.name
+        if (state.status.get() == KeyStatus.DEGRADED) return KeyStatus.DEGRADED.name
+        if (state.currentConcurrency.get() >= maxConcurrency) return "SATURATED"
+        return KeyStatus.HEALTHY.name
+    }
+
+    private fun routeEffectiveStatus(state: UpstreamKeyState, routeModelKey: String, maxConcurrency: Int, now: Long): String {
+        if (state.status.get() == KeyStatus.DISABLED) return KeyStatus.DISABLED.name
+        if (state.status.get() == KeyStatus.DEGRADED) return KeyStatus.DEGRADED.name
+        maybeRecoverRoute(state.key.keyId, routeModelKey, now)
+        val routeState = runtimeRegistry.routeSnapshot(state.key.keyId, routeModelKey)
+        if (routeState.breakerState == BreakerState.OPEN) return KeyStatus.COOLDOWN.name
+        if (state.currentConcurrency.get() >= maxConcurrency) return "SATURATED"
+        return KeyStatus.HEALTHY.name
     }
 
     private fun firstMatchingTarget(key: PooledKeyConfig, targets: List<AliasTargetConfig>): AliasTargetConfig? =
@@ -780,14 +1080,6 @@ class PoolChainManager(
         return (expanded.drop(start) + expanded.take(start)).distinct()
     }
 
-    private fun effectiveStatus(state: UpstreamKeyState, maxConcurrency: Int, now: Long): String {
-        maybeRecover(state, now)
-        if (state.status.get() == KeyStatus.HEALTHY && state.currentConcurrency.get() >= maxConcurrency) {
-            return "SATURATED"
-        }
-        return state.status.get().name
-    }
-
     private fun providerFor(level: PoolLevelConfig, key: PooledKeyConfig): UpstreamProviderConfig = key.provider ?: level.provider
 
     private fun priorityForLevel(level: PoolLevelConfig): Int =
@@ -802,7 +1094,12 @@ class PoolChainManager(
         val shared = runtimeRegistry.channelState(state.key.keyId)
         shared.cooldownUntilEpochMs = state.cooldownUntilEpochMs
         shared.lastError = state.lastError
+        shared.lastStatus = state.lastStatus
         shared.lastSelectedAt = state.lastSelectedAt
+        shared.lastAttemptAtEpochMs = state.lastAttemptAtEpochMs
+        shared.lastSuccessAtEpochMs = state.lastSuccessAtEpochMs
+        shared.failureScope = state.failureScope
+        shared.failureKind = state.failureKind
     }
 
     private fun Int.floorMod(mod: Int): Int = Math.floorMod(this, mod)

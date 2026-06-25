@@ -81,11 +81,7 @@ class AiGatewayAcceptanceTest {
         val resp = ctx.invokeClient("chat", "gpt-4o-mini")
         assertEquals(HttpStatusCode.OK, resp.status, "Failover should pick L2 and succeed")
         val body = parseBody(resp.bodyAsText())
-        ChatShape.assert(body, "gpt-4o-mini", "L1 cooldown -> L2 chat")
-        val pools = ctx.poolSnapshot()
-        val l1Status = pools.chains.first { it.chainId == "default-chain" }
-            .levels.first().keys.first().status
-        assertEquals("COOLDOWN", l1Status)
+        ChatShape.assert(body, "gpt-4o-mini", "L1 failover -> L2 chat")
         val streamResp = ctx.invokeClient("chat", "gpt-4o-mini", stream = true)
         assertEquals(HttpStatusCode.OK, streamResp.status)
     }

@@ -16,24 +16,31 @@ import kotlin.test.assertTrue
 
 class PoolChainManagerTest {
     @Test
-    fun transientServerFailuresUseShortCooldownThenBackOff() {
+    fun transientServerFailuresOnlyCooldownAfterThresholdThenBackOff() {
         val manager = PoolChainManager(listOf(testChain()))
         val selection = manager.selectCandidates("default", "gpt-5.5").single()
 
-        val beforeFirst = System.currentTimeMillis()
         manager.markFailure(selection, 502, "upstream failed")
-        val firstCooldown = cooldownRemainingMs(manager, beforeFirst)
+        assertHealthy(manager)
 
         manager.markFailure(selection, 502, "upstream failed again")
-        val secondCooldown = cooldownRemainingMs(manager, System.currentTimeMillis())
+        assertHealthy(manager)
 
-        assertTrue(firstCooldown in 1..15_000, "first 502 cooldown should be short, was ${firstCooldown}ms")
-        assertTrue(secondCooldown > firstCooldown, "repeated 502 should back off")
+        val beforeThird = System.currentTimeMillis()
+        manager.markFailure(selection, 502, "upstream failed third time")
+        val firstCooldown = cooldownRemainingMs(manager, beforeThird)
+
+        val beforeFourth = System.currentTimeMillis()
+        manager.markFailure(selection, 502, "upstream failed fourth time")
+        val secondCooldown = cooldownRemainingMs(manager, beforeFourth)
+
+        assertTrue(firstCooldown in 1..10_000, "third 502 cooldown should stay short, was ${firstCooldown}ms")
+        assertTrue(secondCooldown > firstCooldown, "repeated 502 after threshold should back off")
         assertTrue(secondCooldown <= 60_000, "cooldown should cap at the level max")
     }
 
     @Test
-    fun successResetsConsecutiveFailureBackoff() {
+    fun successResetsTransientFailureThreshold() {
         val manager = PoolChainManager(listOf(testChain()))
         val selection = manager.selectCandidates("default", "gpt-5.5").single()
 
@@ -41,11 +48,43 @@ class PoolChainManagerTest {
         manager.markFailure(selection, 502, "upstream failed again")
         manager.markSuccess(selection)
 
-        val beforeNextFailure = System.currentTimeMillis()
         manager.markFailure(selection, 502, "upstream failed after recovery")
-        val cooldown = cooldownRemainingMs(manager, beforeNextFailure)
+        manager.markFailure(selection, 502, "upstream failed after recovery again")
+        assertHealthy(manager)
+    }
 
-        assertTrue(cooldown in 1..15_000, "success should reset 5xx backoff, was ${cooldown}ms")
+    @Test
+    fun routeBreakerOnlyOpensAfterTransientThreshold() {
+        val manager = PoolChainManager(listOf(testChain()))
+        val selection = manager.selectCandidates("default", "gpt-5.5").single()
+
+        manager.markFailure(selection, 502, "upstream failed")
+        assertEquals("HEALTHY", manager.snapshot().chains.single().levels.single().keys.single().status)
+
+        manager.markFailure(selection, 502, "upstream failed again")
+        assertEquals("HEALTHY", manager.snapshot().chains.single().levels.single().keys.single().status)
+
+        val beforeThird = System.currentTimeMillis()
+        manager.markFailure(selection, 502, "upstream failed third time")
+        val cooldown = cooldownRemainingMs(manager, beforeThird)
+
+        assertTrue(cooldown in 1..10_000)
+    }
+
+    @Test
+    fun explainSelectionIncludesBreakerAndFailureMetadata() {
+        val manager = PoolChainManager(listOf(testChain()))
+        val selection = manager.selectCandidates("default", "gpt-5.5").single()
+        manager.markFailure(selection, 502, "upstream failed")
+        manager.markFailure(selection, 502, "upstream failed again")
+        manager.markFailure(selection, 502, "upstream failed third time")
+
+        val explain = manager.explainSelection("default", "gpt-5.5")
+        val key = explain.priorityTiers.single().ineligible.single()
+
+        assertEquals("COOLDOWN", key.effectiveStatus)
+        assertEquals("OPEN", key.breakerState)
+        assertEquals("SERVER_5XX", key.failureKind)
     }
 
     @Test
@@ -108,16 +147,20 @@ class PoolChainManagerTest {
     }
 
     @Test
-    fun cooldownWrittenByAnInFlightOldManagerSurvivesReload() {
+    fun cooldownWrittenByAnInFlightOldManagerSurvivesReloadAfterThreshold() {
         val registry = PoolRuntimeRegistry()
         val oldManager = PoolChainManager(listOf(testChain()), registry)
         val selection = oldManager.selectCandidates("default", "gpt-5.5").single()
         val reloadedManager = PoolChainManager(listOf(testChain()), registry)
 
         oldManager.markFailure(selection, 502, "late upstream failure")
+        oldManager.markFailure(selection, 502, "late upstream failure again")
+        oldManager.markFailure(selection, 502, "late upstream failure third time")
 
-        val key = reloadedManager.snapshot().chains.single().levels.single().keys.single()
-        assertEquals("COOLDOWN", key.status)
+        val explain = reloadedManager.explainSelection("default", "gpt-5.5")
+        val key = explain.priorityTiers.single().ineligible.single()
+        assertEquals("OPEN", key.breakerState)
+        assertEquals("COOLDOWN", key.effectiveStatus)
         assertTrue(assertNotNull(key.cooldownUntilEpochMs) > System.currentTimeMillis())
     }
 
@@ -206,10 +249,24 @@ class PoolChainManagerTest {
         assertEquals(7, manager.listPools("default").single().priority)
     }
 
-    private fun cooldownRemainingMs(manager: PoolChainManager, baselineMs: Long): Long {
+    private fun assertHealthy(manager: PoolChainManager) {
         val key = manager.snapshot().chains.single().levels.single().keys.single()
-        assertEquals("COOLDOWN", key.status)
-        val until = assertNotNull(key.cooldownUntilEpochMs)
+        assertEquals("HEALTHY", key.status)
+        assertNull(key.cooldownUntilEpochMs)
+    }
+
+    private fun routeState(manager: PoolChainManager): RouteStateSnapshot =
+        manager.runtimeRegistry.routeSnapshot("ch-test", "gpt-5.5")
+
+    private fun assertRouteOpen(manager: PoolChainManager) {
+        assertEquals(BreakerState.OPEN, routeState(manager).breakerState)
+        assertTrue(assertNotNull(routeState(manager).cooldownUntilEpochMs) > System.currentTimeMillis())
+    }
+
+    private fun cooldownRemainingMs(manager: PoolChainManager, baselineMs: Long): Long {
+        val routeState = routeState(manager)
+        assertEquals(BreakerState.OPEN, routeState.breakerState)
+        val until = assertNotNull(routeState.cooldownUntilEpochMs)
         return until - baselineMs
     }
 

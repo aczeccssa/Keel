@@ -164,8 +164,10 @@ export class KeelChart extends KeelElement {
     _renderBar(data, labels, colors, height, singleColor) {
         const max = Math.max(1, ...data);
         const palette = colors || this._defaultColors();
+        const thinValuesWithLabels = labels.length === data.length && labels.some(label => !label);
         const cols = data.map((v, i) => {
             const label = labels[i] || '';
+            const valueLabel = thinValuesWithLabels && !label ? '&nbsp;' : this._fmtNum(v);
             // Empty buckets recede to a faint baseline track instead of drawing a
             // full-color 2px dash, which otherwise litters dense trends with marks.
             if (!v) {
@@ -181,7 +183,7 @@ export class KeelChart extends KeelElement {
             const color = singleColor || palette[i % palette.length];
             return `
                 <div class="bar-col">
-                    <span class="bar-value">${this._fmtNum(v)}</span>
+                    <span class="bar-value">${valueLabel}</span>
                     <div class="bar" style="height:${h}px;background:${color};" title="${label}: ${v}"></div>
                     <span class="bar-label">${this._escHtml(label)}</span>
                 </div>

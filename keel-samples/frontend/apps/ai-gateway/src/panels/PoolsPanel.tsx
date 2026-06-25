@@ -18,13 +18,20 @@ interface Group {
 interface PoolChannel {
   channelId?: string;
   channelName?: string;
+  routeModelKey?: string;
   effectiveStatus?: string;
+  breakerState?: string;
+  failureScope?: string | null;
+  failureKind?: string | null;
   weight?: number;
   currentConcurrency?: number;
   maxConcurrency?: number;
   totalRequests?: number;
   totalFailures?: number;
+  lastStatus?: number | null;
   lastError?: string | null;
+  cooldownRemainingMs?: number | null;
+  probeEligible?: boolean;
   metrics1m?: WindowMetrics;
   metrics5m?: WindowMetrics;
   metrics15m?: WindowMetrics;
@@ -49,6 +56,7 @@ interface Pool {
   routingPolicy?: string;
   priority?: number;
   totalInflight?: number;
+  halfOpenChannels?: number;
   metrics1m?: WindowMetrics;
   metrics5m?: WindowMetrics;
   metrics15m?: WindowMetrics;
@@ -58,7 +66,14 @@ interface Pool {
 
 interface ExplainAttempt {
   channelId?: string;
+  channelName?: string;
+  modelKey?: string;
+  resolvedModel?: string;
+  upstreamModel?: string;
   outcome?: string;
+  breakerState?: string | null;
+  failureScope?: string | null;
+  failureKind?: string | null;
   status?: number | null;
   reason?: string | null;
   latencyMs?: number | null;
@@ -67,6 +82,7 @@ interface ExplainAttempt {
 interface ExplainResult {
   selectedChannelId?: string | null;
   routingPolicy?: string;
+  result?: string;
   requestTrace?: {
     requestId?: string;
     outcome?: string;
@@ -88,6 +104,26 @@ function statusTone(status: string | undefined): 'ok' | 'warn' | 'danger' | 'mut
     default:
       return 'muted';
   }
+}
+
+function breakerTone(state: string | undefined): 'ok' | 'warn' | 'danger' | 'muted' {
+  switch ((state ?? '').toUpperCase()) {
+    case 'CLOSED':
+      return 'ok';
+    case 'HALF_OPEN':
+      return 'warn';
+    case 'OPEN':
+      return 'danger';
+    default:
+      return 'muted';
+  }
+}
+
+function formatMs(ms: number | null | undefined): string {
+  if (ms == null || ms <= 0) return '0 ms';
+  if (ms >= 60_000) return `${(ms / 1000).toFixed(0)} s`;
+  if (ms >= 1_000) return `${(ms / 1000).toFixed(1)} s`;
+  return `${ms} ms`;
 }
 
 export function PoolsPanel({ api }: { api: AiGatewayApi }) {
@@ -190,13 +226,21 @@ export function PoolsPanel({ api }: { api: AiGatewayApi }) {
                 <strong>{channel.channelName ?? channel.channelId ?? '—'}</strong>
                 {' · '}
                 <Chip tone={statusTone(channel.effectiveStatus)}>{channel.effectiveStatus ?? 'UNKNOWN'}</Chip>
+                {' '}
+                <Chip tone={breakerTone(channel.breakerState)}>{channel.breakerState ?? 'UNKNOWN'}</Chip>
               </span>
               <span style={{ fontSize: 12, color: 'var(--keel-muted)' }}>
-                {channel.channelId ?? '—'} · weight {channel.weight ?? 0} · inflight {channel.currentConcurrency ?? 0}/{channel.maxConcurrency ?? 0}
+                {channel.channelId ?? '—'} · model {channel.routeModelKey ?? '—'} · weight {channel.weight ?? 0}
+                {' · '}inflight {channel.currentConcurrency ?? 0}/{channel.maxConcurrency ?? 0}
                 {' · '}requests {channel.totalRequests ?? 0}
                 {' · '}1m {channel.metrics1m?.selectedRequests ?? 0}
                 {' · '}p95 {channel.metrics1m?.p95LatencyMs ?? 0} ms
                 {(channel.totalFailures ?? 0) > 0 ? ` · fail ${channel.totalFailures}` : ''}
+                {channel.lastStatus != null ? ` · last ${channel.lastStatus}` : ''}
+                {channel.failureKind ? ` · ${channel.failureKind}` : ''}
+                {channel.failureScope ? ` · ${channel.failureScope}` : ''}
+                {channel.cooldownRemainingMs ? ` · recover ${formatMs(channel.cooldownRemainingMs)}` : ''}
+                {channel.probeEligible ? ' · probe' : ''}
                 {channel.lastError ? ` · ${channel.lastError}` : ''}
               </span>
               <span style={{ fontSize: 12, color: 'var(--keel-muted)' }}>
@@ -240,7 +284,7 @@ export function PoolsPanel({ api }: { api: AiGatewayApi }) {
             <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 12 }}>
               <span className="keel-mono">{explain.requestTrace?.requestId ?? 'preview'}</span>
               <Chip tone={explain.requestTrace?.outcome === 'SUCCESS' ? 'ok' : 'warn'}>
-                {explain.requestTrace?.outcome ?? 'PREVIEW'}
+                {explain.requestTrace?.outcome ?? explain.result ?? 'PREVIEW'}
               </Chip>
               <span>{explain.requestTrace?.failoverCount ?? 0} failovers</span>
               <span>selected {explain.selectedChannelId ?? explain.requestTrace?.attempts?.find((a) => a.outcome === 'SUCCESS')?.channelId ?? '—'}</span>
@@ -248,7 +292,13 @@ export function PoolsPanel({ api }: { api: AiGatewayApi }) {
             <div style={{ display: 'grid', gap: 6 }}>
               {(explain.requestTrace?.attempts ?? []).map((attempt, index) => (
                 <div key={`${attempt.channelId ?? 'attempt'}-${index}`} className="keel-mono" style={{ fontSize: 12 }}>
-                  {attempt.channelId ?? '—'} · {attempt.outcome ?? 'UNKNOWN'} · {attempt.status ?? '—'}
+                  {attempt.channelId ?? '—'}
+                  {attempt.channelName ? ` (${attempt.channelName})` : ''}
+                  {attempt.modelKey ? ` · ${attempt.modelKey}` : ''}
+                  {attempt.outcome ? ` · ${attempt.outcome}` : ''}
+                  {attempt.breakerState ? ` · ${attempt.breakerState}` : ''}
+                  {attempt.failureKind ? ` · ${attempt.failureKind}` : ''}
+                  {attempt.status != null ? ` · ${attempt.status}` : ''}
                   {attempt.latencyMs != null ? ` · ${attempt.latencyMs} ms` : ''}
                   {attempt.reason ? ` · ${attempt.reason}` : ''}
                 </div>

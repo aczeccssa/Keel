@@ -47,17 +47,17 @@ describe('AI Gateway panels', () => {
           groupId: 'default', aliasOrModel: 'gpt-5', routingPolicy: 'POOL_BALANCE', priority: 100,
           metrics1m: { selectedRequests: 12, successRequests: 10, failedRequests: 2, errorRate: 0.1667, p95LatencyMs: 420 },
           channels: [{
-            channelId: 'ch-a', channelName: 'Primary', effectiveStatus: 'HEALTHY', weight: 100,
-            currentConcurrency: 1, maxConcurrency: 10, trafficShare1m: 0.67, expectedShare: 0.67, shareDeviation: 0,
+            channelId: 'ch-a', channelName: 'Primary', routeModelKey: 'gpt-5', effectiveStatus: 'HEALTHY', breakerState: 'CLOSED',
+            weight: 100, currentConcurrency: 1, maxConcurrency: 10, trafficShare1m: 0.67, expectedShare: 0.67, shareDeviation: 0,
             metrics1m: { selectedRequests: 8, successRequests: 7, failedRequests: 1, errorRate: 0.125, p95LatencyMs: 400 }
           }]
         }]
       })),
       explainGroupPool: vi.fn(async () => ({
-        selectedChannelId: 'ch-a', routingPolicy: 'POOL_BALANCE',
+        selectedChannelId: 'ch-a', routingPolicy: 'POOL_BALANCE', result: 'SELECTED',
         requestTrace: { requestId: 'req-42', outcome: 'SUCCESS', failoverCount: 1, attempts: [
-          { channelId: 'ch-b', outcome: 'FAILED', status: 502, reason: 'bad gateway' },
-          { channelId: 'ch-a', outcome: 'SUCCESS', status: 200 }
+          { channelId: 'ch-b', channelName: 'Backup', modelKey: 'gpt-5', outcome: 'FAILED', breakerState: 'OPEN', failureKind: 'SERVER_5XX', status: 502, reason: 'bad gateway' },
+          { channelId: 'ch-a', channelName: 'Primary', modelKey: 'gpt-5', outcome: 'SUCCESS', breakerState: 'CLOSED', status: 200 }
         ] }
       }))
     } as unknown as AiGatewayApi;
@@ -71,6 +71,6 @@ describe('AI Gateway panels', () => {
 
     await waitFor(() => expect(poolApi.explainGroupPool).toHaveBeenCalledWith('default', 'gpt-5', {}));
     expect(await screen.findByText('req-42')).toBeInTheDocument();
-    expect(screen.getByText(/ch-b · FAILED · 502/)).toBeInTheDocument();
+    expect(screen.getByText(/ch-b \(Backup\) · gpt-5 · FAILED · OPEN · SERVER_5XX · 502/)).toBeInTheDocument();
   });
 });

@@ -72,4 +72,51 @@ class TokenUsageEnrichmentTest {
         assertEquals("Default", enriched[1].routingGroupName)
         assertEquals("Anthropic Main", enriched[1].channelName)
     }
+
+    @Test
+    fun preservesStructuredErrorFieldsWhenEnriching() {
+        val records = listOf(
+            TokenUsageRecordView(
+                recordId = "rec-3",
+                requestId = "req-3",
+                keyId = "key-2",
+                userId = "usr-2",
+                userGroupId = "default",
+                model = "claude-haiku-4-5-20251001",
+                provider = "anthropic",
+                status = 503,
+                transportStatus = 503,
+                outcome = "ERROR",
+                errorCode = "pool_exhausted",
+                errorDetail = "flat-detail",
+                errorDetailJson = "{\"result\":\"EXHAUSTED\"}",
+                routeTraceJson = "{\"attempts\":[]}",
+                failureScope = "CHANNEL_MODEL",
+                failureKind = "POOL_EXHAUSTED",
+                selectedChannelId = "ch-9",
+                usageSource = "NONE",
+                upstreamKeyId = "ch-9",
+                poolLevelId = "anthropic-p0",
+                routingGroupId = "anthropic",
+                usage = com.keel.contract.ai.TokenUsage(),
+                cost = com.keel.contract.ai.CostBreakdown(),
+                latencyMs = 7,
+                createdAt = "2026-06-20T00:02:00Z",
+            )
+        )
+
+        val enriched = enrichUsageRecords(
+            records = records,
+            userEmailsById = emptyMap(),
+            customerSummariesById = emptyMap(),
+            channelNamesById = mapOf("ch-9" to "Anthropic Pool"),
+            groupNamesById = mapOf("anthropic" to "Anthropic"),
+        )
+
+        assertEquals("{\"result\":\"EXHAUSTED\"}", enriched.single().errorDetailJson)
+        assertEquals("{\"attempts\":[]}", enriched.single().routeTraceJson)
+        assertEquals("CHANNEL_MODEL", enriched.single().failureScope)
+        assertEquals("POOL_EXHAUSTED", enriched.single().failureKind)
+        assertEquals("Anthropic Pool", enriched.single().channelName)
+    }
 }

@@ -23,12 +23,22 @@ data class PoolExplainCandidateView(
     val priority: Int,
     val weight: Int,
     val effectiveStatus: String,
+    val breakerState: String = "CLOSED",
+    val failureScope: String? = null,
+    val failureKind: String? = null,
     val currentConcurrency: Int,
     val maxConcurrency: Int,
     val score: Double?,
+    val probeEligible: Boolean = false,
     val targetModel: String,
     val resolvedModel: String,
     val upstreamModel: String,
+    val cooldownUntilEpochMs: Long? = null,
+    val cooldownRemainingMs: Long? = null,
+    val lastStatus: Int? = null,
+    val lastError: String? = null,
+    val lastAttemptAtEpochMs: Long? = null,
+    val lastSuccessAtEpochMs: Long? = null,
     val reason: String? = null,
 )
 
@@ -46,6 +56,7 @@ data class PoolExplainResponse(
     val routedModel: String?,
     val routingPolicy: String,
     val selectedChannelId: String?,
+    val result: String = if (selectedChannelId != null) "SELECTED" else "EXHAUSTED",
     val priorityTiers: List<PoolExplainTierView>,
     val requestTrace: PoolRequestTraceView? = null,
 )
@@ -53,8 +64,15 @@ data class PoolExplainResponse(
 @Serializable
 data class PoolRequestAttemptView(
     val channelId: String,
+    val channelName: String,
+    val modelKey: String,
+    val resolvedModel: String,
+    val upstreamModel: String,
     val priority: Int,
     val outcome: String,
+    val breakerState: String? = null,
+    val failureScope: String? = null,
+    val failureKind: String? = null,
     val status: Int? = null,
     val reason: String? = null,
     val latencyMs: Long? = null,
@@ -89,7 +107,11 @@ data class RuntimeWindowMetrics(
 data class PoolChannelRuntimeView(
     val channelId: String,
     val channelName: String,
+    val routeModelKey: String,
     val effectiveStatus: String,
+    val breakerState: String = "CLOSED",
+    val failureScope: String? = null,
+    val failureKind: String? = null,
     val priority: Int,
     val weight: Int,
     val currentConcurrency: Int,
@@ -111,8 +133,13 @@ data class PoolChannelRuntimeView(
     val shareDeviation: Double = 0.0,
     val cooldownCount: Long = 0,
     val cooldownUntilEpochMs: Long? = null,
+    val cooldownRemainingMs: Long? = null,
+    val lastStatus: Int? = null,
     val lastError: String? = null,
     val lastSelectedAt: Long? = null,
+    val lastAttemptAtEpochMs: Long? = null,
+    val lastSuccessAtEpochMs: Long? = null,
+    val probeEligible: Boolean = false,
 )
 
 @Serializable
@@ -135,6 +162,7 @@ data class PoolView(
     val degradedChannels: Int = 0,
     val disabledChannels: Int = 0,
     val saturatedChannels: Int = 0,
+    val halfOpenChannels: Int = 0,
     val failoverCount1m: Long = 0,
     val channels: List<PoolChannelRuntimeView>,
 )

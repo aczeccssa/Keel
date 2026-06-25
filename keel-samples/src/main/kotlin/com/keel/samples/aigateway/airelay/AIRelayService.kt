@@ -45,6 +45,7 @@ import com.keel.samples.aigateway.airelay.usage.TokenEstimator
 import kotlinx.coroutines.flow.asFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
+import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -122,7 +123,15 @@ class AIRelayService(
                     status = 429,
                     errorCode = "rate_limited",
                     errorDetail = "ruleId=${rateDecision.ruleId} retryAfterSeconds=${rateDecision.retryAfterSeconds}",
-                    started = started
+                    errorDetailJson = buildJsonObject {
+                        put("ruleId", JsonPrimitive(rateDecision.ruleId))
+                        put("retryAfterSeconds", JsonPrimitive(rateDecision.retryAfterSeconds))
+                        put("failureScope", JsonPrimitive("CHANNEL_MODEL"))
+                        put("failureKind", JsonPrimitive("RATE_LIMIT"))
+                    }.toString(),
+                    started = started,
+                    failureScope = "CHANNEL_MODEL",
+                    failureKind = "RATE_LIMIT",
                 )
             )
             return rateLimitError(clientProtocol, rateDecision)
@@ -227,6 +236,7 @@ class AIRelayService(
                             transportStatus = upstream.status,
                             outcome = if (upstream.status >= 400) RequestOutcome.ERROR else RequestOutcome.SUCCESS,
                             usageSource = if (effectiveUsage.totalTokens > 0) com.keel.contract.ai.UsageSource.PROVIDER else com.keel.contract.ai.UsageSource.NONE,
+                            selectedChannelId = selection.keyState.key.keyId,
                         )
                     )
                 } catch (error: Throwable) {
@@ -258,12 +268,22 @@ class AIRelayService(
                             status = error.status,
                             errorCode = "upstream_${error.status}",
                             errorDetail = error.message,
+                            errorDetailJson = buildJsonObject {
+                                put("status", JsonPrimitive(error.status))
+                                put("message", JsonPrimitive(error.message ?: ""))
+                                error.retryAfterSeconds?.let { put("retryAfterSeconds", JsonPrimitive(it)) }
+                                put("selectedChannelId", JsonPrimitive(selection.keyState.key.keyId))
+                            }.toString(),
                             started = started,
                             failoverCount = failoverCount,
                             upstreamProtocol = selection.provider.protocol.name,
                             provider = selection.provider.providerId,
                             poolLevelId = selection.level.levelId,
                             upstreamKeyId = selection.keyState.key.keyId,
+                            selectedChannelId = selection.keyState.key.keyId,
+                            failureScope = "CHANNEL_MODEL",
+                            failureKind = if (error.status in 500..599) "SERVER_5XX" else "CLIENT",
+                            routeTraceJson = poolChainManager.explainSelection(keyContext.verified.routingGroupId, ir.model, context.requestId).requestTrace?.let(json::encodeToString),
                         )
                     )
                     return protocolError(clientProtocol, error.status, "upstream_error", error.message)
@@ -280,10 +300,10 @@ class AIRelayService(
             }
         }
         poolChainManager.completeTrace(context.requestId, "EXHAUSTED")
+        val explain = poolChainManager.explainSelection(keyContext.verified.routingGroupId, ir.model, context.requestId)
+        val detailJson = json.encodeToString(explain)
         System.err.println(
-            "airelay_pool_exhausted model=${ir.model} client=$clientProtocol detail=${
-                poolChainManager.explainAvailability(keyContext.verified.routingGroupId, ir.model)
-            }"
+            "airelay_pool_exhausted model=${ir.model} client=$clientProtocol detail=${detailJson.take(512)}"
         )
         usageRecorder.record(
             rejectionRecord(
@@ -292,9 +312,14 @@ class AIRelayService(
                 ir = ir,
                 status = 503,
                 errorCode = shortErrorCode(lastError),
-                errorDetail = poolChainManager.explainAvailability(keyContext.verified.routingGroupId, ir.model),
+                errorDetail = detailJson,
+                errorDetailJson = detailJson,
                 started = started,
-                failoverCount = failoverCount
+                failoverCount = failoverCount,
+                selectedChannelId = explain.selectedChannelId,
+                failureScope = "CHANNEL_MODEL",
+                failureKind = "POOL_EXHAUSTED",
+                routeTraceJson = explain.requestTrace?.let(json::encodeToString),
             )
         )
         return poolExhaustedError(clientProtocol, ir.model, keyContext.verified.routingGroupId)
@@ -386,6 +411,12 @@ class AIRelayService(
                             status = error.status,
                             errorCode = "upstream_${error.status}",
                             errorDetail = error.message,
+                            errorDetailJson = buildJsonObject {
+                                put("status", JsonPrimitive(error.status))
+                                put("message", JsonPrimitive(error.message ?: ""))
+                                error.retryAfterSeconds?.let { put("retryAfterSeconds", JsonPrimitive(it)) }
+                                put("selectedChannelId", JsonPrimitive(selection.keyState.key.keyId))
+                            }.toString(),
                             started = started,
                             streamed = true,
                             failoverCount = failoverCount,
@@ -393,6 +424,10 @@ class AIRelayService(
                             provider = selection.provider.providerId,
                             poolLevelId = selection.level.levelId,
                             upstreamKeyId = selection.keyState.key.keyId,
+                            selectedChannelId = selection.keyState.key.keyId,
+                            failureScope = "CHANNEL_MODEL",
+                            failureKind = if (error.status in 500..599) "SERVER_5XX" else "CLIENT",
+                            routeTraceJson = poolChainManager.explainSelection(keyContext.verified.routingGroupId, ir.model, context.requestId).requestTrace?.let(json::encodeToString),
                         )
                     )
                     return protocolError(clientProtocol, error.status, "upstream_error", error.message)
@@ -413,8 +448,9 @@ class AIRelayService(
         }
 
         poolChainManager.completeTrace(context.requestId, "EXHAUSTED")
-        val detail = poolChainManager.explainAvailability(keyContext.verified.routingGroupId, ir.model)
-        System.err.println("airelay_pool_exhausted model=${ir.model} client=$clientProtocol stream=true detail=$detail")
+        val explain = poolChainManager.explainSelection(keyContext.verified.routingGroupId, ir.model, context.requestId)
+        val detailJson = json.encodeToString(explain)
+        System.err.println("airelay_pool_exhausted model=${ir.model} client=$clientProtocol stream=true detail=${detailJson.take(512)}")
         usageRecorder.record(
             rejectionRecord(
                 key = keyContext.verified,
@@ -422,10 +458,15 @@ class AIRelayService(
                 ir = ir,
                 status = 503,
                 errorCode = shortErrorCode(lastError),
-                errorDetail = detail,
+                errorDetail = detailJson,
+                errorDetailJson = detailJson,
                 started = started,
                 streamed = true,
-                failoverCount = failoverCount
+                failoverCount = failoverCount,
+                selectedChannelId = explain.selectedChannelId,
+                failureScope = "CHANNEL_MODEL",
+                failureKind = "POOL_EXHAUSTED",
+                routeTraceJson = explain.requestTrace?.let(json::encodeToString),
             )
         )
         return poolExhaustedError(clientProtocol, ir.model, keyContext.verified.routingGroupId)
@@ -813,12 +854,17 @@ class AIRelayService(
         errorCode: String?,
         started: kotlinx.datetime.Instant,
         errorDetail: String? = null,
+        errorDetailJson: String? = null,
         streamed: Boolean = false,
         failoverCount: Int = 0,
         upstreamProtocol: String = "none",
         provider: String = "none",
         poolLevelId: String? = null,
         upstreamKeyId: String? = null,
+        selectedChannelId: String? = null,
+        failureScope: String? = null,
+        failureKind: String? = null,
+        routeTraceJson: String? = null,
     ) = UsageRecordInput(
         keyId = key.keyId, userId = key.userId, userGroupId = key.userGroupId,
         clientProtocol = clientProtocol.name, upstreamProtocol = upstreamProtocol,
@@ -829,7 +875,12 @@ class AIRelayService(
         errorCode = errorCode?.take(64),
         streamed = streamed,
         failoverCount = failoverCount,
-        errorDetail = errorDetail?.take(4_000)
+        errorDetail = errorDetail?.take(4_000),
+        errorDetailJson = errorDetailJson?.take(12_000),
+        selectedChannelId = selectedChannelId,
+        failureScope = failureScope,
+        failureKind = failureKind,
+        routeTraceJson = routeTraceJson?.take(12_000),
     )
 
     private suspend fun recordLocalAccountingFailure(
@@ -892,13 +943,14 @@ class AIRelayService(
         model: String,
         groupId: String,
     ): RelayResult {
-        val detail = poolChainManager.explainAvailability(groupId, model)
+        val explain = poolChainManager.explainSelection(groupId, model)
+        val detailJson = json.encodeToString(explain)
         return protocolError(
             clientProtocol = clientProtocol,
             status = 503,
             errorType = "api_error",
             message = "All upstream pools exhausted for model $model because the routed upstream capacity is currently saturated.",
-            headers = errorHeaders("pool_exhausted", detail)
+            headers = errorHeaders("pool_exhausted", detailJson)
         )
     }
 

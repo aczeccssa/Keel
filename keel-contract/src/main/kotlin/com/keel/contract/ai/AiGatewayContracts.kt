@@ -97,6 +97,11 @@ data class UsageRecordInput(
     val outcome: RequestOutcome = if (status >= 400) RequestOutcome.ERROR else RequestOutcome.SUCCESS,
     val usageSource: UsageSource = if (usage.totalTokens > 0 || usage.cacheCreationInputTokens > 0 || usage.cacheReadInputTokens > 0) UsageSource.PROVIDER else UsageSource.NONE,
     val errorDetail: String? = null,
+    val errorDetailJson: String? = null,
+    val selectedChannelId: String? = null,
+    val failureScope: String? = null,
+    val failureKind: String? = null,
+    val routeTraceJson: String? = null,
 )
 
 @Serializable
@@ -159,6 +164,11 @@ data class UsageRecordView(
     val outcome: String = if (status >= 400) "ERROR" else "SUCCESS",
     val errorCode: String? = null,
     val errorDetail: String? = null,
+    val errorDetailJson: String? = null,
+    val routeTraceJson: String? = null,
+    val failureScope: String? = null,
+    val failureKind: String? = null,
+    val selectedChannelId: String? = null,
     val upstreamKeyId: String? = null,
     val poolLevelId: String? = null,
     val streamed: Boolean = false,
@@ -253,12 +263,20 @@ data class PoolLevelHealth(
 data class PoolKeyHealth(
     val keyId: String,
     val status: String,
+    val breakerState: String = "CLOSED",
+    val failureScope: String? = null,
+    val failureKind: String? = null,
     val totalRequests: Long,
     val totalFailures: Long,
     val currentConcurrency: Int,
     val maxConcurrency: Int,
     val cooldownUntilEpochMs: Long?,
-    val lastError: String?
+    val cooldownRemainingMs: Long? = null,
+    val lastStatus: Int? = null,
+    val lastError: String? = null,
+    val lastAttemptAtEpochMs: Long? = null,
+    val lastSuccessAtEpochMs: Long? = null,
+    val probeEligible: Boolean = false,
 )
 
 interface RateLimitSnapshotProvider {

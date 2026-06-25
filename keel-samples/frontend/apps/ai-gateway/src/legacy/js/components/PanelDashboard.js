@@ -143,10 +143,24 @@ export class PanelDashboard extends KeelElement {
             ? `${(o.cooldownChannels || 0) + (o.disabledChannels || 0)} channel(s) need attention`
             : 'All channels healthy';
 
-        const reqTrend = t.requests || t.requestsByHour || [];
-        this.refs.reqHint.textContent = `${this._window} · ${t.bucketGranularity || ''}`;
+        const reqTrend = this._compactTrend(t.requests || t.requestsByHour || [], (group) => ({
+            timestamp: group[group.length - 1].timestamp,
+            requests: group.reduce((sum, point) => sum + (point.requests || 0), 0),
+            successRate: group.reduce((sum, point) => sum + (point.requests || 0), 0) > 0
+                ? group.reduce((sum, point) => sum + ((point.successRate || 0) * (point.requests || 0)), 0)
+                    / group.reduce((sum, point) => sum + (point.requests || 0), 0)
+                : 0
+        }));
+        this.refs.reqHint.textContent = `${this._window} · ${this._trendBucketLabel(t.bucketGranularity || '')}`;
         this.refs.requestChart.render({ type: 'bar', color: 'var(--teal, #0d9488)', data: reqTrend.map(p => p.requests), labels: this._thinLabels(reqTrend.map(p => this._bucketLabel(p.timestamp))), height: 110, emptyText: 'No request data yet' });
-        const tokenTrend = t.tokens || t.tokensByHour || [];
+        const tokenTrend = this._compactTrend(t.tokens || t.tokensByHour || [], (group) => ({
+            timestamp: group[group.length - 1].timestamp,
+            promptTokens: group.reduce((sum, point) => sum + (point.promptTokens || 0), 0),
+            completionTokens: group.reduce((sum, point) => sum + (point.completionTokens || 0), 0),
+            cacheWriteTokens: group.reduce((sum, point) => sum + (point.cacheWriteTokens || 0), 0),
+            cacheReadTokens: group.reduce((sum, point) => sum + (point.cacheReadTokens || 0), 0),
+            costUsd: group.reduce((sum, point) => sum + (point.costUsd || 0), 0)
+        }));
         this.refs.tokenChart.render({ type: 'bar', color: 'var(--indigo, #6366f1)', data: tokenTrend.map(p => (p.promptTokens || 0) + (p.completionTokens || 0) + (p.cacheWriteTokens || 0) + (p.cacheReadTokens || 0)), labels: this._thinLabels(tokenTrend.map(p => this._bucketLabel(p.timestamp))), height: 110, emptyText: 'No token data yet' });
         const latencyTrend = t.latency || t.latencyByHour || [];
         this.refs.latencyChart.render({ type: 'sparkline', data: latencyTrend.map(p => p.p95 || 0), emptyText: 'No latency data yet' });
@@ -185,6 +199,22 @@ export class PanelDashboard extends KeelElement {
         if (labels.length <= max) return labels;
         const step = Math.ceil(labels.length / max);
         return labels.map((label, i) => (i % step === 0 ? label : ''));
+    }
+
+    _compactTrend(points, combine) {
+        if (this._window !== '30d' || points.length <= 10) return points;
+        const groupSize = Math.ceil(points.length / 10);
+        const compact = [];
+        for (let i = 0; i < points.length; i += groupSize) {
+            const group = points.slice(i, i + groupSize);
+            if (group.length > 0) compact.push(combine(group));
+        }
+        return compact;
+    }
+
+    _trendBucketLabel(baseGranularity) {
+        if (this._window !== '30d') return baseGranularity;
+        return '3d';
     }
 
     _bucketLabel(timestamp) {

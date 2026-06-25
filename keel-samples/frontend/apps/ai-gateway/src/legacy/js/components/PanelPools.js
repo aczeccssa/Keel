@@ -11,6 +11,9 @@ const ST = {
     COOLDOWN: { cls: 'st-warn', label: 'Cooldown' },
     DEGRADED: { cls: 'st-warn', label: 'Degraded' },
     DISABLED: { cls: 'st-bad',  label: 'Disabled' },
+    OPEN:     { cls: 'st-bad',  label: 'Open' },
+    HALF_OPEN:{ cls: 'st-warn', label: 'Half-Open' },
+    CLOSED:   { cls: 'st-ok',   label: 'Closed' },
 };
 
 export class PanelPools extends KeelElement {
@@ -297,17 +300,20 @@ export class PanelPools extends KeelElement {
                     return;
                 }
                 el.innerHTML = `<table>
-                    <thead><tr><th>Key ID</th><th>Status</th><th>Requests</th><th>Failures</th><th>Concurrency</th><th>Last Error</th><th></th></tr></thead>
+                    <thead><tr><th>Key ID</th><th>Status</th><th>Breaker</th><th>Requests</th><th>Failures</th><th>Concurrency</th><th>Last Error</th><th></th></tr></thead>
                     <tbody>${keys.map(k => {
                         const s = ST[k.status] || ST.HEALTHY;
+                        const breaker = ST[k.breakerState] || { cls: '', label: esc(k.breakerState || 'Unknown') };
+                        const detail = [k.failureKind, k.failureScope, k.cooldownRemainingMs ? `${k.cooldownRemainingMs}ms` : null].filter(Boolean).join(' · ');
                         return `<tr>
                             <td><code>${esc(k.keyId)}</code></td>
                             <td><span class="st ${s.cls}">${s.label}</span></td>
+                            <td><span class="st ${breaker.cls}">${esc(breaker.label)}</span></td>
                             <td><span>${k.totalRequests || 0}</span></td>
                             <td><span>${k.totalFailures || 0}</span></td>
                             <td><span>${k.currentConcurrency || 0}</span></td>
-                            <td><samp>${esc(k.lastError || 'none')}</samp></td>
-                            <td>${k.status !== 'HEALTHY'
+                            <td><samp>${esc([k.lastError || 'none', detail].filter(Boolean).join(' · '))}</samp></td>
+                            <td>${k.status !== 'HEALTHY' || k.breakerState === 'OPEN' || k.breakerState === 'HALF_OPEN'
                                 ? `<button class="btn-reset" data-rc="${esc(chain.chainId)}" data-rk="${esc(k.keyId)}">Reset</button>`
                                 : ''}</td>
                         </tr>`;
