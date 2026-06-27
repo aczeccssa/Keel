@@ -16,7 +16,7 @@ import kotlin.test.assertTrue
 
 class PoolChainManagerTest {
     @Test
-    fun transientServerFailuresOnlyCooldownAfterThresholdThenBackOff() {
+    fun transientServerFailuresOnlyCooldownAfterThresholdAndLateFailuresDoNotExtend() {
         val manager = PoolChainManager(listOf(testChain()))
         val selection = manager.selectCandidates("default", "gpt-5.5").single()
 
@@ -29,14 +29,46 @@ class PoolChainManagerTest {
         val beforeThird = System.currentTimeMillis()
         manager.markFailure(selection, 502, "upstream failed third time")
         val firstCooldown = cooldownRemainingMs(manager, beforeThird)
+        val firstCooldownUntil = routeState(manager).cooldownUntilEpochMs
 
-        val beforeFourth = System.currentTimeMillis()
-        manager.markFailure(selection, 502, "upstream failed fourth time")
-        val secondCooldown = cooldownRemainingMs(manager, beforeFourth)
+        manager.markFailure(selection, 502, "late in-flight upstream failure")
+        val secondCooldownUntil = routeState(manager).cooldownUntilEpochMs
 
         assertTrue(firstCooldown in 1..10_000, "third 502 cooldown should stay short, was ${firstCooldown}ms")
-        assertTrue(secondCooldown > firstCooldown, "repeated 502 after threshold should back off")
-        assertTrue(secondCooldown <= 60_000, "cooldown should cap at the level max")
+        assertEquals(firstCooldownUntil, secondCooldownUntil, "late in-flight 502 should not extend cooldown")
+    }
+
+    @Test
+    fun retryAfterCanExtendAnAlreadyOpenRouteBreaker() {
+        val manager = PoolChainManager(listOf(testChain()))
+        val selection = manager.selectCandidates("default", "gpt-5.5").single()
+
+        manager.markFailure(selection, 502, "upstream failed")
+        manager.markFailure(selection, 502, "upstream failed again")
+        manager.markFailure(selection, 502, "upstream failed third time")
+        val firstCooldownUntil = routeState(manager).cooldownUntilEpochMs
+
+        manager.markFailure(selection, 429, "upstream rate limited", retryAfterSeconds = 30)
+        val retryAfterCooldownUntil = routeState(manager).cooldownUntilEpochMs
+
+        assertTrue(
+            retryAfterCooldownUntil > firstCooldownUntil,
+            "explicit Retry-After should be allowed to extend an already-open route breaker"
+        )
+    }
+
+    @Test
+    fun shorterRetryAfterDoesNotShortenAnAlreadyOpenRouteBreaker() {
+        val manager = PoolChainManager(listOf(testChain()))
+        val selection = manager.selectCandidates("default", "gpt-5.5").single()
+
+        manager.markFailure(selection, 429, "upstream rate limited", retryAfterSeconds = 30)
+        val firstCooldownUntil = routeState(manager).cooldownUntilEpochMs
+
+        manager.markFailure(selection, 429, "shorter retry after", retryAfterSeconds = 1)
+        val secondCooldownUntil = routeState(manager).cooldownUntilEpochMs
+
+        assertEquals(firstCooldownUntil, secondCooldownUntil, "shorter Retry-After should not shorten an already-open route breaker")
     }
 
     @Test

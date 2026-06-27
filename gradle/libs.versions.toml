@@ -16,6 +16,8 @@ netty = "4.1.117.Final"
 micrometer = "1.14.2"
 hikari = "5.1.0"
 h2 = "2.2.224"
+postgresql = "42.7.3"
+sqlite-jdbc = "3.46.0.0"
 inspektor = "0.10.0-alpha"
 opentelemetry = "1.38.0"
 
@@ -80,6 +82,8 @@ hikari-cp = { group = "com.zaxxer", name = "HikariCP", version.ref = "hikari" }
 
 # H2 Database
 h2-database = { group = "com.h2database", name = "h2", version.ref = "h2" }
+postgresql-driver = { group = "org.postgresql", name = "postgresql", version.ref = "postgresql" }
+sqlite-jdbc = { group = "org.xerial", name = "sqlite-jdbc", version.ref = "sqlite-jdbc" }
 
 # KSP
 ksp-api = { group = "com.google.devtools.ksp", name = "symbol-processing-api", version.ref = "ksp" }

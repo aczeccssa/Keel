@@ -12,7 +12,7 @@ import com.keel.kernel.plugin.*
 import com.keel.kernel.plugin.PluginEndpointBuilders.pluginEndpoints
 import com.keel.openapi.annotations.KeelApiPlugin
 import com.keel.openapi.runtime.OpenApiDoc
-import com.keel.samples.aigateway.GatewayDataPaths
+import com.keel.samples.aigateway.GatewayDatabaseFactoryResolver
 import com.keel.samples.aigateway.customerportal.auth.*
 import org.koin.dsl.module
 
@@ -49,9 +49,9 @@ class CustomerPortalPlugin : StandardKeelPlugin {
     override suspend fun onInit(context: PluginInitContext) {
         contextKernelKoin = context.kernelKoin
         jwtService = CustomerJwtService()
-        dbFactory = DatabaseFactory.h2File(
-            filePath = GatewayDataPaths.databasePath("customer_portal"),
-            poolSize = 5,
+        dbFactory = GatewayDatabaseFactoryResolver.resolveFactory(
+            logicalName = "customer_portal",
+            defaultPoolSize = 5,
         )
         val db = dbFactory.init()
         repository = CustomerPortalRepository(db)

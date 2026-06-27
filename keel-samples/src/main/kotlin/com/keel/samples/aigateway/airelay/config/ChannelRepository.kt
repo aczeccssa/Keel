@@ -20,6 +20,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import org.jetbrains.exposed.sql.ResultRow
 import org.jetbrains.exposed.sql.SortOrder
+import org.jetbrains.exposed.sql.Transaction
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
 import org.jetbrains.exposed.sql.and
 import org.jetbrains.exposed.sql.deleteWhere
@@ -598,8 +599,7 @@ class ChannelRepository(
     }
 
     private fun migrateGroupExposureMode() = database.transaction {
-        val ddl = "ALTER TABLE airelay_group ADD COLUMN IF NOT EXISTS exposure_mode VARCHAR(32) NOT NULL DEFAULT 'ALL_MODELS'"
-        runCatching { exec(ddl) }
+        addColumnIfMissing("airelay_group", "exposure_mode", "VARCHAR(32) NOT NULL DEFAULT 'ALL_MODELS'")
         GroupTable.selectAll().forEach { row ->
             val current = row[GroupTable.exposureMode]
             val normalized = GroupExposureMode.from(current).name
@@ -612,45 +612,48 @@ class ChannelRepository(
     }
 
     private fun migratePricingSchema() = database.transaction {
-        listOf(
-            "ALTER TABLE airelay_model_pricing ADD COLUMN IF NOT EXISTS variant_key VARCHAR(64)",
-            "ALTER TABLE airelay_model_pricing ADD COLUMN IF NOT EXISTS label VARCHAR(120)",
-            "ALTER TABLE airelay_model_pricing ADD COLUMN IF NOT EXISTS billing_unit_tokens BIGINT NOT NULL DEFAULT 1000000",
-            "ALTER TABLE airelay_model_pricing ADD COLUMN IF NOT EXISTS input_cost_per_mtok DOUBLE PRECISION NOT NULL DEFAULT 0.0",
-            "ALTER TABLE airelay_model_pricing ADD COLUMN IF NOT EXISTS output_cost_per_mtok DOUBLE PRECISION NOT NULL DEFAULT 0.0",
-            "ALTER TABLE airelay_model_pricing ADD COLUMN IF NOT EXISTS cache_creation_cost_per_mtok DOUBLE PRECISION",
-            "ALTER TABLE airelay_model_pricing ADD COLUMN IF NOT EXISTS cache_read_cost_per_mtok DOUBLE PRECISION",
-            "ALTER TABLE airelay_model_pricing ADD COLUMN IF NOT EXISTS cached_input_discount DOUBLE PRECISION",
-            "ALTER TABLE airelay_model_pricing ADD COLUMN IF NOT EXISTS reasoning_output_cost_per_mtok DOUBLE PRECISION",
-            "ALTER TABLE airelay_model_pricing ADD COLUMN IF NOT EXISTS credit_multiplier DOUBLE PRECISION",
-            "ALTER TABLE airelay_model_pricing ADD COLUMN IF NOT EXISTS notes VARCHAR(500)",
-            "ALTER TABLE airelay_model_pricing_tier ADD COLUMN IF NOT EXISTS start_tokens_inclusive BIGINT NOT NULL DEFAULT 0",
-            "ALTER TABLE airelay_model_pricing_tier ADD COLUMN IF NOT EXISTS end_tokens_exclusive BIGINT",
-            "ALTER TABLE airelay_model_pricing_tier ADD COLUMN IF NOT EXISTS billing_unit_tokens BIGINT NOT NULL DEFAULT 1000000",
-            "ALTER TABLE airelay_model_pricing_tier ADD COLUMN IF NOT EXISTS input_cost_per_unit DOUBLE PRECISION NOT NULL DEFAULT 0.0",
-            "ALTER TABLE airelay_model_pricing_tier ADD COLUMN IF NOT EXISTS output_cost_per_unit DOUBLE PRECISION NOT NULL DEFAULT 0.0",
-            "ALTER TABLE airelay_model_pricing_tier ADD COLUMN IF NOT EXISTS cache_creation_cost_per_unit DOUBLE PRECISION",
-            "ALTER TABLE airelay_model_pricing_tier ADD COLUMN IF NOT EXISTS cache_read_cost_per_unit DOUBLE PRECISION",
-            "ALTER TABLE airelay_model_pricing_tier ADD COLUMN IF NOT EXISTS reasoning_output_cost_per_unit DOUBLE PRECISION",
-            "CREATE INDEX IF NOT EXISTS airelay_model_pricing_tier_pricing_id ON airelay_model_pricing_tier (pricing_id)"
-        ).forEach { ddl ->
-            runCatching { exec(ddl) }
-        }
+        addColumnIfMissing("airelay_model_pricing", "variant_key", "VARCHAR(64)")
+        addColumnIfMissing("airelay_model_pricing", "label", "VARCHAR(120)")
+        addColumnIfMissing("airelay_model_pricing", "billing_unit_tokens", "BIGINT NOT NULL DEFAULT 1000000")
+        addColumnIfMissing("airelay_model_pricing", "input_cost_per_mtok", "DOUBLE PRECISION NOT NULL DEFAULT 0.0")
+        addColumnIfMissing("airelay_model_pricing", "output_cost_per_mtok", "DOUBLE PRECISION NOT NULL DEFAULT 0.0")
+        addColumnIfMissing("airelay_model_pricing", "cache_creation_cost_per_mtok", "DOUBLE PRECISION")
+        addColumnIfMissing("airelay_model_pricing", "cache_read_cost_per_mtok", "DOUBLE PRECISION")
+        addColumnIfMissing("airelay_model_pricing", "cached_input_discount", "DOUBLE PRECISION")
+        addColumnIfMissing("airelay_model_pricing", "reasoning_output_cost_per_mtok", "DOUBLE PRECISION")
+        addColumnIfMissing("airelay_model_pricing", "credit_multiplier", "DOUBLE PRECISION")
+        addColumnIfMissing("airelay_model_pricing", "notes", "VARCHAR(500)")
+        addColumnIfMissing("airelay_model_pricing_tier", "start_tokens_inclusive", "BIGINT NOT NULL DEFAULT 0")
+        addColumnIfMissing("airelay_model_pricing_tier", "end_tokens_exclusive", "BIGINT")
+        addColumnIfMissing("airelay_model_pricing_tier", "billing_unit_tokens", "BIGINT NOT NULL DEFAULT 1000000")
+        addColumnIfMissing("airelay_model_pricing_tier", "input_cost_per_unit", "DOUBLE PRECISION NOT NULL DEFAULT 0.0")
+        addColumnIfMissing("airelay_model_pricing_tier", "output_cost_per_unit", "DOUBLE PRECISION NOT NULL DEFAULT 0.0")
+        addColumnIfMissing("airelay_model_pricing_tier", "cache_creation_cost_per_unit", "DOUBLE PRECISION")
+        addColumnIfMissing("airelay_model_pricing_tier", "cache_read_cost_per_unit", "DOUBLE PRECISION")
+        addColumnIfMissing("airelay_model_pricing_tier", "reasoning_output_cost_per_unit", "DOUBLE PRECISION")
+        runCatching { exec("CREATE INDEX IF NOT EXISTS airelay_model_pricing_tier_pricing_id ON airelay_model_pricing_tier (pricing_id)") }
     }
 
     private fun migrateCreditMultiplierSchema() = database.transaction {
-        listOf(
-            "ALTER TABLE airelay_group_alias ADD COLUMN IF NOT EXISTS credit_multiplier DOUBLE PRECISION",
-            "ALTER TABLE airelay_model ADD COLUMN IF NOT EXISTS credit_multiplier DOUBLE PRECISION",
-        ).forEach { ddl ->
-            runCatching { exec(ddl) }
-        }
+        addColumnIfMissing("airelay_group_alias", "credit_multiplier", "DOUBLE PRECISION")
+        addColumnIfMissing("airelay_model", "credit_multiplier", "DOUBLE PRECISION")
     }
 
     private fun migrateAliasRoutingPolicySchema() = database.transaction {
-        runCatching {
-            exec("ALTER TABLE airelay_group_alias ADD COLUMN IF NOT EXISTS routing_policy VARCHAR(32) NOT NULL DEFAULT 'ORDERED_FAILOVER'")
+        addColumnIfMissing("airelay_group_alias", "routing_policy", "VARCHAR(32) NOT NULL DEFAULT 'ORDERED_FAILOVER'")
+    }
+
+    private fun Transaction.addColumnIfMissing(tableName: String, columnName: String, definition: String) {
+        if (!hasColumn(tableName, columnName)) {
+            exec("ALTER TABLE $tableName ADD COLUMN $columnName $definition")
         }
+    }
+
+    private fun Transaction.hasColumn(tableName: String, columnName: String): Boolean {
+        return exec("SELECT * FROM $tableName LIMIT 1") { rs ->
+            val metadata = rs.metaData
+            (1..metadata.columnCount).any { metadata.getColumnName(it).equals(columnName, ignoreCase = true) }
+        } ?: false
     }
 
     private fun backfillChannelMemberships() = database.transaction {

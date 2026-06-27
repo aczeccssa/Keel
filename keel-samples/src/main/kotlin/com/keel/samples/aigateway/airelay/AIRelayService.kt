@@ -31,6 +31,7 @@ import com.keel.samples.aigateway.airelay.protocol.anthropic.AnthropicErrorMappe
 import com.keel.samples.aigateway.airelay.protocol.anthropic.AnthropicStreamObserver
 import com.keel.samples.aigateway.airelay.protocol.anthropic.AnthropicStreamOutcome
 import com.keel.samples.aigateway.airelay.protocol.openai.responses.ResponsesStreamObserver
+import com.keel.samples.aigateway.airelay.protocol.boolean
 import com.keel.samples.aigateway.airelay.protocol.obj
 import com.keel.samples.aigateway.airelay.protocol.string
 import com.keel.samples.aigateway.airelay.protocol.textOf
@@ -90,11 +91,12 @@ class AIRelayService(
         clientProtocol: WireProtocol
     ): RelayResult {
         val started = kotlinx.datetime.Clock.System.now()
-        val ir = try {
+        val decodedIr = try {
             transcoder.decodeRequest(clientProtocol, rawRequest)
         } catch (e: Exception) {
             return protocolError(clientProtocol, 400, "invalid_request_error", e.message ?: "Invalid request")
         }
+        val ir = resolveInboundStream(context, rawRequest, decodedIr)
 
         validateProtocolHeaders(context, clientProtocol)?.let { return it }
 
@@ -359,17 +361,23 @@ class AIRelayService(
                     anthropicObserver?.observe(event)
                     responsesObserver?.observe(event)
                 }
-                val decodedEvents = transcoder.decodeStream(selection.provider.protocol, observedRaw).onEach { event ->
-                    when (event) {
-                        is IrStreamEvent.UsageUpdate -> lastUsage = event.usage
-                        is IrStreamEvent.MessageDelta -> lastUsage = event.usage
-                        is IrStreamEvent.ResponseDone -> lastUsage = event.finalUsage
-                        is IrStreamEvent.ResponseStart -> if (event.usage.totalTokens > 0) lastUsage = event.usage
-                        is IrStreamEvent.TextDelta -> outputText.append(event.delta)
-                        else -> Unit
+                val clientEvents = if (clientProtocol == WireProtocol.ANTHROPIC_MESSAGES &&
+                    selection.provider.protocol == WireProtocol.ANTHROPIC_MESSAGES
+                ) {
+                    observedRaw
+                } else {
+                    val decodedEvents = transcoder.decodeStream(selection.provider.protocol, observedRaw).onEach { event ->
+                        when (event) {
+                            is IrStreamEvent.UsageUpdate -> lastUsage = event.usage
+                            is IrStreamEvent.MessageDelta -> lastUsage = event.usage
+                            is IrStreamEvent.ResponseDone -> lastUsage = event.finalUsage
+                            is IrStreamEvent.ResponseStart -> if (event.usage.totalTokens > 0) lastUsage = event.usage
+                            is IrStreamEvent.TextDelta -> outputText.append(event.delta)
+                            else -> Unit
+                        }
                     }
+                    transcoder.encodeStream(clientProtocol, decodedEvents)
                 }
-                val clientEvents = transcoder.encodeStream(clientProtocol, decodedEvents)
                 val headers = extraHeaders.toMutableMap()
                 headers["X-Upstream-Protocol"] = listOf(selection.provider.protocol.name)
                 headers["Content-Type"] = listOf("text/event-stream")
@@ -787,14 +795,14 @@ class AIRelayService(
         upstreamProtocol: WireProtocol,
         ir: IrRequest,
     ): JsonObject {
-        if (sameProtocolPassThrough(clientProtocol, upstreamProtocol)) {
-            return patchRequestModel(rawRequest, ir.model)
+        val request = if (sameProtocolPassThrough(clientProtocol, upstreamProtocol)) {
+            patchPassThroughRequest(rawRequest, upstreamProtocol, ir)
+        } else {
+            transcoder.encodeRequest(upstreamProtocol, ir)
         }
-        return transcoder.encodeRequest(upstreamProtocol, ir)
+        validateUpstreamRequest(upstreamProtocol, ir, request)
+        return request
     }
-
-    private fun patchRequestModel(rawRequest: JsonObject, model: String): JsonObject =
-        JsonObject(rawRequest.toMutableMap().apply { put("model", JsonPrimitive(model)) })
 
     private fun sameProtocolPassThrough(clientProtocol: WireProtocol, upstreamProtocol: WireProtocol): Boolean =
         clientProtocol == upstreamProtocol
@@ -802,9 +810,12 @@ class AIRelayService(
     private fun upstreamHeaderOverrides(context: KeelRequestContext, protocol: WireProtocol, ir: IrRequest? = null): Map<String, String> {
         if (protocol != WireProtocol.ANTHROPIC_MESSAGES) return emptyMap()
         val overrides = linkedMapOf<String, String>()
-        context.requestHeaders["anthropic-beta"]?.firstOrNull()?.takeIf { it.isNotBlank() }?.let {
-            overrides["anthropic-beta"] = it
-        }
+        context.requestHeaders["anthropic-beta"]
+            ?.map(String::trim)
+            ?.filter(String::isNotBlank)
+            ?.takeIf { it.isNotEmpty() }
+            ?.joinToString(",")
+            ?.let { overrides["anthropic-beta"] = it }
         if ("anthropic-beta" !in overrides) {
             modelVariantSemantics(ir?.model.orEmpty()).anthropicBeta?.let { overrides["anthropic-beta"] = it }
         }
@@ -1001,9 +1012,7 @@ class AIRelayService(
                 request = RawProxyRequest(
                     method = method,
                     path = upstreamPath,
-                    queryString = raw.query.entries.joinToString("&") { (k, values) ->
-                        values.joinToString("&") { v -> "${java.net.URLEncoder.encode(k, "UTF-8")}=${java.net.URLEncoder.encode(v, "UTF-8")}" }
-                    },
+                    queryString = buildForwardQueryString(raw.query),
                     headers = raw.headers,
                     body = raw.body,
                     contentType = raw.headers["Content-Type"]?.firstOrNull()
@@ -1067,3 +1076,61 @@ class AIRelayService(
         }
     }
 }
+
+internal fun patchPassThroughRequest(
+    rawRequest: JsonObject,
+    upstreamProtocol: WireProtocol,
+    ir: IrRequest,
+): JsonObject = JsonObject(rawRequest.toMutableMap().apply {
+    put("model", JsonPrimitive(ir.model))
+    put("stream", JsonPrimitive(ir.stream))
+    if (upstreamProtocol == WireProtocol.OPENAI_RESPONSES) {
+        put("store", JsonPrimitive(false))
+    }
+})
+
+internal fun validateUpstreamRequest(
+    upstreamProtocol: WireProtocol,
+    ir: IrRequest,
+    request: JsonObject,
+) {
+    when (upstreamProtocol) {
+        WireProtocol.OPENAI_RESPONSES -> {
+            val stream = request.boolean("stream")
+            if (ir.stream && stream != true) {
+                throw PluginApiException(400, "Outbound Responses streaming request must set stream=true")
+            }
+            if (!ir.stream && stream == true) {
+                throw PluginApiException(400, "Outbound Responses blocking request must not set stream=true")
+            }
+        }
+
+        WireProtocol.ANTHROPIC_MESSAGES -> Unit
+
+        WireProtocol.OPENAI_CHAT -> Unit
+    }
+}
+
+internal fun resolveInboundStream(
+    context: KeelRequestContext,
+    rawRequest: JsonObject,
+    ir: IrRequest,
+): IrRequest {
+    if (ir.stream || rawRequest.containsKey("stream")) return ir
+    val queryStream = context.queryParameters["stream"]?.firstOrNull()?.equals("true", ignoreCase = true) == true
+    val acceptsSse = context.requestHeaders["Accept"]?.any { it.contains("text/event-stream", ignoreCase = true) } == true
+    return if (queryStream || acceptsSse) ir.copy(stream = true) else ir
+}
+
+internal fun buildForwardQueryString(query: Map<String, List<String>>): String =
+    query.entries.asSequence()
+        .filter { it.key.isNotBlank() }
+        .flatMap { (key, values) ->
+            values.asSequence()
+                .map(String::trim)
+                .filter(String::isNotBlank)
+                .map { value ->
+                    "${java.net.URLEncoder.encode(key, "UTF-8")}=${java.net.URLEncoder.encode(value, "UTF-8")}"
+                }
+        }
+        .joinToString("&")

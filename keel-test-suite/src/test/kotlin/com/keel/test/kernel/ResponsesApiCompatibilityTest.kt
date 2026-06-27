@@ -111,6 +111,71 @@ class ResponsesApiCompatibilityTest {
         assertEquals(HttpStatusCode.OK, resp.status, "Streaming request failed: ${resp.bodyAsText()}")
     }
 
+    @Test
+    fun responsesQueryStreamSignalIsPromotedToUpstreamStreamFlag() = withRelay { ctx ->
+        val resp = ctx.client.post("/api/plugins/airelay/v1/responses?stream=true") {
+            header("Authorization", "Bearer ${ctx.rawKey}")
+            contentType(ContentType.Application.Json)
+            setBody(
+                """
+                {
+                    "model": "test-model",
+                    "input": "hello",
+                    "store": false
+                }
+                """.trimIndent()
+            )
+        }
+        assertEquals(HttpStatusCode.OK, resp.status, "Query-driven streaming request failed: ${resp.bodyAsText()}")
+
+        val upstreamReq = capturedRequests.last()
+        assertEquals("true", upstreamReq["stream"]?.jsonPrimitive?.contentOrNull)
+    }
+
+    @Test
+    fun responsesStringStreamFlagIsNormalizedToBooleanTrue() = withRelay { ctx ->
+        val resp = ctx.client.post("/api/plugins/airelay/v1/responses") {
+            header("Authorization", "Bearer ${ctx.rawKey}")
+            contentType(ContentType.Application.Json)
+            setBody(
+                """
+                {
+                    "model": "test-model",
+                    "input": "hello",
+                    "store": false,
+                    "stream": "true"
+                }
+                """.trimIndent()
+            )
+        }
+        assertEquals(HttpStatusCode.OK, resp.status, "String stream request failed: ${resp.bodyAsText()}")
+
+        val upstreamReq = capturedRequests.last()
+        assertEquals("true", upstreamReq["stream"]?.jsonPrimitive?.contentOrNull)
+    }
+
+    @Test
+    fun responsesSseAcceptHeaderIsPromotedToUpstreamStreamFlag() = withRelay { ctx ->
+        val resp = ctx.client.post("/api/plugins/airelay/v1/responses") {
+            header("Authorization", "Bearer ${ctx.rawKey}")
+            header("Accept", "text/event-stream")
+            contentType(ContentType.Application.Json)
+            setBody(
+                """
+                {
+                    "model": "test-model",
+                    "input": "hello",
+                    "store": false
+                }
+                """.trimIndent()
+            )
+        }
+        assertEquals(HttpStatusCode.OK, resp.status, "Accept-driven streaming request failed: ${resp.bodyAsText()}")
+
+        val upstreamReq = capturedRequests.last()
+        assertEquals("true", upstreamReq["stream"]?.jsonPrimitive?.contentOrNull)
+    }
+
     // ---- Field sanitization tests ----
 
     @Test

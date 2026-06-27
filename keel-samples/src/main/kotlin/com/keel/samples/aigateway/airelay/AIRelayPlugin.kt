@@ -21,7 +21,7 @@ import com.keel.kernel.plugin.PluginRuntimeMode
 import com.keel.kernel.plugin.StandardKeelPlugin
 import com.keel.openapi.annotations.KeelApiPlugin
 import com.keel.openapi.runtime.OpenApiDoc
-import com.keel.samples.aigateway.GatewayDataPaths
+import com.keel.samples.aigateway.GatewayDatabaseFactoryResolver
 import com.keel.samples.aigateway.airelay.batches.BatchListResponse
 import com.keel.samples.aigateway.airelay.batches.BatchResultsResponse
 import com.keel.samples.aigateway.airelay.batches.BatchView
@@ -144,9 +144,9 @@ class AIRelayPlugin : StandardKeelPlugin {
 
         // DB-backed channel/model configuration. Seeded from airelay/pools.json (if present) or
         // the static defaults on first boot, then editable at runtime via the admin API/UI.
-        val factory = DatabaseFactory.h2File(
-            filePath = GatewayDataPaths.databasePath("aigateway_airelay"),
-            poolSize = 5
+        val factory = GatewayDatabaseFactoryResolver.resolveFactory(
+            logicalName = "aigateway_airelay",
+            defaultPoolSize = 5,
         )
         val db = factory.init()
         val repo = ChannelRepository(db, SecretCipher.fromEnv())

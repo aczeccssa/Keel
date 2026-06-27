@@ -9,11 +9,14 @@ import kotlinx.coroutines.flow.asFlow
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class OpenAIResponsesCodecTest {
@@ -171,6 +174,48 @@ class OpenAIResponsesCodecTest {
         val encoded = codec.encodeRequest(anthropicCodec.decodeRequest(anthropicRequest))
 
         assertEquals("required", encoded["tool_choice"]!!.jsonPrimitive.content)
+    }
+
+    @Test
+    fun responsesContextManagementDoesNotLeakToAnthropicRequests() {
+        val responsesRequest = json.parseToJsonElement(
+            """
+            {
+              "model": "gpt-5.5",
+              "stream": true,
+              "context_management": {"mode": "truncate"},
+              "input": [{
+                "type": "message",
+                "role": "user",
+                "content": [{"type":"input_text","text":"hello"}]
+              }]
+            }
+            """.trimIndent()
+        ).jsonObject
+
+        val encoded = anthropicCodec.encodeRequest(codec.decodeRequest(responsesRequest))
+
+        assertNull(encoded["context_management"])
+        assertEquals(JsonPrimitive(true), encoded["stream"])
+    }
+
+    @Test
+    fun anthropicContextManagementDoesNotLeakToResponsesRequests() {
+        val anthropicRequest = json.parseToJsonElement(
+            """
+            {
+              "model": "claude-opus-4-8",
+              "max_tokens": 64,
+              "context_management": {"mode": "clear_tool_results"},
+              "messages": [{"role":"user","content":"hello"}]
+            }
+            """.trimIndent()
+        ).jsonObject
+
+        val encoded = codec.encodeRequest(anthropicCodec.decodeRequest(anthropicRequest))
+
+        assertNull(encoded["context_management"])
+        assertFalse(encoded.containsKey("context_management"))
     }
 
     @Test

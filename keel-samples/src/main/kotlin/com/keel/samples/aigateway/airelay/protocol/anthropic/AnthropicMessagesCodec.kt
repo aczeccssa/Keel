@@ -60,7 +60,8 @@ class AnthropicMessagesCodec : ProtocolCodec {
             inferenceGeo = rawJson.string("inference_geo"),
             extras = buildExtras(rawJson, setOf("model", "system", "messages", "max_tokens", "temperature",
                 "top_p", "top_k", "stop_sequences", "tools", "tool_choice", "stream", "metadata",
-                "thinking", "cache_control", "service_tier", "container", "inference_geo", "output_config")),
+                "thinking", "cache_control", "service_tier", "container", "inference_geo", "output_config",
+                "context_management")),
         )
     }
 
@@ -589,7 +590,7 @@ class AnthropicMessagesCodec : ProtocolCodec {
     companion object {
         private val RESERVED = setOf(
             "model", "system", "messages", "max_tokens", "temperature", "top_p", "top_k",
-            "stop_sequences", "tools", "tool_choice", "stream", "metadata", "thinking",
+            "stop_sequences", "tools", "tool_choice", "stream", "metadata", "thinking", "context_management",
             "cache_control", "service_tier", "container", "inference_geo", "output_config",
         )
     }

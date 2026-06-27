@@ -17,7 +17,7 @@ import com.keel.kernel.plugin.PluginRuntimeContext
 import com.keel.kernel.plugin.StandardKeelPlugin
 import com.keel.openapi.annotations.KeelApiPlugin
 import com.keel.openapi.runtime.OpenApiDoc
-import com.keel.samples.aigateway.GatewayDataPaths
+import com.keel.samples.aigateway.GatewayDatabaseFactoryResolver
 import com.keel.samples.aigateway.airelay.config.ChannelRepository
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -57,9 +57,9 @@ class TokenPlugin : StandardKeelPlugin {
         kernelKoin = context.kernelKoin
         userDirectory = context.kernelKoin.get<UserDirectory>()
         jwtVerifier = context.kernelKoin.get<JwtPrincipalVerifier>()
-        dbFactory = DatabaseFactory.h2File(
-            filePath = GatewayDataPaths.databasePath("aigateway_token"),
-            poolSize = 5
+        dbFactory = GatewayDatabaseFactoryResolver.resolveFactory(
+            logicalName = "aigateway_token",
+            defaultPoolSize = 5,
         )
         database = dbFactory.init()
         repository = TokenRepository(database, userDirectory)

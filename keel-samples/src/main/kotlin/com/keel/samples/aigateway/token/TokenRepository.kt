@@ -22,6 +22,7 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import org.jetbrains.exposed.sql.ResultRow
 import org.jetbrains.exposed.sql.SortOrder
+import org.jetbrains.exposed.sql.Transaction
 import org.jetbrains.exposed.sql.and
 import org.jetbrains.exposed.sql.insert
 import org.jetbrains.exposed.sql.selectAll
@@ -46,18 +47,31 @@ class TokenRepository(
 
     private fun migrateUsageRecordOutcomeColumns() {
         database.transaction {
-            exec("ALTER TABLE token_usage_records ADD COLUMN IF NOT EXISTS transport_status INT NOT NULL DEFAULT 200")
-            exec("ALTER TABLE token_usage_records ADD COLUMN IF NOT EXISTS routing_group_id VARCHAR(64)")
-            exec("ALTER TABLE token_usage_records ADD COLUMN IF NOT EXISTS outcome VARCHAR(16) NOT NULL DEFAULT 'SUCCESS'")
-            exec("ALTER TABLE token_usage_records ADD COLUMN IF NOT EXISTS usage_source VARCHAR(16) NOT NULL DEFAULT 'PROVIDER'")
-            exec("ALTER TABLE token_usage_records ALTER COLUMN error_code VARCHAR(128)")
-            exec("ALTER TABLE token_usage_records ADD COLUMN IF NOT EXISTS error_detail CLOB")
-            exec("ALTER TABLE token_usage_records ADD COLUMN IF NOT EXISTS error_detail_json CLOB")
-            exec("ALTER TABLE token_usage_records ADD COLUMN IF NOT EXISTS route_trace_json CLOB")
-            exec("ALTER TABLE token_usage_records ADD COLUMN IF NOT EXISTS failure_scope VARCHAR(32)")
-            exec("ALTER TABLE token_usage_records ADD COLUMN IF NOT EXISTS failure_kind VARCHAR(32)")
-            exec("ALTER TABLE token_usage_records ADD COLUMN IF NOT EXISTS selected_channel_id VARCHAR(64)")
+            addColumnIfMissing("token_usage_records", "transport_status", "INT NOT NULL DEFAULT 200")
+            addColumnIfMissing("token_usage_records", "routing_group_id", "VARCHAR(64)")
+            addColumnIfMissing("token_usage_records", "outcome", "VARCHAR(16) NOT NULL DEFAULT 'SUCCESS'")
+            addColumnIfMissing("token_usage_records", "usage_source", "VARCHAR(16) NOT NULL DEFAULT 'PROVIDER'")
+            runCatching { exec("ALTER TABLE token_usage_records ALTER COLUMN error_code VARCHAR(128)") }
+            addColumnIfMissing("token_usage_records", "error_detail", "CLOB")
+            addColumnIfMissing("token_usage_records", "error_detail_json", "CLOB")
+            addColumnIfMissing("token_usage_records", "route_trace_json", "CLOB")
+            addColumnIfMissing("token_usage_records", "failure_scope", "VARCHAR(32)")
+            addColumnIfMissing("token_usage_records", "failure_kind", "VARCHAR(32)")
+            addColumnIfMissing("token_usage_records", "selected_channel_id", "VARCHAR(64)")
         }
+    }
+
+    private fun Transaction.addColumnIfMissing(tableName: String, columnName: String, definition: String) {
+        if (!hasColumn(tableName, columnName)) {
+            exec("ALTER TABLE $tableName ADD COLUMN $columnName $definition")
+        }
+    }
+
+    private fun Transaction.hasColumn(tableName: String, columnName: String): Boolean {
+        return exec("SELECT * FROM $tableName LIMIT 1") { rs ->
+            val metadata = rs.metaData
+            (1..metadata.columnCount).any { metadata.getColumnName(it).equals(columnName, ignoreCase = true) }
+        } ?: false
     }
 
     fun seedDemoKeyIfNeeded() = database.transaction {

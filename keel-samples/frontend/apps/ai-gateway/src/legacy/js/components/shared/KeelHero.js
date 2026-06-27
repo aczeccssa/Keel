@@ -108,6 +108,25 @@ export class KeelHero extends KeelElement {
                     letter-spacing: 0.1em;
                     text-transform: uppercase;
                 }
+                :host([compact="true"]) .hero {
+                    min-height: 108px;
+                    margin-bottom: 12px;
+                }
+                :host([compact="true"]) .hero-main {
+                    padding: 16px 18px 14px;
+                    gap: 18px;
+                }
+                :host([compact="true"]) .hero-copy {
+                    gap: 6px;
+                }
+                :host([compact="true"]) .hero-title {
+                    font-size: clamp(26px, 3.8vw, 46px);
+                    max-width: 10ch;
+                }
+                :host([compact="true"]) .hero-caption,
+                :host([compact="true"]) .hero-side :is(div, span, strong, code) {
+                    font-size: 9px;
+                }
                 @media (max-width: 900px) {
                     .hero {
                         min-height: 0;

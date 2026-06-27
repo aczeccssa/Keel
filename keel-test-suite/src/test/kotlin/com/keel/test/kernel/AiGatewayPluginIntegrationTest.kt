@@ -13,6 +13,11 @@ import com.keel.samples.aigateway.airelay.PooledKeyConfig
 import com.keel.samples.aigateway.airelay.UpstreamProviderConfig
 import com.keel.samples.aigateway.airelay.protocol.WireProtocol
 import com.keel.samples.aigateway.airelay.upstream.MockFailure
+import com.keel.samples.aigateway.airelay.upstream.OpenedUpstreamStream
+import com.keel.samples.aigateway.airelay.upstream.RawProxyRequest
+import com.keel.samples.aigateway.airelay.upstream.RawProxyResponse
+import com.keel.samples.aigateway.airelay.upstream.UpstreamHttpClient
+import com.keel.samples.aigateway.airelay.upstream.UpstreamResponse
 import com.keel.samples.aigateway.riskcontrol.RiskControlPlugin
 import com.keel.samples.aigateway.token.TokenPlugin
 import io.ktor.client.request.get
@@ -35,15 +40,22 @@ import io.ktor.sse.ServerSentEvent
 import io.ktor.server.testing.testApplication
 import io.ktor.utils.io.readUTF8Line
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonArray
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import java.nio.file.Files
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.asFlow
 import kotlinx.coroutines.withTimeout
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 import org.koin.core.context.startKoin
 import org.koin.core.context.stopKoin
@@ -144,6 +156,83 @@ class AiGatewayPluginIntegrationTest {
                 }
                 json.parseToJsonElement(requireNotNull(payload) { "expected one SSE payload" }).jsonObject
             }
+        }
+    }
+
+    private class RecordingAnthropicUpstream(
+        private val streamEvents: List<ServerSentEvent> = emptyList(),
+        private val rawProxyBody: ByteArray = """{"ok":true}""".toByteArray(),
+    ) : UpstreamHttpClient {
+        val seenExtraHeaders = mutableListOf<Map<String, String>>()
+        val seenStreamRequests = mutableListOf<JsonObject>()
+        val seenRawProxyRequests = mutableListOf<RawProxyRequest>()
+
+        override suspend fun send(
+            selection: com.keel.samples.aigateway.airelay.pool.PoolSelection,
+            request: JsonObject,
+            extraHeaders: Map<String, String>,
+        ): UpstreamResponse {
+            seenExtraHeaders += extraHeaders.toMap()
+            return UpstreamResponse(
+                status = 200,
+                body = buildJsonObject {
+                    put("id", JsonPrimitive("msg-recorded"))
+                    put("type", JsonPrimitive("message"))
+                    put("role", JsonPrimitive("assistant"))
+                    put("model", JsonPrimitive(request["model"]?.jsonPrimitive?.content ?: "claude-only"))
+                    put("content", buildJsonArray {
+                        add(buildJsonObject {
+                            put("type", JsonPrimitive("text"))
+                            put("text", JsonPrimitive("recorded"))
+                        })
+                    })
+                    put("stop_reason", JsonPrimitive("end_turn"))
+                    put("usage", buildJsonObject {
+                        put("input_tokens", JsonPrimitive(3))
+                        put("output_tokens", JsonPrimitive(2))
+                    })
+                },
+            )
+        }
+
+        override suspend fun openStream(
+            selection: com.keel.samples.aigateway.airelay.pool.PoolSelection,
+            request: JsonObject,
+            extraHeaders: Map<String, String>,
+        ): OpenedUpstreamStream {
+            seenExtraHeaders += extraHeaders.toMap()
+            seenStreamRequests += request
+            return OpenedUpstreamStream(
+                status = 200,
+                events = streamEvents.asFlow(),
+            )
+        }
+
+        override suspend fun countTokens(
+            selection: com.keel.samples.aigateway.airelay.pool.PoolSelection,
+            request: JsonObject,
+            extraHeaders: Map<String, String>,
+        ): UpstreamResponse {
+            seenExtraHeaders += extraHeaders.toMap()
+            return UpstreamResponse(
+                status = 200,
+                body = buildJsonObject { put("input_tokens", JsonPrimitive(7)) },
+            )
+        }
+
+        override suspend fun proxyRaw(
+            selection: com.keel.samples.aigateway.airelay.pool.PoolSelection,
+            request: RawProxyRequest,
+            extraHeaders: Map<String, String>,
+        ): RawProxyResponse {
+            seenExtraHeaders += extraHeaders.toMap()
+            seenRawProxyRequests += request
+            return RawProxyResponse(
+                status = 200,
+                headers = mapOf("X-Test-Upstream" to listOf("anthropic")),
+                contentType = "application/json",
+                body = rawProxyBody,
+            )
         }
     }
 
@@ -578,6 +667,146 @@ class AiGatewayPluginIntegrationTest {
         assertTrue(body.contains("event: content_block_start"), body)
         assertTrue(body.contains("event: content_block_delta"), body)
         assertTrue(body.contains("event: message_stop"), body)
+    }
+
+    @Test
+    fun anthropicStreamingSameProtocolPassesThroughRawSseAndRecordsUsage() = setupApp {
+        val upstream = RecordingAnthropicUpstream(
+            streamEvents = listOf(
+                ServerSentEvent(
+                    event = "message_start",
+                    data = """{"type":"message_start","message":{"id":"msg_raw","type":"message","role":"assistant","model":"claude-only","content":[],"stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":11,"output_tokens":0}}}""",
+                ),
+                ServerSentEvent(
+                    event = "content_block_start",
+                    data = """{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_raw","name":"Read","input":{}}}""",
+                ),
+                ServerSentEvent(
+                    event = "content_block_delta",
+                    data = """{"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\"pages\":\"\"}"}}""",
+                ),
+                ServerSentEvent(
+                    event = "message_delta",
+                    data = """{"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"input_tokens":11,"output_tokens":5},"context_management":{"applied":[{"type":"clear_tool_results"}]}}""",
+                ),
+                ServerSentEvent(
+                    event = "message_stop",
+                    data = """{"type":"message_stop"}""",
+                ),
+            ),
+        )
+        relayPlugin.installRealUpstream(
+            upstream,
+            listOf(
+                PoolChainConfig(
+                    chainId = "default",
+                    modelAliases = listOf("claude-only"),
+                    levels = listOf(
+                        PoolLevelConfig(
+                            levelId = "anthropic-p0",
+                            levelIndex = 0,
+                            provider = UpstreamProviderConfig("anthropic-upstream", protocol = WireProtocol.ANTHROPIC_MESSAGES),
+                            keys = listOf(PooledKeyConfig("anthropic-channel", supportedModels = listOf("claude-only"))),
+                        )
+                    ),
+                )
+            ),
+        )
+
+        val relayResp = client.post("/api/plugins/airelay/v1/messages") {
+            header("x-api-key", rawKey)
+            header("anthropic-version", "2023-06-01")
+            contentType(ContentType.Application.Json)
+            setBody("""{"model":"claude-only","stream":true,"messages":[{"role":"user","content":"Read file"}],"max_tokens":64}""")
+        }
+
+        assertEquals(HttpStatusCode.OK, relayResp.status, relayResp.bodyAsText())
+        assertEquals("ANTHROPIC_MESSAGES", relayResp.headers["X-Upstream-Protocol"])
+        val body = relayResp.bodyAsText()
+        assertTrue(body.contains("""event: content_block_start"""), body)
+        assertTrue(body.contains("""data: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_raw","name":"Read","input":{}}}"""), body)
+        assertTrue(body.contains("""data: {"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"input_tokens":11,"output_tokens":5},"context_management":{"applied":[{"type":"clear_tool_results"}]}}"""), body)
+
+        val usageResp = client.get("/api/plugins/token/v1/keys/$keyId/usage") {
+            header("Authorization", "Bearer $accessToken")
+        }
+        assertEquals(HttpStatusCode.OK, usageResp.status, usageResp.bodyAsText())
+        val firstRecord = json.parseToJsonElement(usageResp.bodyAsText()).jsonObject["records"]!!.jsonArray.first().jsonObject
+        assertEquals(200, firstRecord["status"]!!.jsonPrimitive.content.toInt())
+        assertEquals("claude-only", firstRecord["model"]!!.jsonPrimitive.content)
+    }
+
+    @Test
+    fun anthropicRequestPreservesAllBetaHeadersWithoutAppendingFallback() = setupApp {
+        val upstream = RecordingAnthropicUpstream()
+        relayPlugin.installRealUpstream(
+            upstream,
+            listOf(
+                PoolChainConfig(
+                    chainId = "default",
+                    modelAliases = listOf("claude-opus-4-8[1m]"),
+                    levels = listOf(
+                        PoolLevelConfig(
+                            levelId = "anthropic-p0",
+                            levelIndex = 0,
+                            provider = UpstreamProviderConfig("anthropic-upstream", protocol = WireProtocol.ANTHROPIC_MESSAGES),
+                            keys = listOf(PooledKeyConfig("anthropic-channel", supportedModels = listOf("claude-opus-4-8", "claude-opus-4-8[1m]"))),
+                        )
+                    ),
+                )
+            ),
+        )
+
+        val relayResp = client.post("/api/plugins/airelay/v1/messages") {
+            header("x-api-key", rawKey)
+            header("anthropic-version", "2023-06-01")
+            header("anthropic-beta", "files-api-2025-04-14")
+            header("anthropic-beta", "computer-use-2025-01-24")
+            contentType(ContentType.Application.Json)
+            setBody("""{"model":"claude-opus-4-8[1m]","messages":[{"role":"user","content":"Hi"}],"max_tokens":64}""")
+        }
+
+        assertEquals(HttpStatusCode.OK, relayResp.status, relayResp.bodyAsText())
+        val forwarded = upstream.seenExtraHeaders.last()
+        assertEquals("files-api-2025-04-14,computer-use-2025-01-24", forwarded["anthropic-beta"])
+        assertEquals("2023-06-01", forwarded["anthropic-version"])
+        assertFalse((forwarded["anthropic-beta"] ?: "").contains("context-1m-2025-08-07"))
+    }
+
+    @Test
+    fun anthropicRawProxyDropsBlankPagesQueryButKeepsNonEmptyValues() = setupApp {
+        val upstream = RecordingAnthropicUpstream()
+        relayPlugin.installRealUpstream(
+            upstream,
+            listOf(
+                PoolChainConfig(
+                    chainId = "default",
+                    modelAliases = listOf("claude-only"),
+                    levels = listOf(
+                        PoolLevelConfig(
+                            levelId = "anthropic-p0",
+                            levelIndex = 0,
+                            provider = UpstreamProviderConfig("anthropic-upstream", protocol = WireProtocol.ANTHROPIC_MESSAGES),
+                            keys = listOf(PooledKeyConfig("anthropic-channel")),
+                        )
+                    ),
+                )
+            ),
+        )
+
+        val blankPages = client.get("/api/plugins/airelay/v1/files/file_123/content?pages=") {
+            header("x-api-key", rawKey)
+            header("anthropic-version", "2023-06-01")
+        }
+        assertEquals(HttpStatusCode.OK, blankPages.status, blankPages.bodyAsText())
+        assertEquals("", upstream.seenRawProxyRequests[0].queryString)
+
+        val nonEmptyPages = client.get("/api/plugins/airelay/v1/files/file_123/content?pages=1,2") {
+            header("x-api-key", rawKey)
+            header("anthropic-version", "2023-06-01")
+        }
+        assertEquals(HttpStatusCode.OK, nonEmptyPages.status, nonEmptyPages.bodyAsText())
+        assertEquals("pages=1%2C2", upstream.seenRawProxyRequests[1].queryString)
     }
 
     @Test

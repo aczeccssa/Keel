@@ -379,6 +379,7 @@ class PoolChainManager(
         state.lastAttemptAtEpochMs = now
 
         val failureKind = failureKindFor(status)
+        val routeAlreadyOpen = previousBreakerState == BreakerState.OPEN
         when (failureKind) {
             FailureKind.AUTH -> {
                 state.status.set(KeyStatus.DISABLED)
@@ -394,31 +395,40 @@ class PoolChainManager(
                 routeState.breakerState.set(BreakerState.CLOSED)
             }
             FailureKind.RATE_LIMIT -> {
-                val cooldown = retryAfterSeconds?.times(1000)
-                    ?: cooldownBackoffMs(30_000L, routeState.consecutiveTransientFailures.incrementAndGet(), selection.level.cooldownMs)
-                openRouteBreaker(routeState, cooldown, failureKind, message, status, now)
+                val retryAfterCooldown = retryAfterSeconds?.times(1000)
+                if (routeAlreadyOpen && retryAfterCooldown == null) {
+                    recordRouteOpenFailure(routeState, failureKind, message, status, now)
+                } else {
+                    val cooldown = retryAfterCooldown
+                        ?: cooldownBackoffMs(30_000L, routeState.consecutiveTransientFailures.incrementAndGet(), selection.level.cooldownMs)
+                    openRouteBreaker(routeState, cooldown, failureKind, message, status, now, extendOnly = routeAlreadyOpen)
+                }
                 state.status.set(KeyStatus.HEALTHY)
                 state.cooldownUntilEpochMs = 0L
                 state.failureScope = FailureScope.CHANNEL_MODEL
                 state.failureKind = failureKind
             }
             FailureKind.SERVER_5XX -> {
-                val failures = routeState.consecutiveTransientFailures.incrementAndGet()
-                if (failures >= TRANSIENT_HTTP_FAILURES_BEFORE_COOLDOWN) {
-                    openRouteBreaker(
-                        routeState,
-                        cooldownBackoffMs(
-                            TRANSIENT_HTTP_COOLDOWN_MS,
-                            failures - TRANSIENT_HTTP_FAILURES_BEFORE_COOLDOWN + 1,
-                            selection.level.cooldownMs,
-                        ),
-                        failureKind,
-                        message,
-                        status,
-                        now,
-                    )
+                if (routeAlreadyOpen) {
+                    recordRouteOpenFailure(routeState, failureKind, message, status, now)
                 } else {
-                    keepRouteClosed(routeState, failureKind, message, status, now)
+                    val failures = routeState.consecutiveTransientFailures.incrementAndGet()
+                    if (failures >= TRANSIENT_HTTP_FAILURES_BEFORE_COOLDOWN) {
+                        openRouteBreaker(
+                            routeState,
+                            cooldownBackoffMs(
+                                TRANSIENT_HTTP_COOLDOWN_MS,
+                                failures - TRANSIENT_HTTP_FAILURES_BEFORE_COOLDOWN + 1,
+                                selection.level.cooldownMs,
+                            ),
+                            failureKind,
+                            message,
+                            status,
+                            now,
+                        )
+                    } else {
+                        keepRouteClosed(routeState, failureKind, message, status, now)
+                    }
                 }
                 state.status.set(KeyStatus.HEALTHY)
                 state.cooldownUntilEpochMs = 0L
@@ -428,22 +438,26 @@ class PoolChainManager(
             FailureKind.TIMEOUT,
             FailureKind.NETWORK,
             FailureKind.UNKNOWN -> {
-                val failures = routeState.consecutiveTransientFailures.incrementAndGet()
-                if (failures >= TRANSIENT_TRANSPORT_FAILURES_BEFORE_COOLDOWN) {
-                    openRouteBreaker(
-                        routeState,
-                        cooldownBackoffMs(
-                            TRANSIENT_TRANSPORT_COOLDOWN_MS,
-                            failures - TRANSIENT_TRANSPORT_FAILURES_BEFORE_COOLDOWN + 1,
-                            selection.level.cooldownMs,
-                        ),
-                        failureKind,
-                        message,
-                        status,
-                        now,
-                    )
+                if (routeAlreadyOpen) {
+                    recordRouteOpenFailure(routeState, failureKind, message, status, now)
                 } else {
-                    keepRouteClosed(routeState, failureKind, message, status, now)
+                    val failures = routeState.consecutiveTransientFailures.incrementAndGet()
+                    if (failures >= TRANSIENT_TRANSPORT_FAILURES_BEFORE_COOLDOWN) {
+                        openRouteBreaker(
+                            routeState,
+                            cooldownBackoffMs(
+                                TRANSIENT_TRANSPORT_COOLDOWN_MS,
+                                failures - TRANSIENT_TRANSPORT_FAILURES_BEFORE_COOLDOWN + 1,
+                                selection.level.cooldownMs,
+                            ),
+                            failureKind,
+                            message,
+                            status,
+                            now,
+                        )
+                    } else {
+                        keepRouteClosed(routeState, failureKind, message, status, now)
+                    }
                 }
                 state.status.set(KeyStatus.HEALTHY)
                 state.cooldownUntilEpochMs = 0L
@@ -996,11 +1010,25 @@ class PoolChainManager(
         message: String?,
         status: Int?,
         now: Long,
+        extendOnly: Boolean = false,
     ) {
         routeState.breakerState.set(BreakerState.OPEN)
-        routeState.cooldownUntilEpochMs = now + cooldownMs
+        val cooldownUntil = now + cooldownMs
+        if (!extendOnly || cooldownUntil > routeState.cooldownUntilEpochMs) {
+            routeState.cooldownUntilEpochMs = cooldownUntil
+        }
         routeState.halfOpenSuccesses.set(0)
         routeState.probeInFlight.set(0)
+        recordRouteOpenFailure(routeState, failureKind, message, status, now)
+    }
+
+    private fun recordRouteOpenFailure(
+        routeState: SharedRouteRuntimeState,
+        failureKind: FailureKind,
+        message: String?,
+        status: Int?,
+        now: Long,
+    ) {
         routeState.failureScope = FailureScope.CHANNEL_MODEL
         routeState.failureKind = failureKind
         routeState.lastError = message ?: status?.toString()

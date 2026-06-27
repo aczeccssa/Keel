@@ -162,6 +162,8 @@ dependencies {
     implementation(libs.exposed.jdbc)
     implementation(libs.exposed.kotlin.datetime)
     implementation(libs.h2.database)
+    runtimeOnly(libs.postgresql.driver)
+    runtimeOnly(libs.sqlite.jdbc)
     testImplementation(kotlin("test"))
     testImplementation(libs.kotlinx.coroutines.test)
 

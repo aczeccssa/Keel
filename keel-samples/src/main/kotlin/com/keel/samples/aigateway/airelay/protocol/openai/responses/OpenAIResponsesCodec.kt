@@ -67,7 +67,7 @@ class OpenAIResponsesCodec : ProtocolCodec {
             metadata = rawJson.obj("metadata")?.entries?.associate { it.key to it.value.jsonPrimitive.contentOrNull.orEmpty() } ?: emptyMap(),
             extras = buildExtras(rawJson, setOf(
                 "model", "input", "instructions", "max_output_tokens", "temperature", "top_p", "stop",
-                "stream", "reasoning", "text", "tools", "tool_choice", "metadata"
+                "stream", "reasoning", "text", "tools", "tool_choice", "metadata", "context_management"
             )),
         )
     }
@@ -560,7 +560,7 @@ class OpenAIResponsesCodec : ProtocolCodec {
         private val RESERVED = setOf(
             "model", "input", "instructions", "max_output_tokens", "temperature", "top_p", "top_k", "stop",
             "stream", "reasoning", "text", "tools", "tool_choice", "metadata",
-            "system", "max_tokens", "stop_sequences", "thinking", "cache_control",
+            "system", "max_tokens", "stop_sequences", "thinking", "cache_control", "context_management",
             "service_tier", "container", "inference_geo", "output_config"
         )
     }
