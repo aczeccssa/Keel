@@ -37,7 +37,7 @@
 1. **三协议入口** — 同时暴露：
    - **OpenAI Chat Completions** (`/v1/chat/completions`) — legacy 兼容
    - **OpenAI Responses API** (`/v1/responses`) — OpenAI 主推的新一代 agent-style API（2025-03 GA）
-   - **Anthropic Messages** (`/v1/messages`) — Anthropic 原生协议
+   - **Anthropic Messages** (`/v1/messages`) — Anthropic 原生协议；普通客户端走结构化兼容模式，Claude Code 类请求在 Anthropic→Anthropic 路由时走 fidelity 转发模式
 2. **协议任意互转** — 客户端用任意一种协议请求，可路由到任意一种协议的上游（3×3 矩阵）
 3. **账户体系** — 用户注册、JWT 鉴权、用户组、角色（admin/user）
 4. **虚拟 API Key** — 平台为用户派发 `sk-keel-xxx`，与上游真实 Key 解耦
@@ -715,7 +715,7 @@ if (Clock.System.now() >= row[ApiKeysTable.budgetResetAt]) {
 ### 7.1 职责
 
 - 暴露 OpenAI 兼容 API（`/v1/chat/completions`、`/v1/models`）
-- 暴露 Anthropic 兼容 API（`/v1/messages`）
+- 暴露 Anthropic 兼容 API（`/v1/messages`，含 generic compatibility 与 Claude Code fidelity 两种模式）
 - 协议互转
 - 多级故障转移号池
 - SSE 流式转发
@@ -1306,7 +1306,7 @@ class CostCalculator(
 |--------|------|-------------|
 | POST   | `/v1/chat/completions` | OpenAI Chat Completions 兼容（含 stream） |
 | POST   | `/v1/responses`        | **OpenAI Responses API 兼容**（含 stream） |
-| POST   | `/v1/messages`         | Anthropic Messages 兼容（含 stream） |
+| POST   | `/v1/messages`         | Anthropic Messages 兼容（含 stream）；普通请求走 IR 路径，Claude Code 类请求在 Anthropic→Anthropic 场景走 fidelity 转发 |
 | GET    | `/v1/models`           | 合并所有 chain 的模型列表 |
 | GET    | `/admin/pools`         | 查看所有 pool chain 配置 |
 | GET    | `/admin/pools/{chainId}/health` | 查看号池实时健康状态 |
@@ -1315,7 +1315,8 @@ class CostCalculator(
 **协议选择规则**：
 - 入口协议由 **URL 路径** 决定（`/v1/chat/completions` → ChatCompletions 入参）
 - 出口协议由 **匹配到的 PoolChain 中目标 provider 的 `protocol`** 决定
-- 中间一律走 IR 做 transcoding
+- 默认走 IR 做 transcoding
+- 当入口为 `/v1/messages` 且请求被识别为 Claude Code fidelity 模式，并且上游也为 Anthropic Messages 时，保留原始请求/响应信封（query、关键 headers、body 字段、SSE 事件）直连转发，不再走同协议 JSON 重编码
 - 客户端可以用 OpenAI Responses SDK 请求 → 命中 Anthropic 上游 → 返回 Responses 格式响应（完全无感知）
 
 ---

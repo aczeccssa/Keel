@@ -400,32 +400,9 @@ class RealUpstreamHttpClient private constructor(
         request: RawProxyRequest,
         extraHeaders: Map<String, String>
     ): RawProxyResponse {
-        val apiKey = resolveApiKey(selection)
-        val base = selection.provider.baseUrl.trimEnd('/')
-        val url = buildString {
-            append(base)
-            append(request.path)
-            if (request.queryString.isNotBlank()) append('?').append(request.queryString)
-        }
-        val response: HttpResponse = client.request(url) {
+        val response: HttpResponse = client.request(rawEndpointUrl(selection, request)) {
             applyChannelTimeout(selection, streaming = false)
-            method = request.method
-            headers {
-                selection.provider.defaultHeaders.forEach { (k, v) -> append(k, v) }
-                request.headers.forEach { (k, values) -> values.forEach { append(k, it) } }
-                extraHeaders.forEach { (k, v) -> append(k, v) }
-                when (selection.provider.protocol) {
-                    WireProtocol.ANTHROPIC_MESSAGES -> append("x-api-key", apiKey)
-                    else -> append(HttpHeaders.Authorization, "Bearer $apiKey")
-                }
-                if (selection.provider.protocol == WireProtocol.ANTHROPIC_MESSAGES &&
-                    "anthropic-version" !in extraHeaders &&
-                    request.headers.keys.none { it.equals("anthropic-version", ignoreCase = true) }) {
-                    append("anthropic-version", "2023-06-01")
-                }
-            }
-            request.contentType?.let { contentType(ContentType.parse(it)) }
-            if (request.body.isNotEmpty()) setBody(request.body)
+            applyRawRequest(selection, request, extraHeaders)
         }
         val headers: Map<String, List<String>> = response.headers.entries()
             .groupBy({ it.key }, { it.value })
@@ -436,6 +413,75 @@ class RealUpstreamHttpClient private constructor(
             contentType = response.headers[HttpHeaders.ContentType],
             body = response.body()
         )
+    }
+
+    override suspend fun openRawStream(
+        selection: PoolSelection,
+        request: RawProxyRequest,
+        extraHeaders: Map<String, String>
+    ): OpenedUpstreamStream {
+        val response = client.request(rawEndpointUrl(selection, request)) {
+            applyChannelTimeout(selection, streaming = true)
+            applyRawRequest(selection, request, extraHeaders)
+        }
+        if (response.status.value >= 400) {
+            val bodyText = response.bodyAsText()
+            val errorJson = runCatching { json.parseToJsonElement(bodyText).jsonObject }.getOrNull()
+            val errorMessage = errorJson?.obj("error")?.string("message")
+                ?: errorJson?.string("message")
+                ?: "Upstream error: HTTP ${response.status.value}"
+            throw UpstreamHttpException(response.status.value, errorMessage)
+        }
+        val headers: Map<String, List<String>> = response.headers.entries()
+            .groupBy({ it.key }, { it.value })
+            .mapValues { it.value.flatten() }
+        return OpenedUpstreamStream(
+            status = response.status.value,
+            headers = headers,
+            events = flow {
+                val decoder = SseChunkDecoder()
+                val channel: ByteReadChannel = response.body()
+                while (true) {
+                    val line = channel.readUTF8Line() ?: break
+                    decoder.appendAll("$line\n").forEach { emit(it) }
+                    if (line.isEmpty()) {
+                        decoder.appendAll("\n").forEach { emit(it) }
+                    }
+                }
+                decoder.flush()?.let { emit(it) }
+            }
+        )
+    }
+
+    private fun rawEndpointUrl(selection: PoolSelection, request: RawProxyRequest): String = buildString {
+        append(selection.provider.baseUrl.trimEnd('/'))
+        append(request.path)
+        if (request.queryString.isNotBlank()) append('?').append(request.queryString)
+    }
+
+    private fun HttpRequestBuilder.applyRawRequest(
+        selection: PoolSelection,
+        request: RawProxyRequest,
+        extraHeaders: Map<String, String>
+    ) {
+        val apiKey = resolveApiKey(selection)
+        method = request.method
+        headers {
+            selection.provider.defaultHeaders.forEach { (k, v) -> append(k, v) }
+            request.headers.forEach { (k, values) -> values.forEach { append(k, it) } }
+            extraHeaders.forEach { (k, v) -> append(k, v) }
+            when (selection.provider.protocol) {
+                WireProtocol.ANTHROPIC_MESSAGES -> append("x-api-key", apiKey)
+                else -> append(HttpHeaders.Authorization, "Bearer $apiKey")
+            }
+            if (selection.provider.protocol == WireProtocol.ANTHROPIC_MESSAGES &&
+                "anthropic-version" !in extraHeaders &&
+                request.headers.keys.none { it.equals("anthropic-version", ignoreCase = true) }) {
+                append("anthropic-version", "2023-06-01")
+            }
+        }
+        request.contentType?.let { contentType(ContentType.parse(it)) }
+        if (request.body.isNotEmpty()) setBody(request.body)
     }
 
     private fun HttpRequestBuilder.applyChannelTimeout(selection: PoolSelection, streaming: Boolean) {

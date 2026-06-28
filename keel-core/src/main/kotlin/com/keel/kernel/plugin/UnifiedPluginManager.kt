@@ -935,6 +935,9 @@ class UnifiedPluginManager(
         val scope = span?.makeCurrent()
         try {
             val context = buildRequestContext(call, entry.plugin.descriptor.pluginId, endpoint.method, call.request.path())
+            rawBody?.let {
+                context.attributes["keel.rawRequestBody"] = it.toByteArray(Charsets.UTF_8)
+            }
             val privateScope = requireNotNull(entry.privateScopeHandle?.privateScope) {
                 "No private scope available for plugin ${entry.plugin.descriptor.pluginId}"
             }

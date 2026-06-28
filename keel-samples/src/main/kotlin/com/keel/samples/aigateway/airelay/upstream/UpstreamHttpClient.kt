@@ -34,6 +34,11 @@ interface UpstreamHttpClient {
         request: RawProxyRequest,
         extraHeaders: Map<String, String> = emptyMap()
     ): RawProxyResponse
+    suspend fun openRawStream(
+        selection: PoolSelection,
+        request: RawProxyRequest,
+        extraHeaders: Map<String, String> = emptyMap()
+    ): OpenedUpstreamStream
 }
 
 data class UpstreamResponse(
@@ -247,6 +252,42 @@ class MockableUpstreamHttpClient(
             headers = mapOf("X-Mock-Upstream" to listOf(selection.provider.providerId)),
             contentType = request.contentType ?: "application/json",
             body = if (request.body.isEmpty()) "{}".toByteArray() else request.body
+        )
+    }
+
+    override suspend fun openRawStream(
+        selection: PoolSelection,
+        request: RawProxyRequest,
+        extraHeaders: Map<String, String>
+    ): OpenedUpstreamStream {
+        failureOverrides[selection.keyState.key.keyId]?.let { throw it.toException() }
+        if (!selection.provider.baseUrl.startsWith("mock://")) {
+            val real = realClient
+                ?: throw UpstreamHttpException(501, "Real upstream HTTP streaming is not configured in this sample run")
+            return real.openRawStream(selection, request, extraHeaders)
+        }
+        return OpenedUpstreamStream(
+            status = 200,
+            headers = mapOf("Content-Type" to listOf("text/event-stream")),
+            events = flow {
+                when (selection.provider.protocol) {
+                    WireProtocol.OPENAI_CHAT -> {
+                        emit(ServerSentEvent(data = """{"choices":[{"delta":{"content":"mock "}}]}"""))
+                        emit(ServerSentEvent(data = """{"choices":[{"delta":{"content":"response"}}]}"""))
+                        emit(ServerSentEvent(data = "[DONE]"))
+                    }
+                    WireProtocol.OPENAI_RESPONSES -> {
+                        emit(ServerSentEvent(data = """{"type":"response.output_text.delta","delta":"mock "}""", event = "response.output_text.delta"))
+                        emit(ServerSentEvent(data = """{"type":"response.output_text.delta","delta":"response"}""", event = "response.output_text.delta"))
+                        emit(ServerSentEvent(data = """{"type":"response.completed"}""", event = "response.completed"))
+                    }
+                    WireProtocol.ANTHROPIC_MESSAGES -> {
+                        emit(ServerSentEvent(data = """{"type":"content_block_delta","delta":{"type":"text_delta","text":"mock "}}""", event = "content_block_delta"))
+                        emit(ServerSentEvent(data = """{"type":"content_block_delta","delta":{"type":"text_delta","text":"response"}}""", event = "content_block_delta"))
+                        emit(ServerSentEvent(data = """{"type":"message_stop"}""", event = "message_stop"))
+                    }
+                }
+            }
         )
     }
 

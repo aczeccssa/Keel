@@ -12,6 +12,14 @@ import kotlin.test.assertFailsWith
 
 class PassThroughRequestPatchTest {
     @Test
+    fun compatibility403MessagesMapToClientRejected() {
+        assertEquals(
+            RelayFailureKind.CLIENT_REJECTED,
+            classifyUpstreamFailure(403, "Request blocked: this endpoint only accepts requests from the official Claude Code CLI")
+        )
+    }
+
+    @Test
     fun passThroughRequestAppliesModelStreamAndResponsesStoreOverrides() {
         val rawRequest = buildJsonObject {
             put("model", JsonPrimitive("client-model"))

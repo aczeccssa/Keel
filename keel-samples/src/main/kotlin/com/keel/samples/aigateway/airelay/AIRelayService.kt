@@ -20,6 +20,9 @@ import com.keel.contract.customer.CustomerApiKeyVerifier
 import com.keel.contract.customer.CustomerUsageRow
 import com.keel.kernel.plugin.KeelRequestContext
 import com.keel.kernel.plugin.PluginApiException
+import com.keel.kernel.plugin.RawPluginRequest
+import com.keel.kernel.plugin.RawPluginResponse
+import com.keel.samples.aigateway.airelay.pool.FailureKind
 import com.keel.samples.aigateway.airelay.pool.PoolChainManager
 import com.keel.samples.aigateway.airelay.pool.PoolLease
 import com.keel.samples.aigateway.airelay.protocol.IrItem
@@ -36,13 +39,15 @@ import com.keel.samples.aigateway.airelay.protocol.obj
 import com.keel.samples.aigateway.airelay.protocol.string
 import com.keel.samples.aigateway.airelay.protocol.textOf
 import com.keel.samples.aigateway.airelay.upstream.OpenedUpstreamStream
-import com.keel.samples.aigateway.airelay.upstream.UpstreamHttpClient
 import com.keel.samples.aigateway.airelay.upstream.RawProxyRequest
 import com.keel.samples.aigateway.airelay.upstream.RawProxyResponse
+import com.keel.samples.aigateway.airelay.upstream.UpstreamHttpClient
 import com.keel.samples.aigateway.airelay.upstream.UpstreamHttpException
+import com.keel.samples.aigateway.airelay.upstream.UpstreamResponse
 import com.keel.samples.aigateway.airelay.usage.CreditChargeCalculator
 import com.keel.samples.aigateway.airelay.usage.CostCalculator
 import com.keel.samples.aigateway.airelay.usage.TokenEstimator
+import io.ktor.http.HttpMethod
 import kotlinx.coroutines.flow.asFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
@@ -61,6 +66,12 @@ data class RelayResult(
     val headers: Map<String, List<String>> = emptyMap(),
     val body: Any
 )
+
+internal typealias RelayFailureKind = FailureKind
+
+internal enum class AnthropicCompatibilityMode { GENERIC, CLAUDE_CODE_FIDELITY }
+
+internal const val RAW_REQUEST_BODY_ATTRIBUTE = "keel.rawRequestBody"
 
 class AIRelayService(
     private val apiKeyVerifier: ApiKeyVerifier,
@@ -83,6 +94,13 @@ class AIRelayService(
         val verified: VerifiedApiKey,
         val customerId: String?,
         val customerKeyId: String?,
+    )
+
+    private data class FidelityBlockingResponse(
+        val status: Int,
+        val headers: Map<String, List<String>>,
+        val bodyText: String,
+        val bodyJson: JsonObject,
     )
 
     suspend fun handleBlocking(
@@ -151,11 +169,131 @@ class AIRelayService(
                 handleBlockingRelay(context, clientProtocol, rawRequest, ir, keyContext, started, extraHeaders)
             }
         } catch (e: PluginApiException) {
-            System.err.println("airelay_error model=${ir.model} client=${clientProtocol} upstream=none status=${e.status} error=api_error message=${e.message?.take(180)}")
+            System.err.println("airelay_error model=${ir.model} client=${clientProtocol} upstream=none status=${e.status} error=api_error message=${e.message.take(180)}")
             protocolError(clientProtocol, e.status, "api_error", e.message)
         } catch (e: Exception) {
             System.err.println("airelay_error model=${ir.model} client=${clientProtocol} upstream=none status=500 error=${e.javaClass.simpleName?.take(64)} message=${(e.message ?: "").take(180)}")
             protocolError(clientProtocol, 500, "api_error", e.message ?: "Internal error")
+        }
+    }
+
+    suspend fun handleAnthropicRaw(
+        context: KeelRequestContext,
+        raw: RawPluginRequest,
+    ): RawPluginResponse {
+        val rawRequest = runCatching { json.parseToJsonElement(raw.body.decodeToString()).jsonObject }
+            .getOrElse {
+                val error = protocolError(
+                    WireProtocol.ANTHROPIC_MESSAGES,
+                    400,
+                    "invalid_request_error",
+                    it.message ?: "Invalid request",
+                )
+                return RawPluginResponse(
+                    status = error.status,
+                    headers = error.headers,
+                    contentType = "application/json",
+                    body = error.body.toString().encodeToByteArray(),
+                )
+            }
+        val ir = runCatching { resolveInboundStream(context, rawRequest, transcoder.decodeRequest(WireProtocol.ANTHROPIC_MESSAGES, rawRequest)) }
+            .getOrElse {
+                val error = protocolError(
+                    WireProtocol.ANTHROPIC_MESSAGES,
+                    400,
+                    "invalid_request_error",
+                    it.message ?: "Invalid request",
+                )
+                return RawPluginResponse(
+                    status = error.status,
+                    headers = error.headers,
+                    contentType = "application/json",
+                    body = error.body.toString().encodeToByteArray(),
+                )
+            }
+
+        if (ir.stream) {
+            val result = handleBlocking(context, rawRequest, WireProtocol.ANTHROPIC_MESSAGES)
+            return rawResponseFromRelay(result)
+        }
+
+        val started = kotlinx.datetime.Clock.System.now()
+        validateProtocolHeaders(context, WireProtocol.ANTHROPIC_MESSAGES)?.let { error ->
+            return RawPluginResponse(
+                status = error.status,
+                headers = error.headers,
+                contentType = "application/json",
+                body = error.body.toString().encodeToByteArray(),
+            )
+        }
+        val keyContext = verifyKey(context) ?: return RawPluginResponse(
+            status = 401,
+            headers = mapOf("Content-Type" to listOf("application/json")),
+            contentType = "application/json",
+            body = anthropicErrorBody("authentication_error", "Missing or invalid API key").toByteArray()
+        )
+        if (keyContext.verified.allowedModels.isNotEmpty() && ir.model !in keyContext.verified.allowedModels) {
+            val error = protocolError(
+                WireProtocol.ANTHROPIC_MESSAGES,
+                403,
+                "permission_error",
+                "Model '${ir.model}' is not allowed for this key",
+            )
+            return RawPluginResponse(
+                status = error.status,
+                headers = error.headers,
+                contentType = "application/json",
+                body = error.body.toString().encodeToByteArray(),
+            )
+        }
+        val rateDecision = rateLimitGate.tryAcquire(rateLimitContext(context, keyContext.verified, ir))
+        if (rateDecision is RateLimitDecision.Rejected) {
+            val error = rateLimitError(WireProtocol.ANTHROPIC_MESSAGES, rateDecision)
+            return RawPluginResponse(
+                status = error.status,
+                headers = error.headers,
+                contentType = "application/json",
+                body = error.body.toString().encodeToByteArray(),
+            )
+        }
+        val lease = poolChainManager.acquire(keyContext.verified.routingGroupId, ir.model, traceId = context.requestId)
+            ?: return RawPluginResponse(
+                status = 503,
+                headers = mapOf("Content-Type" to listOf("application/json")),
+                contentType = "application/json",
+                body = anthropicErrorBody("api_error", "No upstream available").toByteArray(),
+            )
+        try {
+            val selection = lease.selection
+            val response = proxyAnthropicFidelityBlocking(
+                context = context,
+                rawRequest = rawRequest,
+                ir = ir.copy(model = selection.upstreamModel, stream = false),
+                selection = selection,
+            )
+            poolChainManager.markSuccess(selection, elapsedMs(started))
+            return RawPluginResponse(
+                status = response.status,
+                headers = response.headers,
+                contentType = response.headers.headerValue("Content-Type") ?: "application/json",
+                body = response.bodyText.encodeToByteArray(),
+            )
+        } catch (error: UpstreamHttpException) {
+            poolChainManager.markFailure(
+                selection = lease.selection,
+                status = error.status,
+                message = error.message,
+                retryAfterSeconds = error.retryAfterSeconds,
+                latencyMs = elapsedMs(started),
+            )
+            return RawPluginResponse(
+                status = error.status,
+                headers = mapOf("Content-Type" to listOf("application/json")),
+                contentType = "application/json",
+                body = anthropicErrorBody("upstream_error", error.message).encodeToByteArray(),
+            )
+        } finally {
+            lease.close()
         }
     }
 
@@ -175,12 +313,29 @@ class AIRelayService(
             val lease = poolChainManager.acquire(keyContext.verified.routingGroupId, ir.model, excludedKeyIds, context.requestId)
                 ?: break
             val selection = lease.selection
-            val upstreamHeaders = upstreamHeaderOverrides(context, selection.provider.protocol, ir)
-            val upstreamRequest = buildUpstreamRequest(rawRequest, clientProtocol, selection.provider.protocol, ir.copy(model = selection.upstreamModel, stream = false))
             try {
-                val upstream = upstreamClient.send(
+                val effectiveIr = ir.copy(model = selection.upstreamModel, stream = false)
+                val compatibilityMode = anthropicCompatibilityMode(context, clientProtocol, selection.provider.protocol)
+                val fidelityResponse = if (compatibilityMode == AnthropicCompatibilityMode.CLAUDE_CODE_FIDELITY) {
+                    proxyAnthropicFidelityBlocking(context, rawRequest, effectiveIr, selection)
+                } else {
+                    null
+                }
+                val upstreamHeaders = if (fidelityResponse == null) {
+                    upstreamHeaderOverrides(context, selection.provider.protocol, ir)
+                } else {
+                    emptyMap()
+                }
+                val upstreamRequest = if (fidelityResponse == null) {
+                    buildUpstreamRequest(rawRequest, clientProtocol, selection.provider.protocol, effectiveIr)
+                } else {
+                    null
+                }
+                val upstream = fidelityResponse?.let {
+                    UpstreamResponse(status = it.status, body = it.bodyJson, headers = it.headers)
+                } ?: upstreamClient.send(
                     selection,
-                    upstreamRequest,
+                    requireNotNull(upstreamRequest),
                     upstreamHeaders
                 )
                 if (upstream.status >= 400) {
@@ -195,7 +350,9 @@ class AIRelayService(
                     usage = upstreamIr.usage,
                     completionText = upstreamIr.output.filterIsInstance<IrItem.Message>().joinToString("\n") { textOf(it.content) }
                 )
-                val responseBody = if (sameProtocolPassThrough(clientProtocol, selection.provider.protocol)) {
+                val responseBody = if (fidelityResponse != null) {
+                    fidelityResponse.bodyText
+                } else if (sameProtocolPassThrough(clientProtocol, selection.provider.protocol)) {
                     upstream.body.toString()
                 } else {
                     json.encodeToString(transcoder.encodeResponse(clientProtocol, upstreamIr))
@@ -247,15 +404,21 @@ class AIRelayService(
                 }
                 poolChainManager.markSuccess(selection, elapsedMs(started))
 
-                val headers = (extraHeaders + creditHeaders).toMutableMap()
-                headers["Content-Type"] = listOf("application/json")
+                val headers = if (fidelityResponse != null) {
+                    filterForwardResponseHeaders(fidelityResponse.headers).toMutableMap()
+                } else {
+                    mutableMapOf()
+                }
+                headers.putAll(extraHeaders)
+                headers.putAll(creditHeaders)
+                headers.putIfAbsent("Content-Type", listOf("application/json"))
                 headers["X-Cost-USD"] = listOf(cost.totalCostUsd.toString())
                 headers["X-Upstream-Protocol"] = listOf(selection.provider.protocol.name)
                 headers["X-Request-Id"] = listOf(upstreamIr.id)
                 applyDebugHeaders(context, headers, selection, failoverCount)
                 return RelayResult(status = upstream.status, headers = headers, body = responseBody)
             } catch (error: UpstreamHttpException) {
-                System.err.println("airelay_error model=${ir.model} client=${clientProtocol} upstream=${selection.provider.protocol} status=${error.status} error=upstream_${error.status} message=${(error.message ?: "").take(180)}")
+                System.err.println("airelay_error model=${ir.model} client=${clientProtocol} upstream=${selection.provider.protocol} status=${error.status} error=upstream_${error.status} message=${error.message.take(180)}")
                 poolChainManager.markFailure(selection, error.status, error.message, error.retryAfterSeconds, elapsedMs(started))
                 lastError = error
                 failoverCount += 1
@@ -272,7 +435,7 @@ class AIRelayService(
                             errorDetail = error.message,
                             errorDetailJson = buildJsonObject {
                                 put("status", JsonPrimitive(error.status))
-                                put("message", JsonPrimitive(error.message ?: ""))
+                                put("message", JsonPrimitive(error.message))
                                 error.retryAfterSeconds?.let { put("retryAfterSeconds", JsonPrimitive(it)) }
                                 put("selectedChannelId", JsonPrimitive(selection.keyState.key.keyId))
                             }.toString(),
@@ -284,7 +447,7 @@ class AIRelayService(
                             upstreamKeyId = selection.keyState.key.keyId,
                             selectedChannelId = selection.keyState.key.keyId,
                             failureScope = "CHANNEL_MODEL",
-                            failureKind = if (error.status in 500..599) "SERVER_5XX" else "CLIENT",
+                            failureKind = classifyUpstreamFailure(error.status, error.message).name,
                             routeTraceJson = poolChainManager.explainSelection(keyContext.verified.routingGroupId, ir.model, context.requestId).requestTrace?.let(json::encodeToString),
                         )
                     )
@@ -343,16 +506,26 @@ class AIRelayService(
             val lease = poolChainManager.acquire(keyContext.verified.routingGroupId, ir.model, excludedKeyIds, context.requestId)
                 ?: break
             val selection = lease.selection
-            val upstreamHeaders = upstreamHeaderOverrides(context, selection.provider.protocol, ir)
-            val upstreamRequest = buildUpstreamRequest(
-                rawRequest,
-                clientProtocol,
-                selection.provider.protocol,
-                ir.copy(model = selection.upstreamModel, stream = true)
-            )
             var handedOff = false
             try {
-                val opened = upstreamClient.openStream(selection, upstreamRequest, upstreamHeaders)
+                val effectiveIr = ir.copy(model = selection.upstreamModel, stream = true)
+                val compatibilityMode = anthropicCompatibilityMode(context, clientProtocol, selection.provider.protocol)
+                val opened = if (compatibilityMode == AnthropicCompatibilityMode.CLAUDE_CODE_FIDELITY) {
+                    upstreamClient.openRawStream(
+                        selection = selection,
+                        request = buildAnthropicFidelityRequest(context, rawRequest, effectiveIr),
+                        extraHeaders = emptyMap(),
+                    )
+                } else {
+                    val upstreamHeaders = upstreamHeaderOverrides(context, selection.provider.protocol, ir)
+                    val upstreamRequest = buildUpstreamRequest(
+                        rawRequest,
+                        clientProtocol,
+                        selection.provider.protocol,
+                        effectiveIr
+                    )
+                    upstreamClient.openStream(selection, upstreamRequest, upstreamHeaders)
+                }
                 val anthropicObserver = if (selection.provider.protocol == WireProtocol.ANTHROPIC_MESSAGES) AnthropicStreamObserver() else null
                 val responsesObserver = if (selection.provider.protocol == WireProtocol.OPENAI_RESPONSES) ResponsesStreamObserver() else null
                 var lastUsage = TokenUsage()
@@ -378,9 +551,14 @@ class AIRelayService(
                     }
                     transcoder.encodeStream(clientProtocol, decodedEvents)
                 }
-                val headers = extraHeaders.toMutableMap()
+                val headers = if (compatibilityMode == AnthropicCompatibilityMode.CLAUDE_CODE_FIDELITY) {
+                    filterForwardResponseHeaders(opened.headers).toMutableMap()
+                } else {
+                    mutableMapOf()
+                }
+                headers.putAll(extraHeaders)
                 headers["X-Upstream-Protocol"] = listOf(selection.provider.protocol.name)
-                headers["Content-Type"] = listOf("text/event-stream")
+                headers.putIfAbsent("Content-Type", listOf("text/event-stream"))
                 applyDebugHeaders(context, headers, selection, failoverCount)
                 handedOff = true
                 return RelayResult(
@@ -404,7 +582,7 @@ class AIRelayService(
                     }
                 )
             } catch (error: UpstreamHttpException) {
-                System.err.println("airelay_error model=${ir.model} client=${clientProtocol} upstream=${selection.provider.protocol} status=${error.status} error=upstream_${error.status} message=${(error.message ?: "").take(180)}")
+                System.err.println("airelay_error model=${ir.model} client=${clientProtocol} upstream=${selection.provider.protocol} status=${error.status} error=upstream_${error.status} message=${error.message.take(180)}")
                 poolChainManager.markFailure(selection, error.status, error.message, error.retryAfterSeconds, elapsedMs(started))
                 lastError = error
                 failoverCount += 1
@@ -421,7 +599,7 @@ class AIRelayService(
                             errorDetail = error.message,
                             errorDetailJson = buildJsonObject {
                                 put("status", JsonPrimitive(error.status))
-                                put("message", JsonPrimitive(error.message ?: ""))
+                                put("message", JsonPrimitive(error.message))
                                 error.retryAfterSeconds?.let { put("retryAfterSeconds", JsonPrimitive(it)) }
                                 put("selectedChannelId", JsonPrimitive(selection.keyState.key.keyId))
                             }.toString(),
@@ -434,7 +612,7 @@ class AIRelayService(
                             upstreamKeyId = selection.keyState.key.keyId,
                             selectedChannelId = selection.keyState.key.keyId,
                             failureScope = "CHANNEL_MODEL",
-                            failureKind = if (error.status in 500..599) "SERVER_5XX" else "CLIENT",
+                            failureKind = classifyUpstreamFailure(error.status, error.message).name,
                             routeTraceJson = poolChainManager.explainSelection(keyContext.verified.routingGroupId, ir.model, context.requestId).requestTrace?.let(json::encodeToString),
                         )
                     )
@@ -660,7 +838,6 @@ class AIRelayService(
         return when (val result = ledger.chargeForUsage(keyContext.customerId, keyContext.customerKeyId, creditCost, usdMicros, row)) {
             is ChargeResult.Ok -> mapOf("X-Credits-Remaining" to listOf(result.newBalanceCredits.toString()))
             is ChargeResult.Failed -> mapOf("X-Credits-Charge-Failed" to listOf(result.message))
-            else -> emptyMap()
         }
     }
 
@@ -823,6 +1000,128 @@ class AIRelayService(
             overrides["anthropic-version"] = it
         }
         return overrides
+    }
+
+    private fun anthropicCompatibilityMode(
+        context: KeelRequestContext,
+        clientProtocol: WireProtocol,
+        upstreamProtocol: WireProtocol,
+    ): AnthropicCompatibilityMode =
+        detectAnthropicCompatibilityMode(context.rawPath, context.requestHeaders, clientProtocol, upstreamProtocol)
+
+    private suspend fun proxyAnthropicFidelityBlocking(
+        context: KeelRequestContext,
+        rawRequest: JsonObject,
+        ir: IrRequest,
+        selection: com.keel.samples.aigateway.airelay.pool.PoolSelection,
+    ): FidelityBlockingResponse {
+        val request = buildAnthropicFidelityRequest(context, rawRequest, ir)
+        val response = upstreamClient.proxyRaw(
+            selection = selection,
+            request = request,
+            extraHeaders = emptyMap(),
+        )
+        val bodyText = response.body.decodeToString()
+        if (response.status >= 400) {
+            throw UpstreamHttpException(
+                status = response.status,
+                message = extractUpstreamErrorMessage(bodyText, response.status),
+                retryAfterSeconds = response.headers.headerValue("Retry-After")?.toLongOrNull(),
+            )
+        }
+        val bodyJson = runCatching { json.parseToJsonElement(bodyText).jsonObject }.getOrElse {
+            throw UpstreamHttpException(response.status, "Invalid JSON body from upstream: ${bodyText.take(200)}")
+        }
+        return FidelityBlockingResponse(
+            status = response.status,
+            headers = response.headers,
+            bodyText = bodyText,
+            bodyJson = bodyJson,
+        )
+    }
+
+    private fun buildAnthropicFidelityRequest(
+        context: KeelRequestContext,
+        rawRequest: JsonObject,
+        ir: IrRequest,
+    ): RawProxyRequest {
+        val originalBody = context.attributes[RAW_REQUEST_BODY_ATTRIBUTE] as? ByteArray
+        val patched = patchAnthropicFidelityRequest(rawRequest, ir)
+        val outboundBody = when {
+            rawRequest.string("model") == ir.model && originalBody != null -> originalBody
+            else -> json.encodeToString(JsonObject.serializer(), patched).encodeToByteArray()
+        }
+        validateUpstreamRequest(WireProtocol.ANTHROPIC_MESSAGES, ir, patched)
+        return RawProxyRequest(
+            method = httpMethodOf(context.method),
+            path = "/v1/messages",
+            queryString = buildForwardQueryString(context.queryParameters),
+            headers = filterForwardRequestHeaders(context.requestHeaders),
+            body = outboundBody,
+            contentType = context.requestHeaders.headerValue("Content-Type") ?: "application/json",
+        )
+    }
+
+    private fun filterForwardRequestHeaders(headers: Map<String, List<String>>): Map<String, List<String>> =
+        headers.filterKeys { key ->
+            when (key.lowercase()) {
+                "authorization",
+                "x-api-key",
+                "host",
+                "connection",
+                "content-length",
+                "transfer-encoding",
+                "keep-alive",
+                "proxy-authenticate",
+                "proxy-authorization",
+                "te",
+                "trailer",
+                "upgrade" -> false
+                else -> true
+            }
+        }
+
+    private fun filterForwardResponseHeaders(headers: Map<String, List<String>>): Map<String, List<String>> =
+        headers.filterKeys { key ->
+            when (key.lowercase()) {
+                "connection",
+                "content-length",
+                "transfer-encoding",
+                "keep-alive",
+                "proxy-authenticate",
+                "proxy-authorization",
+                "te",
+                "trailer",
+                "upgrade" -> false
+                else -> true
+            }
+        }
+
+    private fun extractUpstreamErrorMessage(bodyText: String, status: Int): String =
+        runCatching { json.parseToJsonElement(bodyText).jsonObject }.getOrNull()
+            ?.obj("error")?.string("message")
+            ?: runCatching { json.parseToJsonElement(bodyText).jsonObject }.getOrNull()?.string("message")
+            ?: "Upstream returned $status"
+
+    private fun httpMethodOf(method: String): HttpMethod = when (method.uppercase()) {
+        HttpMethod.Get.value -> HttpMethod.Get
+        HttpMethod.Post.value -> HttpMethod.Post
+        HttpMethod.Delete.value -> HttpMethod.Delete
+        else -> HttpMethod.parse(method.uppercase())
+    }
+
+    private fun rawResponseFromRelay(result: RelayResult): RawPluginResponse {
+        val bodyBytes = when (val body = result.body) {
+            is String -> body.encodeToByteArray()
+            is JsonObject -> body.toString().encodeToByteArray()
+            else -> throw PluginApiException(500, "Relay result cannot be converted to raw response")
+        }
+        return RawPluginResponse(
+            status = result.status,
+            headers = result.headers,
+            contentType = result.headers.headerValue("Content-Type") ?: "application/json",
+            body = bodyBytes,
+        )
     }
 
     private fun fallbackCountTokens(request: CountTokensRequest): RelayResult {
@@ -1089,6 +1388,17 @@ internal fun patchPassThroughRequest(
     }
 })
 
+internal fun patchAnthropicFidelityRequest(
+    rawRequest: JsonObject,
+    ir: IrRequest,
+): JsonObject = if (rawRequest.string("model") == ir.model) {
+    rawRequest
+} else {
+    JsonObject(rawRequest.toMutableMap().apply {
+        put("model", JsonPrimitive(ir.model))
+    })
+}
+
 internal fun validateUpstreamRequest(
     upstreamProtocol: WireProtocol,
     ir: IrRequest,
@@ -1134,3 +1444,67 @@ internal fun buildForwardQueryString(query: Map<String, List<String>>): String =
                 }
         }
         .joinToString("&")
+
+internal fun detectAnthropicCompatibilityMode(
+    rawPath: String,
+    requestHeaders: Map<String, List<String>>,
+    clientProtocol: WireProtocol,
+    upstreamProtocol: WireProtocol,
+): AnthropicCompatibilityMode {
+    if (clientProtocol != WireProtocol.ANTHROPIC_MESSAGES || upstreamProtocol != WireProtocol.ANTHROPIC_MESSAGES) {
+        return AnthropicCompatibilityMode.GENERIC
+    }
+    if (!rawPath.endsWith("/v1/messages")) return AnthropicCompatibilityMode.GENERIC
+    val apiKey = requestHeaders.headerValue("x-api-key")
+    val anthropicVersion = requestHeaders.headerValue("anthropic-version")
+    if (apiKey.isNullOrBlank() || anthropicVersion.isNullOrBlank()) return AnthropicCompatibilityMode.GENERIC
+    val userAgent = requestHeaders.headerValue("user-agent").orEmpty()
+    val xApp = requestHeaders.headerValue("x-app").orEmpty()
+    val beta = requestHeaders["anthropic-beta"].orEmpty().joinToString(",")
+    val directBrowserAccess = requestHeaders.headerValue("anthropic-dangerous-direct-browser-access").orEmpty()
+    val resemblesClaudeCode = userAgent.startsWith("claude-cli/") ||
+        xApp.equals("cli", ignoreCase = true) ||
+        directBrowserAccess.equals("true", ignoreCase = true) ||
+        KNOWN_CLAUDE_CODE_BETA_MARKERS.any { beta.contains(it, ignoreCase = true) }
+    return if (resemblesClaudeCode) AnthropicCompatibilityMode.CLAUDE_CODE_FIDELITY else AnthropicCompatibilityMode.GENERIC
+}
+
+internal fun classifyUpstreamFailure(status: Int?, message: String?): RelayFailureKind = when (status) {
+    401 -> FailureKind.AUTH_INVALID
+    403 -> when {
+        isCompatibilityRejection(message) -> FailureKind.CLIENT_REJECTED
+        isAuthFailureMessage(message) -> FailureKind.AUTH_INVALID
+        else -> FailureKind.CLIENT_INPUT
+    }
+    408, 429 -> FailureKind.RATE_LIMIT
+    null -> FailureKind.NETWORK
+    in 500..599 -> FailureKind.SERVER_5XX
+    in 400..499 -> FailureKind.CLIENT_INPUT
+    else -> FailureKind.UNKNOWN
+}
+
+private val KNOWN_CLAUDE_CODE_BETA_MARKERS = setOf(
+    "claude-code",
+    "code-tools",
+    "computer-use",
+)
+
+private fun isCompatibilityRejection(message: String?): Boolean {
+    val normalized = message?.lowercase().orEmpty()
+    if (normalized.isBlank()) return false
+    return normalized.contains("request blocked") ||
+        normalized.contains("only accepts requests from the official claude code cli")
+}
+
+private fun isAuthFailureMessage(message: String?): Boolean {
+    val normalized = message?.lowercase().orEmpty()
+    if (normalized.isBlank()) return false
+    return normalized.contains("invalid api key") ||
+        normalized.contains("api key is invalid") ||
+        normalized.contains("authentication") ||
+        normalized.contains("unauthorized") ||
+        normalized.contains("credential")
+}
+
+private fun Map<String, List<String>>.headerValue(name: String): String? =
+    entries.firstOrNull { it.key.equals(name, ignoreCase = true) }?.value?.firstOrNull()

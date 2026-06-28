@@ -32,7 +32,7 @@ private const val HALF_OPEN_PROBE_CONCURRENCY = 1
 enum class KeyStatus { HEALTHY, COOLDOWN, DEGRADED, DISABLED }
 enum class BreakerState { CLOSED, OPEN, HALF_OPEN }
 enum class FailureScope { CHANNEL_GLOBAL, CHANNEL_MODEL }
-enum class FailureKind { AUTH, RATE_LIMIT, SERVER_5XX, TIMEOUT, NETWORK, CLIENT, UNKNOWN }
+enum class FailureKind { AUTH_INVALID, CLIENT_REJECTED, RATE_LIMIT, SERVER_5XX, TIMEOUT, NETWORK, CLIENT_INPUT, UNKNOWN }
 
 data class UpstreamKeyState(
     val chain: PoolChainConfig,
@@ -367,6 +367,7 @@ class PoolChainManager(
         message: String?,
         retryAfterSeconds: Long? = null,
         latencyMs: Long = 0L,
+        failureKindOverride: FailureKind? = null,
     ) {
         val state = selection.keyState
         val routeState = runtimeRegistry.routeState(state.key.keyId, selection.routeModelKey)
@@ -378,10 +379,10 @@ class PoolChainManager(
         state.lastStatus = status
         state.lastAttemptAtEpochMs = now
 
-        val failureKind = failureKindFor(status)
+        val failureKind = failureKindOverride ?: failureKindFor(status, message)
         val routeAlreadyOpen = previousBreakerState == BreakerState.OPEN
         when (failureKind) {
-            FailureKind.AUTH -> {
+            FailureKind.AUTH_INVALID -> {
                 state.status.set(KeyStatus.DISABLED)
                 state.cooldownUntilEpochMs = 0L
                 state.failureScope = FailureScope.CHANNEL_GLOBAL
@@ -464,8 +465,11 @@ class PoolChainManager(
                 state.failureScope = FailureScope.CHANNEL_MODEL
                 state.failureKind = failureKind
             }
-            FailureKind.CLIENT -> {
+            FailureKind.CLIENT_REJECTED,
+            FailureKind.CLIENT_INPUT -> {
                 keepRouteClosed(routeState, failureKind, message, status, now)
+                state.status.set(KeyStatus.HEALTHY)
+                state.cooldownUntilEpochMs = 0L
                 state.failureScope = FailureScope.CHANNEL_MODEL
                 state.failureKind = failureKind
             }
@@ -994,13 +998,36 @@ class PoolChainManager(
         return (baseMs * multiplier).coerceAtMost(maxMs)
     }
 
-    private fun failureKindFor(status: Int?): FailureKind = when (status) {
-        401, 403 -> FailureKind.AUTH
+    private fun failureKindFor(status: Int?, message: String?): FailureKind = when (status) {
+        401 -> FailureKind.AUTH_INVALID
+        403 -> when {
+            isCompatibilityRejection(message) -> FailureKind.CLIENT_REJECTED
+            isAuthFailureMessage(message) -> FailureKind.AUTH_INVALID
+            else -> FailureKind.CLIENT_INPUT
+        }
         408, 429 -> FailureKind.RATE_LIMIT
         null -> FailureKind.NETWORK
         in 500..599 -> FailureKind.SERVER_5XX
-        in 400..499 -> FailureKind.CLIENT
+        in 400..499 -> FailureKind.CLIENT_INPUT
         else -> FailureKind.UNKNOWN
+    }
+
+    private fun isCompatibilityRejection(message: String?): Boolean {
+        val normalized = message?.lowercase().orEmpty()
+        if (normalized.isBlank()) return false
+        return normalized.contains("request blocked") ||
+            normalized.contains("only accepts requests from the official claude code cli")
+    }
+
+    private fun isAuthFailureMessage(message: String?): Boolean {
+        val normalized = message?.lowercase().orEmpty()
+        if (normalized.isBlank()) return false
+        return normalized.contains("invalid api key") ||
+            normalized.contains("api key is invalid") ||
+            normalized.contains("authentication") ||
+            normalized.contains("unauthorized") ||
+            normalized.contains("forbidden") ||
+            normalized.contains("credential")
     }
 
     private fun openRouteBreaker(

@@ -120,6 +120,22 @@ class PoolChainManagerTest {
     }
 
     @Test
+    fun officialCliCompatibility403DoesNotDisableChannel() {
+        val manager = PoolChainManager(listOf(testChain()))
+        val selection = manager.selectCandidates("default", "gpt-5.5").single()
+
+        manager.markFailure(
+            selection,
+            403,
+            "Request blocked: this endpoint only accepts requests from the official Claude Code CLI",
+        )
+
+        val key = manager.snapshot().chains.single().levels.single().keys.single()
+        assertEquals("HEALTHY", key.status)
+        assertEquals("CLIENT_REJECTED", key.failureKind)
+    }
+
+    @Test
     fun equalWeightPoolAlternatesSelectionsWhenIdle() {
         val manager = PoolChainManager(listOf(weightedChain(100, 100)))
 
